@@ -2,13 +2,13 @@
 #
 # 单一事实源：URL、模型目录、上下文、模态、思考等级、价格（含分时段）、额度查询都在这里。
 # 本文件**不含任何密钥字面量**：每个 provider 用 `key_env` 指明环境变量名，密钥放环境变量，
-# 或者写到用户私有的 ~/.agents/llm.toml 里覆盖（同 id 的 provider 按字段覆盖）。
+# 或者写到用户私有的 ~/.agents/providers.toml 里覆盖（同 id 的 provider 按字段覆盖）。
 #
 # 字段里的 source 记录的是**实际查证来源**，retrieved 是查证日期。
 # 标 unverified 的字段表示本机探测或官方文档都没拿到，值来自网关在售目录，不要当合同价用。
 #
 # 这里只写机器无关的事实；机器自己的东西（密钥、内网 base_url、自建 provider）
-# 属于 ~/.agents/llm.toml —— 两个文件同 id 的 provider 合并，私有字段覆盖社区字段。
+# 属于 ~/.agents/providers.toml —— 两个文件同 id 的 provider 合并，私有字段覆盖社区字段。
 
 schema = 1
 updated = "2026-10-22"
@@ -219,7 +219,7 @@ retrieved = "2026-10-22"
   jsonpath = { balance = "balance_infos[?currency=='CNY'].total_balance", available = "is_available" }
   source = "https://api-docs.deepseek.com/api/get-user-balance/"
   verified_live = "2026-10-22 返回 total_balance 215.52 CNY"
-  script = "llm/deepseek.py"
+  script = "providers/deepseek.py"
   script_env = "DEEPSEEK_API_KEY"
 
 [[provider]]
@@ -332,13 +332,13 @@ retrieved = "2026-10-22"
   unit = "percent-left"
   jsonpath = { window_current_pct = "model_remains[].current_interval_remaining_percent", window_weekly_pct = "model_remains[].current_weekly_remaining_percent", reset_current = "model_remains[].remains_time", reset_weekly = "model_remains[].weekly_remains_time" }
   source = "https://platform.minimax.cn/docs/m-plan/faq"
-  conflicting_sources = "模型表与 API 参考页都没有这个端点，只有 M Plan FAQ 写；本机脚本 llm/minimax.py 正在用它，且能跑出读数，所以按可用收录。"
+  conflicting_sources = "模型表与 API 参考页都没有这个端点，只有 M Plan FAQ 写；本机脚本 providers/minimax.py 正在用它，且能跑出读数，所以按可用收录。"
   note = """
     必须是 M Plan 订阅 key，按量付费 key 返回 base_resp.status_code 1004/2049。
     字段名来自官方 CLI 源码而非文档；current_interval_usage_count 这个字段名有坑——
     它装的是**剩余**不是已用，used = total - usage_count。
   """
-  script = "llm/minimax.py"
+  script = "providers/minimax.py"
   script_env = "MINIMAX_CN_API_KEY"
 
   [[provider.quota_query]]
@@ -646,7 +646,7 @@ note = "按厂商成本转售、零加价；5 小时 + 每周两个滚动窗，�
   jsonpath = { monthly_credits = "credits.monthlyCredits", free_credits = "credits.freeCredits", purchased_credits = "credits.purchasedCredits", five_hour_used = "windowLimits.fiveHour.used", five_hour_cap = "windowLimits.fiveHour.cap", five_hour_reset = "windowLimits.fiveHour.resetAt", weekly_used = "windowLimits.weekly.used", weekly_cap = "windowLimits.weekly.cap", weekly_reset = "windowLimits.weekly.resetAt" }
   verified_live = "2026-10-22 返回 monthlyCredits 0.0552、fiveHour cap 14、weekly cap 35"
   capacities = { monthly = 140 }   # 官方周上限 35 × 4 估算，按实际套餐改
-  script = "llm/command-code-goat.py"
+  script = "providers/command-code-goat.py"
   script_env = "COMMAND_CODE_GOAT_API_KEY"
 
 [[provider]]
@@ -729,7 +729,7 @@ retrieved = "2026-10-22"
   fallback_url = "https://api.kimi.com/coding/v1/usage"
   note = "官方文档不写这个端点，是 Kimi Code CLI 源码在调；官方只给控制台与 CLI /usage"
   source = "https://github.com/MoonshotAI/kimi-code"
-  script = "llm/kimi-coding.py"
+  script = "providers/kimi-coding.py"
   script_env = "KIMI_CODING_API_KEY"
 
   [[provider.quota_query]]
@@ -1131,7 +1131,7 @@ note = "这个主机是通义千问 MaaS 的**产品**端点，不是内置的 a
     官方 CLI `bl usage token-plan` 走控制台鉴权。所以本机用控制台 Cookie 读数据网关，
     脚本自己取 sec_token。Cookie 过期时读数是"缺失"，不是 0。
   """
-  script = "llm/qwen.py"
+  script = "providers/qwen.py"
   script_env = "QWEN_CONSOLE_COOKIE"
 
 [[provider]]
@@ -1515,7 +1515,7 @@ note = "本机这把 key 已过期：直接打 /zen/v1/models 返回 api_key_exp
   unit = "percent-left"
   windows = ["rolling", "weekly", "monthly"]
   source = "C:/resource/dsh-balance/opencode-go.mjs"
-  script = "llm/opencode-go.py"
+  script = "providers/opencode-go.py"
   script_env = "OPENCODE_API_KEY"
 
 [[provider]]
@@ -1568,8 +1568,8 @@ patch_layer_profile = "C:/Users/17124/.dsh/profiles/web/cordis.patch.yml"
 patch_layer_home = "C:/Users/17124/.dsh/cordis.patch.yml"
 row_id = "llm-pi-ai"
 default_model_row = "agent-default-model"
-# 每个 provider 的 quota_query.script 是**相对本文件所在目录**的路径：脚本都在 ~/.agents/llm/
-# 下，解释器是 python（`python ~/.agents/llm/<name>.py`）。llm/probe.py 离线跑全部解析器。
+# 每个 provider 的 quota_query.script 是**相对本文件所在目录**的路径：脚本都在 ~/.agents/providers/
+# 下，解释器是 python（`python ~/.agents/providers/<name>.py`）。providers/probe.py 离线跑全部解析器。
 quota_plugin = "dsh-llm-quota-retry"
 
 # 换密钥时这里和 .dsh/.credentials.yaml 的 refs 要同步改，否则两边指向两把不同的 key。
