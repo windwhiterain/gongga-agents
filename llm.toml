@@ -1,0 +1,1583 @@
+# 社区共建的 LLM / provider 目录（gongga-agents）
+#
+# 单一事实源：URL、模型目录、上下文、模态、思考等级、价格（含分时段）、额度查询都在这里。
+# 本文件**不含任何密钥字面量**：每个 provider 用 `key_env` 指明环境变量名，密钥放环境变量，
+# 或者写到用户私有的 ~/.agents/llm.toml 里覆盖（同 id 的 provider 按字段覆盖）。
+#
+# 字段里的 source 记录的是**实际查证来源**，retrieved 是查证日期。
+# 标 unverified 的字段表示本机探测或官方文档都没拿到，值来自网关在售目录，不要当合同价用。
+#
+# 这里只写机器无关的事实；机器自己的东西（密钥、内网 base_url、自建 provider）
+# 属于 ~/.agents/llm.toml —— 两个文件同 id 的 provider 合并，私有字段覆盖社区字段。
+
+schema = 1
+updated = "2026-10-22"
+timezone = "Asia/Shanghai"
+
+# ---------------------------------------------------------------------------
+# 日历：价格分段里的"是否节假日"由它决定
+# ---------------------------------------------------------------------------
+# 为什么不能直接用休息日：DeepSeek 官方写的是"高峰时段排除**中国法定节假日**"，
+# 而 2026-02-15（春节假期第一天，连休）不是法定节假日，2026-01-02（元旦补休）
+# 也不是。任一份公开数据集的 isOffDay 都把"连休/补休"和"法定节假日"混在一起，
+# 所以法定日必须单独列出。
+[calendar]
+timezone = "Asia/Shanghai"
+
+  [calendar.sources]
+  # 放假调休全集：holidays 33 天 / workdays 6 天 / inLieuDays 6 天（2026 实测）
+  rest_and_makeup = { name = "chinese-days", url = "https://cdn.jsdelivr.net/npm/chinese-days/dist/years/{year}.json", retrieved = "2026-10-22" }
+  # 备用：每天从 gov.cn 抓取并更新，字段少但覆盖面广
+  fallback = { name = "holiday-cn", url = "https://raw.githubusercontent.com/NateScarlet/holiday-cn/master/{year}.json", retrieved = "2026-10-22" }
+  # 法定日的定义出处
+  authority = { name = "全国年节及纪念日放假办法（国务院令第795号）", url = "https://www.gov.cn/zhengce/content/202411/content_6986380.htm" }
+  notice_2026 = { name = "国务院办公厅关于2026年部分节假日安排的通知（国办发明电〔2025〕7号）", url = "https://www.gov.cn/zhengce/zhengceku/202511/content_7047091.htm" }
+  notice_2027 = { name = "尚未发布（gov.cn 政策库检索无结果，预计 2026-11 发布）", url = "https://sousuo.www.gov.cn/search-gov/data?t=zhengcelibrary_gw&q=2027年部分节假日安排" }
+
+  # 五类日子，按顺序命中即返回，O(1) 查表
+  # 注意 workday 与 weekend 不是互补：调休上班日是"周末里的工作日"，
+  # 而补休/连休是"工作日里的休息日"。
+  [calendar.rules]
+  workday        = "周一至周五，且不在 statutory、不在 holidays(放假调休全集) 里"   # 普通工作日
+  makeup_workday = "周六或周日，且在 workdays(调休上班日) 里"                      # DeepSeek 按空闲时段计费
+  holiday        = "在 statutory 里"                                              # 法定节假日
+  rest_day       = "在 holidays 或 inLieuDays 里，但不是 statutory"               # 连休 / 补休
+  weekend        = "周六或周日，且不在 workdays、不在 statutory 里"               # 普通周末
+  unknown        = "该年份没有 statutory 表时按 weekend 兜底，并打 warning"
+  peak_eligible  = "workday"        # 只有普通工作日落在高峰时段，其余五类都是空闲时段
+
+  # 法定节假日日期（国办通知 + 放假办法）。DeepSeek 高峰价就用这张表。
+  [calendar.statutory."2026"]
+  dates = ["2026-01-01", "2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19", "2026-04-04", "2026-05-01", "2026-05-02", "2026-06-19", "2026-09-25", "2026-10-01", "2026-10-02", "2026-10-03"]
+  count = 13
+  breakdown = { "元旦" = ["2026-01-01"], "春节" = ["2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19"], "清明" = ["2026-04-04"], "劳动节" = ["2026-05-01", "2026-05-02"], "端午" = ["2026-06-19"], "中秋" = ["2026-09-25"], "国庆" = ["2026-10-01", "2026-10-02", "2026-10-03"] }
+  makeup_workdays = ["2026-01-04", "2026-02-14", "2026-02-28", "2026-05-09", "2026-09-20", "2026-10-10"]
+  # 2027 的法定日与调休安排在国务院通知发布前无法确定；已知锚点：
+  # 元旦 2027-01-01；春节除夕 2027-02-05、初一至初三 2027-02-06..08（农历推算，非官方）。
+  [calendar.statutory."2027"]
+  dates = ["2027-01-01"]
+  status = "partial"
+  note = "只放了可推算的元旦；2026-11 通知发布后补全，补全前一律按 weekend 兜底。"
+
+# ---------------------------------------------------------------------------
+# 峰谷计费：四家规则各不相同，别混用
+# ---------------------------------------------------------------------------
+# 一句话对照（全部为北京时间）：
+#   DeepSeek 官方   高峰 09:00-12:00 + 14:00-18:00，周一至周五，**排除法定节假日**；
+#                   调休上班的周末也按空闲时段计费。这是唯一带节假日规则的。
+#   阿里百炼         忙时 08:00-22:00 每天连续；闲时 22:00-次日 08:00。官方未写节假日规则（节假日照算忙时）。
+#   腾讯 TokenHub   DeepSeek 模型按 09:00-12:00 + 14:00-18:00 周一至周五；官方未写节假日规则。
+#                   hy4-preview / hy3 是平价，没有任何分段。
+#   千问 Token Plan 夜间 22:00-次日 08:00，Qwen3.8 系 Credits 0.4×、DeepSeek 系 0.5×。不是单价打折，是扣量系数。
+#   MiMo Token Plan  夜间 00:00-08:00，Credits 0.8×。同样是扣量系数。
+#   MiniMax / Kimi   官方价目里没有任何峰谷机制。
+[peak_off_peak]
+mechanisms = ["price_band", "credit_multiplier", "none"]
+
+  [peak_off_peak.deepseek_official]
+  peak = { hours = [{ start = "09:00", end = "12:00" }, { start = "14:00", end = "18:00" }], days = ["workday"] }
+  off_peak = { hours = "其余全部", days = ["workday", "weekend", "holiday", "rest_day", "makeup_workday"] }
+  multiplier = 0.5
+  source = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
+  quote = "空闲时段价格为高峰时段价格的一半。北京时间周一至周五（不含中国法定节假日）9:00-12:00、14:00-18:00 为高峰时段；其余时段，包括周末及中国法定节假日全天均为空闲时段。"
+  basis = "以平台服务端收到请求的时间为准"
+
+  [peak_off_peak.bailian_dashscope]
+  peak = { hours = [{ start = "08:00", end = "22:00" }], days = ["workday", "weekend", "holiday", "rest_day", "makeup_workday"] }
+  off_peak = { hours = [{ start = "22:00", end = "24:00" }, { start = "00:00", end = "08:00" }], days = "全部" }
+  multiplier = 0.5
+  applies_to = ["deepseek-v4.1-flash-1017", "deepseek-v4-pro-0813", "deepseek-v4-flash-0731"]
+  source = "https://help.aliyun.com/zh/model-studio/model-pricing"
+  note = "官方没写节假日例外，所以节假日仍是忙时。"
+
+  [peak_off_peak.tencent_tokenhub]
+  peak = { hours = [{ start = "09:00", end = "12:00" }, { start = "14:00", end = "18:00" }], days = ["workday"] }
+  off_peak = { hours = "其余全部", days = "全部" }
+  multiplier = 0.5
+  applies_to = ["deepseek-v4.1-flash-1017", "deepseek-v4-pro-0813", "deepseek-v4-flash-0731"]
+  flat_rate_models = ["hy4-preview", "hy3"]
+  source = "https://cloud.tencent.com/document/product/1823/130055"
+  effective = "原厂直供 2026-08-29 起，其余 DeepSeek 模型 2026-09-26 起"
+
+  [peak_off_peak.qwen_token_plan]
+  discount_window = { hours = [{ start = "22:00", end = "24:00" }, { start = "00:00", end = "08:00" }], days = "全部" }
+  credit_multiplier = { qwen3_series = 0.4, deepseek_series = 0.5 }
+  source = "https://platform.qianwenai.com/docs/token-plan/personal/token-plan-personal-overview"
+  note = "折的是 Credits 消耗量，不是标价；decision-model-preview 限时免费。"
+
+  [peak_off_peak.mimo_token_plan]
+  discount_window = { hours = [{ start = "00:00", end = "08:00" }], days = "全部" }
+  credit_multiplier = 0.8
+  source = "https://mimo.mi.com/docs/zh-CN/quick-start/faq/token-plan/Usage&Quota"
+
+# ---------------------------------------------------------------------------
+# provider
+# ---------------------------------------------------------------------------
+# kind: vendor = 厂商直连 | gateway = 聚合/转发，按厂商价转售 | local = 自建
+# api:  pi-ai 的协议标识：openai-completions | openai-responses | anthropic-messages
+# key_env: DSH 侧对应的凭据引用名（~/.dsh/.credentials.yaml 的 refs 条目）
+#
+# 一个 provider 可以有多个 endpoint —— 同一家的 Chat Completions / Responses /
+# Messages 常常是三个不同主机，各自 baseURL。
+
+[[provider]]
+id = "deepseek-official"
+name = "DeepSeek 官方"
+kind = "vendor"
+key_env = "DEEPSEEK_API_KEY"
+homepage = "https://platform.deepseek.com"
+docs = "https://api-docs.deepseek.com"
+retrieved = "2026-10-22"
+
+  [[provider.endpoint]]
+  id = "openai"
+  api = "openai-completions"
+  base_url = "https://api.deepseek.com/v1"
+  auth = "bearer"
+
+  [[provider.model]]
+  id = "deepseek-flash"
+  name = "DeepSeek V4.1-Flash-1017"
+  context = 1000000
+  max_output = 384000
+  modalities = ["text", "image"]
+  reasoning_levels = ["none", "low", "high", "max"]
+  reasoning_default = "high"
+  reasoning_field = { openai = "thinking{type} + reasoning_effort", anthropic = "reasoning.effort", responses = "reasoning.effort" }
+  reasoning_mapping = { minimal = "low", low = "low", medium = "high", high = "high", xhigh = "high", max = "max", ultra = "max" }
+  concurrency_limit = 2500
+  retired_ids = ["deepseek-chat", "deepseek-reasoner", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"]
+  retired_note = "chat/reasoner 于 2026-07-24 下线；v4-flash 与 vision-exp 仍接受但已退役，转发到 V4.1-Flash"
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 2.00              # cache miss
+  output = 8.00
+  cache_read = 0.04
+  price_usd = { input = 0.30, output = 1.20, cache_read = 0.006 }
+    [[provider.model.price.band]]
+    id = "offpeak"
+    days = ["weekend", "holiday", "rest_day", "makeup_workday"]
+    note = "周末、法定节假日、连休补休、以及调休上班的周末，全天按此价"
+    input = 1.00
+    output = 4.00
+    cache_read = 0.02
+    price_usd = { input = 0.15, output = 0.60, cache_read = 0.003 }
+    source = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
+    retrieved = "2026-10-22"
+  [[provider.model.price.band]]
+  id = "peak"
+  hours = [{ start = "09:00", end = "12:00" }, { start = "14:00", end = "18:00" }]
+  days = ["workday"]
+  note = "官方原文：北京时间周一至周五（不含中国法定节假日）9:00-12:00、14:00-18:00 为高峰时段"
+  source = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
+  retrieved = "2026-10-22"
+
+  [[provider.model]]
+  id = "deepseek-v4-pro"
+  name = "DeepSeek V4-Pro-0813"
+  context = 1000000
+  max_output = 384000
+  modalities = ["text"]
+  # Server-side search, run by DeepSeek: verified 2026-10-24 against
+  # /v1/responses — it answers with web_search_call items (action.type = search
+  # or open_page). deepseek-flash silently ignores the same declaration, so this
+  # belongs to v4-pro alone; see docs/notes/server-providers.md.
+  builtin_tools = ["web_search"]
+  reasoning_levels = ["none", "low", "high", "max"]
+  reasoning_default = "high"
+  concurrency_limit = 500
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 9.00
+  output = 27.00
+  cache_read = 0.30
+  price_usd = { input = 1.32, output = 3.96, cache_read = 0.044 }
+  [[provider.model.price.band]]
+  id = "offpeak"
+  days = ["weekend", "holiday", "rest_day", "makeup_workday"]
+  input = 4.50
+  output = 13.50
+  cache_read = 0.15
+  price_usd = { input = 0.66, output = 1.98, cache_read = 0.022 }
+  source = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
+  retrieved = "2026-10-22"
+  [[provider.model.price.band]]
+  id = "peak"
+  hours = [{ start = "09:00", end = "12:00" }, { start = "14:00", end = "18:00" }]
+  days = ["workday"]
+  source = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
+  retrieved = "2026-10-22"
+
+  [[provider.quota_query]]
+  id = "wallet"
+  method = "GET"
+  url = "https://api.deepseek.com/user/balance"
+  auth = "bearer"
+  unit = "cny-left"
+  jsonpath = { balance = "balance_infos[?currency=='CNY'].total_balance", available = "is_available" }
+  source = "https://api-docs.deepseek.com/api/get-user-balance/"
+  verified_live = "2026-10-22 返回 total_balance 215.52 CNY"
+  script = "llm/deepseek.py"
+  script_env = "DEEPSEEK_API_KEY"
+
+[[provider]]
+id = "minimax-cn"
+name = "MiniMax 中国区"
+kind = "vendor"
+plan_kind = "token_plan"
+key_env = "MINIMAX_CN_API_KEY"
+homepage = "https://platform.minimaxi.com"
+catalog = "https://api.minimaxi.com/v1/models"
+catalog_verified = "2026-10-22 返回 9 个模型"
+retrieved = "2026-10-22"
+
+  [[provider.endpoint]]
+  id = "openai"
+  api = "openai-completions"
+  base_url = "https://api.minimax.cn/v1"
+  auth = "bearer"
+  note = "api.minimaxi.com 是同一服务的别名；国际站是 api.minimax.io，那边这把 key 返回 401"
+  [[provider.endpoint]]
+  id = "anthropic"
+  api = "anthropic-messages"
+  base_url = "https://api.minimax.cn/anthropic"
+  auth = "bearer"
+  [[provider.endpoint]]
+  id = "token-plan"
+  api = "openai-completions"
+  base_url = "https://api.minimax.cn/v1"
+  auth = "bearer"
+  note = "M Plan（曾名 Token Plan）**没有独立主机**，同一 baseURL 换订阅 key 而已，两者不可互换；Token Plan 已停售给新用户"
+
+  [[provider.model]]
+  id = "MiniMax-M3.1-Flash"
+  name = "MiniMax M3.1 Flash"
+  context = 1000000            # 输入+输出合计，官方没有单独公布 max_output / max_input
+  modalities = ["text", "image", "video"]
+  image_limits = "JPEG/PNG/GIF/WEBP ≤10MB；视频 MP4/AVI/MOV/MKV ≤50MB（Files API 可到 512MB）"
+  reasoning_levels = ["low", "medium", "high", "xhigh", "max"]
+  reasoning_default = "max"
+  reasoning_field = { anthropic = "output_config.effort", openai = "reasoning_effort", responses = "reasoning.effort" }
+  reasoning_note = "这个模型**关不掉思考**：thinking{type:disabled} 或 effort:none 会直接 400（requires adaptive thinking）"
+  retired_ids = ["MiniMax-M3.1-Flash-Preview", "MiniMax-M2.5", "MiniMax-M2.7"]
+  retired_note = "Preview 已下线由本模型承接；M2.5/M2.7 于 2026-10-19 停新用户、2026-11-18 下线"
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 1.00
+  output = 4.00
+  cache_read = 0.10
+  price_usd = { input = 0.15, output = 0.60, cache_read = 0.015 }
+  source = "https://platform.minimaxi.com/docs/pricing/overview"
+  retrieved = "2026-10-22"
+  note = "无任何峰谷机制。service_tier=priority 是 1.5×，但本模型不支持。"
+  alias = ["MiniMax-M3.1-Flash-Preview"]
+
+  [[provider.model]]
+  id = "MiniMax-M3"
+  name = "MiniMax M3"
+  context = 1000000
+  modalities = ["text", "image", "video"]
+  reasoning_default = "off"
+  reasoning_note = "思考默认关闭，要用 thinking{type:adaptive} 打开；本模型没有 effort 等级"
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 2.10              # 输入 ≤512k
+  output = 8.40
+  cache_read = 0.42
+  price_usd = { input = 0.30, output = 1.20, cache_read = 0.06 }
+  source = "https://platform.minimaxi.com/docs/pricing/overview"
+  retrieved = "2026-10-22"
+  note = "永久五折，原价 ¥4.20/¥16.80/¥0.84"
+    [[provider.model.price.band]]
+    id = "long-context"
+    input_over = 512000     # 按输入长度分段，不是按时间
+    input = 4.20
+    output = 16.80
+    cache_read = 0.84
+    price_usd = { input = 0.60, output = 2.40, cache_read = 0.12 }
+    source = "https://platform.minimaxi.com/docs/pricing/overview"
+
+  [[provider.model]]
+  id = "MiniMax-M2.7"
+  name = "MiniMax M2.7"
+  context = 200000
+  modalities = ["text"]
+  retired = "2026-11-18 下线；M Plan 下自 2026-10-19 起请求自动改走 M3.1-Flash"
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 0.30
+  output = 1.20
+  cache_read = 0.06
+  price_usd = { input = 0.06, output = 0.24, cache_read = 0.006 }
+  source = "https://commandcode.ai/docs/resources/pricing-limits"
+  retrieved = "2026-10-22"
+
+  [provider.plan]
+  name = "M Plan"
+  months = { CN = { Go = "¥49", Explore = "¥119", Build = "¥469" }, intl = { Go = "$22", Explore = "$55", Build = "$132" } }
+  credit_pack = "1,000 积分 = ¥7（国内）"
+  windows = "5 小时 + 7 天滚动窗口，不结转"
+  source = "https://platform.minimaxi.com/docs/m-plan/monthly-offer"
+
+  [[provider.quota_query]]
+  id = "token-plan-remains"
+  method = "GET"
+  url = "https://www.minimax.cn/v1/token_plan/remains"
+  auth = "bearer"
+  unit = "percent-left"
+  jsonpath = { window_current_pct = "model_remains[].current_interval_remaining_percent", window_weekly_pct = "model_remains[].current_weekly_remaining_percent", reset_current = "model_remains[].remains_time", reset_weekly = "model_remains[].weekly_remains_time" }
+  source = "https://platform.minimax.cn/docs/m-plan/faq"
+  conflicting_sources = "模型表与 API 参考页都没有这个端点，只有 M Plan FAQ 写；本机脚本 llm/minimax.py 正在用它，且能跑出读数，所以按可用收录。"
+  note = """
+    必须是 M Plan 订阅 key，按量付费 key 返回 base_resp.status_code 1004/2049。
+    字段名来自官方 CLI 源码而非文档；current_interval_usage_count 这个字段名有坑——
+    它装的是**剩余**不是已用，used = total - usage_count。
+  """
+  script = "llm/minimax.py"
+  script_env = "MINIMAX_CN_API_KEY"
+
+  [[provider.quota_query]]
+  id = "payg-balance"
+  method = "GET"
+  url = "https://api.minimax.cn/account/query_balance"
+  auth = "bearer-or-x-api-key"
+  unit = "cny-left"
+  applies_to = "按量付费 key（sk-api- 前缀），与上面的 M Plan 订阅 key 是两把"
+  jsonpath = { available = "available_amount", cash = "cash_balance", voucher = "voucher_balance", credit = "credit_balance", owed = "owed_amount" }
+  source = "https://github.com/MiniMax-AI/cli"
+  note = "金额字段都是字符串；这个端点同样不在公开 API 参考里，来自官方 CLI 源码。"
+
+[[provider]]
+id = "command-code-goat"
+name = "Command Code（GOAT 聚合网关）"
+kind = "gateway"
+key_env = "COMMAND_CODE_GOAT_API_KEY"
+homepage = "https://commandcode.ai"
+docs = "https://commandcode.ai/docs/provider"
+catalog = "https://api.commandcode.ai/provider/v1/models"
+catalog_verified = "2026-10-22 返回 95 个模型，每个带 context_length 与 supported_endpoints"
+pricing_source = "https://commandcode.ai/docs/resources/pricing-limits"
+retrieved = "2026-10-22"
+note = "按厂商成本转售、零加价；5 小时 + 每周两个滚动窗，另加月度 credit 池"
+
+  [[provider.endpoint]]
+  id = "openai"
+  api = "openai-completions"
+  base_url = "https://api.commandcode.ai/provider/v1"
+  auth = "bearer"
+  note = "supported_endpoints 含 /responses 的模型再走 /responses，含 /messages 的走 /messages"
+
+  # 本机真正用到的几个；完整 95 个以 catalog 端点为准
+  [[provider.model]]
+  id = "deepseek/deepseek-v4.1-flash"
+  name = "DeepSeek V4.1 Flash"
+  context = 1000000
+  modalities = ["text", "image"]
+  reasoning_levels = ["low", "medium", "high", "xhigh", "max"]
+  endpoints = ["/chat/completions", "/responses"]
+  [provider.model.price]
+  currency = "USD"
+  unit = "per_1m_tokens"
+  input = 0.15      # 谷时
+  output = 0.60
+  cache_read = 0.003
+  [[provider.model.price.band]]
+  id = "peak"
+  hours = [{ start = "01:00", end = "04:00" }, { start = "06:00", end = "10:00" }]
+  days = ["workday"]
+  input = 0.30
+  output = 1.20
+  cache_read = 0.006
+  note = "UTC 窗口，周末与法定节假日全天按谷时价"
+  source = "https://api-docs.deepseek.com/quick_start/pricing"
+  retrieved = "2026-10-22"
+  promo = "per-model 月度 credit 提升：Go $10 / GOAT $80 / Pro $90，无到期日"
+
+  [[provider.model]]
+  id = "stepfun/Step-5-Preview"
+  name = "Step 5 Preview"
+  context = 1000000
+  modalities = ["text"]
+  endpoints = ["/chat/completions", "/responses"]
+  [provider.model.price]
+  currency = "USD"
+  unit = "per_1m_tokens"
+  input = 1.00
+  output = 2.70
+  cache_read = 0.05
+  source = "https://commandcode.ai/docs/resources/pricing-limits"
+  retrieved = "2026-10-22"
+
+  [[provider.model]]
+  id = "zai-org/GLM-5.2"
+  name = "GLM-5.2"
+  context = 1000000
+  modalities = ["text"]
+  endpoints = ["/chat/completions", "/responses"]
+  [provider.model.price]
+  currency = "USD"
+  unit = "per_1m_tokens"
+  input = 1.40
+  output = 4.40
+  cache_read = 0.26
+  source = "https://commandcode.ai/docs/resources/pricing-limits"
+  retrieved = "2026-10-22"
+
+  [[provider.model]]
+  id = "xiaomi/mimo-v2.6-pro"
+  name = "MiMo V2.6 Pro"
+  context = 1048576
+  modalities = ["text", "image"]
+  endpoints = ["/chat/completions", "/responses"]
+  [provider.model.price]
+  currency = "USD"
+  unit = "per_1m_tokens"
+  input = 0.435
+  output = 0.87
+  cache_read = 0.0036
+  source = "https://commandcode.ai/docs/resources/pricing-limits"
+  retrieved = "2026-10-22"
+
+  [[provider.model]]
+  id = "Qwen/Qwen3.8-Max-0902"
+  name = "Qwen 3.8 Max 0902"
+  context = 1000000
+  modalities = ["text"]
+  endpoints = ["/chat/completions"]
+  [provider.model.price]
+  currency = "USD"
+  unit = "per_1m_tokens"
+  input = 2.00
+  output = 6.00
+  cache_read = 0.25
+  source = "https://commandcode.ai/docs/resources/pricing-limits"
+  retrieved = "2026-10-22"
+
+  [[provider.model]]
+  id = "meituan/LongCat-2.0"
+  name = "LongCat 2.0"
+  context = 1048576
+  modalities = ["text"]
+  endpoints = ["/chat/completions"]
+  [provider.model.price]
+  currency = "USD"
+  unit = "per_1m_tokens"
+  input = 0.30
+  output = 1.20
+  cache_read = 0.006
+  source = "https://commandcode.ai/docs/resources/pricing-limits"
+  retrieved = "2026-10-22"
+
+  [[provider.model]]
+  id = "tencent/hy4-preview"
+  name = "Tencent Hy4 Preview"
+  context = 1000000
+  modalities = ["text"]
+  endpoints = ["/chat/completions"]
+  reasoning_levels = ["off", "high"]
+  [provider.model.price]
+  currency = "USD"
+  unit = "per_1m_tokens"
+  input = 0.834
+  output = 2.501
+  cache_read = 0.042
+  source = "https://commandcode.ai/docs/resources/pricing-limits"
+  retrieved = "2026-10-22"
+
+  [[provider.model]]
+  id = "moonshotai/Kimi-K3"
+  name = "Kimi K3"
+  context = 1000000
+  modalities = ["text", "image"]
+  endpoints = ["/chat/completions", "/responses"]
+  [provider.model.price]
+  currency = "USD"
+  unit = "per_1m_tokens"
+  input = 3.00
+  output = 15.00
+  cache_read = 0.30
+  source = "https://commandcode.ai/docs/resources/pricing-limits"
+  retrieved = "2026-10-22"
+
+  # 网关转售的国际模型。价格是「厂商成本、零加价」，所以它同时是这些模型在本机
+  # 唯一能摸到的价目表；厂商直连要另开账号，本文件没收录它们的直连端点。
+  [[provider.model]]
+  id = "claude-opus-5-5"
+  name = "Claude Opus 5.5"
+  context = 1000000
+  max_output = 128000
+  modalities = ["text", "image"]
+  endpoints = ["/messages"]
+  reasoning_levels = ["low", "medium", "high", "xhigh", "max"]   # 走 output_config.effort
+  [provider.model.price]
+  currency = "USD"
+  input = 4.00
+  output = 20.00
+  cache_read = 0.20
+  cache_write_5m = 5.00
+  source = "https://claude.com/pricing"
+  retrieved = "2026-10-22"
+
+  [[provider.model]]
+  id = "claude-sonnet-5-5"
+  name = "Claude Sonnet 5.5"
+  context = 1000000
+  max_output = 128000
+  modalities = ["text", "image"]
+  endpoints = ["/messages"]
+  [provider.model.price]
+  currency = "USD"
+  input = 2.00
+  output = 10.00
+  cache_read = 0.10
+  cache_write_5m = 2.50
+  source = "https://claude.com/pricing"
+  retrieved = "2026-10-22"
+
+  [[provider.model]]
+  id = "gpt-6.1-sol"
+  name = "GPT-6.1 Sol"
+  context = 1050000
+  max_output = 128000
+  modalities = ["text", "image"]
+  endpoints = ["/chat/completions", "/responses"]
+  reasoning_levels = ["low", "medium", "high", "xhigh", "max"]   # 不接受 none / minimal
+  [provider.model.price]
+  currency = "USD"
+  input = 2.00
+  output = 10.00
+  cache_read = 0.10
+  cache_write_5m = 2.50
+  source = "https://platform.openai.com/docs/models"
+  retrieved = "2026-10-22"
+  [[provider.model.price.band]]
+  id = "long-context"
+  input_over = 272000
+  note = "超过 272K 输入时，**整个请求**按 2× 输入 / 1.5× 输出重算，不只是超出的部分"
+  input = 4.00
+  output = 15.00
+  cache_read = 0.20
+  source = "https://help.openai.com/en/articles/20001415"
+
+  [[provider.model]]
+  id = "gpt-6-luna"
+  name = "GPT-6 Luna"
+  context = 1050000
+  max_output = 128000
+  modalities = ["text", "image"]
+  endpoints = ["/chat/completions", "/responses"]
+  reasoning_levels = ["none", "low", "medium", "high", "xhigh", "max"]
+  [provider.model.price]
+  currency = "USD"
+  input = 0.10
+  output = 0.50
+  cache_read = 0.01
+  cache_write_5m = 0.125
+  source = "https://platform.openai.com/docs/models"
+  retrieved = "2026-10-22"
+
+  [[provider.model]]
+  id = "google/gemini-4-argon"
+  name = "Gemini 4 Argon"
+  context = 1048576
+  max_output = 65536
+  modalities = ["text", "image", "video", "audio"]
+  endpoints = ["/chat/completions", "/responses"]
+  reasoning_levels = ["low", "medium", "high"]                   # 没有 minimal
+  [provider.model.price]
+  currency = "USD"
+  input = 2.00
+  output = 10.00
+  cache_read = 0.10
+  price_after = { from = "2026-12-01", input = 4.00, output = 20.00, cache_read = 0.20 }
+  source = "https://ai.google.dev/gemini-api/docs/pricing"
+  retrieved = "2026-10-22"
+  note = "1M 是输入+思考+输出共用的一个窗口；同步解码上限 65,536，要更长必须 background=true。12-01 调价。"
+
+  [[provider.model]]
+  id = "xai/grok-4.7"
+  name = "Grok 4.7"
+  context = 500000
+  modalities = ["text", "image"]
+  endpoints = ["/chat/completions", "/responses"]
+  reasoning_levels = ["low", "medium", "high", "xhigh"]
+  [provider.model.price]
+  currency = "USD"
+  input = 2.00
+  output = 6.00
+  cache_read = 0.50
+  [[provider.model.price.band]]
+  id = "long-context"
+  input_over = 200000
+  input = 4.00
+  output = 12.00
+  cache_read = 1.00
+  source = "https://docs.x.ai/developers/pricing"
+  retrieved = "2026-10-22"
+
+  [[provider.model]]
+  id = "mistral/mistral-large-4"
+  name = "Mistral Large 4"
+  context = 524288
+  modalities = ["text"]
+  endpoints = ["/chat/completions", "/responses"]
+  reasoning_levels = ["none", "minimal", "low", "medium", "high", "xhigh"]
+  [provider.model.price]
+  currency = "USD"
+  input = 0.68
+  output = 2.09
+  cache_read = 0.07
+  price_list = { input = 1.36, output = 4.18, cache_read = 0.14 }
+  source = "https://docs.mistral.ai/inference/pricing"
+  retrieved = "2026-10-22"
+  note = "现价是标价的 5 折；max output 官方没公布，只能从 GET /v1/models 读。"
+
+  [[provider.quota_query]]
+  id = "credits"
+  method = "GET"
+  url = "https://api.commandcode.ai/alpha/billing/credits"
+  auth = "bearer"
+  unit = "usd-left"
+  jsonpath = { monthly_credits = "credits.monthlyCredits", free_credits = "credits.freeCredits", purchased_credits = "credits.purchasedCredits", five_hour_used = "windowLimits.fiveHour.used", five_hour_cap = "windowLimits.fiveHour.cap", five_hour_reset = "windowLimits.fiveHour.resetAt", weekly_used = "windowLimits.weekly.used", weekly_cap = "windowLimits.weekly.cap", weekly_reset = "windowLimits.weekly.resetAt" }
+  verified_live = "2026-10-22 返回 monthlyCredits 0.0552、fiveHour cap 14、weekly cap 35"
+  capacities = { monthly = 140 }   # 官方周上限 35 × 4 估算，按实际套餐改
+  script = "llm/command-code-goat.py"
+  script_env = "COMMAND_CODE_GOAT_API_KEY"
+
+[[provider]]
+id = "kimi-coding"
+name = "Kimi 编程套餐（Moonshot coding plan）"
+kind = "vendor"
+plan_kind = "coding_plan"
+key_env = "KIMI_CODING_API_KEY"
+homepage = "https://www.kimi.com/code"
+console = "https://www.kimi.com/code/console"
+catalog_verified = "本机 DSH profile 在用 k3 / k3-256k；官方文档未列模型表"
+retrieved = "2026-10-22"
+
+  [[provider.endpoint]]
+  id = "openai"
+  api = "openai-completions"
+  base_url = "https://api.kimi.com/coding/v1"
+  auth = "bearer"
+  [[provider.endpoint]]
+  id = "anthropic"
+  api = "anthropic-messages"
+  base_url = "https://api.kimi.com/coding"
+  auth = "bearer"
+  note = "国内站；国际站是 api.kimi.ai/coding。两站 key 不通用。"
+  # 按量开放平台是另外两个主机、另外一把 key：
+  #   https://api.moonshot.cn/v1        （国内，OpenAI 兼容）
+  #   https://api.moonshot.cn/anthropic （国内，Messages）
+  # Kimi API 开放平台 / Kimi Code / Kimi 会员是三个互不通用计费的产品。
+
+  [[provider.model]]
+  id = "k3"
+  name = "Kimi K3"
+  context = 1048576
+  max_output = 131072
+  modalities = ["text", "image"]
+  note = "K3 恒开思考，没有 thinking 关；视频输入只在按量站有，k3-256k 不支持"
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 20.00            # cache miss
+  output = 100.00
+  cache_read = 2.00
+  cache_write_5m = 20.00
+  cache_write_1h = 40.00
+  source = "https://platform.moonshot.cn/docs/pricing/chat"
+  retrieved = "2026-10-22"
+  note = "这是按量站的价格；coding plan 本身是订阅制，走下面的额度窗口。"
+
+  [[provider.model]]
+  id = "k3-256k"
+  name = "Kimi K3 256K"
+  context = 262144
+  modalities = ["text", "image"]
+  note = "只在 coding plan 订阅端点上存在，按量站没有这个 id"
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 20.00
+  output = 100.00
+  cache_read = 2.00
+  source = "https://platform.moonshot.cn/docs/pricing/chat"
+  retrieved = "2026-10-22"
+
+  [provider.plan]
+  name = "Kimi 会员"
+  months_cny = { Go = 49, Plus = 99, Pro = 199, Max = 699, Ultra = 1399 }
+  months_usd = { Plus = 19, Pro = 39, Max = 99, Ultra = 199 }
+  gating = "Kimi Code 要 Plus 及以上；k3 要 Plus 及以上，1M 上下文要 Pro 及以上"
+  topup = "单次最低 ¥25，每天最多 10 次、每天最多 ¥3,000，余额上限 ¥10,000"
+  source = "https://www.kimi.com/help/membership/membership-overview"
+  note = "两个帮助页都写了「最新价格请以会员购买页为准」，购买页是 JS 渲染的，这里是文档里的数字。"
+
+  [[provider.quota_query]]
+  id = "coding-usages"
+  method = "GET"
+  url = "https://api.kimi.com/coding/v1/usages"
+  auth = "bearer"
+  unit = "percent-left"
+  jsonpath = { limit_5h_used_ratio = "usages.limit_5h.used_ratio", limit_5h_reset = "usages.limit_5h.reset_time", limit_7d_used_ratio = "usages.limit_7d.used_ratio", limit_7d_reset = "usages.limit_7d.reset_time", limit_month_total = "usages.limit_month_total", limit_month_code = "usages.limit_month_code", booster_left = "boosterWallet.balance.amountLeft", monthly_charge_limit = "boosterWallet.monthlyChargeLimit.priceInCents" }
+  fallback_url = "https://api.kimi.com/coding/v1/usage"
+  note = "官方文档不写这个端点，是 Kimi Code CLI 源码在调；官方只给控制台与 CLI /usage"
+  source = "https://github.com/MoonshotAI/kimi-code"
+  script = "llm/kimi-coding.py"
+  script_env = "KIMI_CODING_API_KEY"
+
+  [[provider.quota_query]]
+  id = "open-platform-balance"
+  method = "GET"
+  url = "https://api.moonshot.cn/v1/users/me/balance"
+  auth = "bearer"
+  unit = "cny-left"
+  jsonpath = { available = "data.available_balance", voucher = "data.voucher_balance", cash = "data.cash_balance", ok = "data.status" }
+  source = "https://platform.kimi.com/docs/api/balance"
+  note = "开放平台余额，与 coding plan 订阅是两套独立产品；用订阅 key 打这个端点返回 401。本机实测 401。"
+
+[[provider]]
+id = "stepfun"
+name = "阶跃星辰 StepFun"
+kind = "vendor"
+key_env = "STEP_API_KEY"
+homepage = "https://platform.stepfun.com"
+docs = "https://platform.stepfun.com/docs/zh/api-reference/intro"
+catalog = "https://api.stepfun.com/v1/models"
+catalog_verified = "2026-10-22 返回 33 个模型，文本对话线为 step-5-preview / step-3.7-flash / step-3.5-flash"
+retrieved = "2026-10-22"
+
+  [[provider.endpoint]]
+  id = "openai"
+  api = "openai-completions"
+  base_url = "https://api.stepfun.com/v1"
+  auth = "bearer"
+  [[provider.endpoint]]
+  id = "anthropic"
+  api = "anthropic-messages"
+  base_url = "https://api.stepfun.com/v1"
+  auth = "bearer"
+  [[provider.endpoint]]
+  id = "step-plan"
+  api = "openai-completions"
+  base_url = "https://api.stepfun.com/step_plan/v1"
+  auth = "bearer"
+  note = "Step Plan 订阅端点；Anthropic SDK 的 base 是 https://api.stepfun.com/step_plan（不带 /v1）"
+
+  [[provider.model]]
+  id = "step-5-preview"
+  name = "Step 5 Preview"
+  context = 1000000
+  max_output = 64000
+  modalities = ["text", "image", "video"]
+  image_limits = "最多 60 张图；MP4 < 128MB"
+  reasoning_levels = ["low", "medium", "high"]
+  reasoning_field = { openai = "reasoning_effort", anthropic = "output_config.effort", responses = "reasoning.effort" }
+  reasoning_note = "CoT 在 message.reasoning；要 reasoning_content 就加 reasoning_format:\"deepseek-style\"。Step 在这些路由上不用 thinking 字段。"
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 7.00
+  output = 20.00
+  cache_read = 0.70
+  price_usd = { input = 1.00, output = 2.70, cache_read = 0.10 }
+  source = "https://platform.stepfun.com/docs/zh/guides/pricing/pricing/details"
+  retrieved = "2026-10-22"
+  note = "cache read 2026-10-14 00:30（北京时间）起从 ¥0.35 涨到 ¥0.70，之前付费的调用方有保护期。"
+
+  [[provider.model]]
+  id = "step-3.7-flash"
+  name = "Step 3.7 Flash"
+  context = 256000
+  modalities = ["text"]
+  reasoning_levels = ["low", "medium", "high"]
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 1.35
+  output = 8.10
+  cache_read = 0.27
+  price_usd = { input = 0.20, output = 1.15, cache_read = 0.04 }
+  source = "https://platform.stepfun.com/docs/zh/guides/pricing/pricing/details"
+  retrieved = "2026-10-22"
+
+  [[provider.model]]
+  id = "step-3.5-flash"
+  name = "Step 3.5 Flash"
+  context = 256000
+  modalities = ["text"]
+  reasoning_levels = ["low", "high"]      # -2603 版本只有这两档
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 0.70
+  output = 2.10
+  cache_read = 0.14
+  price_usd = { input = 0.09, output = 0.30, cache_read = 0.02 }
+  source = "https://platform.stepfun.com/docs/zh/guides/pricing/pricing/details"
+  retrieved = "2026-10-22"
+
+  [provider.plan]
+  name = "Step Plan"
+  months_cny = { Mini = 49, Plus = 99, Pro = 199, Max = 699 }
+  credits = "1 元 = 1,000,000 credit，周期末清零；加油包 ¥49/400M、¥99/1600M，有效 30 天"
+  peak = { hours = [{ start = "09:00", end = "12:00" }, { start = "14:00", end = "18:00" }], days = ["workday"], credit_multiplier = 2.0 }
+  effective = "2026-10-15 00:00（北京时间）起生效，之前付费的调用方有保护"
+  applies_to = ["step-5-preview"]
+  source = "https://platform.stepfun.com/docs/zh/step-plan/pricing"
+
+  [[provider.quota_query]]
+  id = "account"
+  method = "GET"
+  url = "https://api.stepfun.com/v1/accounts"
+  auth = "bearer"
+  unit = "cny-left"
+  jsonpath = { balance = "balance", cash = "total_cash_balance", voucher = "total_voucher_balance", kind = "type" }
+  source = "https://platform.stepfun.com/docs/zh/api-reference/accounts/get"
+  note = "这是按量余额。Step Plan 的剩余 credit **没有** API，只能控制台看。"
+
+[[provider]]
+id = "xiaomi-mimo"
+name = "小米 MiMo"
+kind = "vendor"
+key_env = "XIAOMI_API_KEY"
+homepage = "https://platform.xiaomimimo.com"
+docs = "https://mimo.mi.com"
+catalog = "https://api.xiaomimimo.com/v1/models"
+catalog_verified = "2026-10-22 返回 7 个：mimo-v2.6-pro / -ultraspeed / -flash、mimo-v2.5-pro、mimo-v2.5 及 asr/tts"
+retrieved = "2026-10-22"
+
+  [[provider.endpoint]]
+  id = "openai"
+  api = "openai-completions"
+  base_url = "https://api.xiaomimimo.com/v1"
+  auth = "bearer"
+  [[provider.endpoint]]
+  id = "anthropic"
+  api = "anthropic-messages"
+  base_url = "https://api.xiaomimimo.com/anthropic"
+  auth = "bearer"
+  [[provider.endpoint]]
+  id = "token-plan-cn"
+  api = "openai-completions"
+  base_url = "https://token-plan-cn.xiaomimimo.com/v1"
+  auth = "bearer"
+  key_prefix = "tp-"
+  note = "套餐 key（tp- 前缀）走这个主机，与按量 key 分开；另有 sgp / ams 两个区"
+
+  [[provider.model]]
+  id = "mimo-v2.6-pro"
+  name = "MiMo V2.6 Pro"
+  context = 1000000
+  max_output = 128000
+  modalities = ["text", "image", "audio", "video"]
+  reasoning_levels = ["on", "off"]        # 只有 thinking{type} 开关，官方没有 effort 等级
+  reasoning_default = "on"
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 3.00
+  output = 6.00
+  cache_read = 0.025
+  cache_write = 0.00                       # 限时免费
+  price_usd = { input = 0.435, output = 0.87, cache_read = 0.0036 }
+  source = "https://mimo.mi.com/docs/zh-CN/price/pay-as-you-go"
+  retrieved = "2026-10-22"
+  [[provider.model.price.band]]
+  id = "batch"                              # Batch API 平价 5 折，与时间无关
+  input = 1.50
+  output = 3.00
+  cache_read = 0.0125
+  source = "https://mimo.mi.com/docs/zh-CN/price/pay-as-you-go"
+
+  [[provider.model]]
+  id = "mimo-v2.6-flash"
+  name = "MiMo V2.6 Flash"
+  context = 1000000
+  max_output = 128000
+  modalities = ["text", "image", "audio", "video"]
+  reasoning_levels = ["on", "off"]
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 1.00
+  output = 2.00
+  cache_read = 0.02
+  price_usd = { input = 0.14, output = 0.28, cache_read = 0.0028 }
+  source = "https://mimo.mi.com/docs/zh-CN/price/pay-as-you-go"
+  retrieved = "2026-10-22"
+
+  [[provider.model]]
+  id = "mimo-v2.6-pro-ultraspeed"
+  name = "MiMo V2.6 Pro UltraSpeed"
+  context = 1000000
+  max_output = 128000
+  modalities = ["text", "image", "audio", "video"]
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 30.00
+  output = 60.00
+  cache_read = 0.25
+  price_usd = { input = 4.35, output = 8.70, cache_read = 0.036 }
+  source = "https://mimo.mi.com/docs/zh-CN/price/pay-as-you-go"
+  retrieved = "2026-10-22"
+
+  [provider.plan]
+  name = "Token Plan"
+  key_prefix = "tp-"
+  months_cny = { Lite = 39, Standard = 99, Pro = 329, Max = 659 }
+  credits = "Lite 41 亿、Standard 110 亿、Pro 380 亿、Max 820 亿"
+  credit_per_1m_pro = "2.5 命中 / 300 未命中 / 600 输出"
+  credit_per_1m_flash = "2 / 100 / 200"
+  night_discount = { hours = [{ start = "00:00", end = "08:00" }], credit_multiplier = 0.8 }
+  validity = "购买日起一个自然月/年，按 UTC 计算；到期或额度用尽即失效"
+  source = "https://mimo.mi.com/docs/zh-CN/price/token-plan"
+
+  [[provider.quota_query]]
+  id = "none"
+  available = false
+  console = "https://platform.xiaomimimo.com/#/console/balance"
+  note = "官方 API 参考里**没有**任何余额/额度端点，只有控制台。社区逆向的 console-internal 端点未验证且随时会变，不收。"
+  retired_models = ["mimo-v2.5-pro", "mimo-v2.5"]
+  retired_note = "2026-10-21 10:00 下线"
+
+[[provider]]
+id = "longcat"
+name = "美团 LongCat"
+kind = "vendor"
+key_env = "LONGCAT_API_KEY"
+key_prefix = "ak_"
+homepage = "https://longcat.chat"
+catalog = "https://api.longcat.chat/openai/v1/models"
+catalog_verified = "2026-10-22 返回 2 个：LongCat-2.5-Preview(1M/262144)、LongCat-2.0"
+retrieved = "2026-10-22"
+
+  [[provider.endpoint]]
+  id = "openai"
+  api = "openai-completions"
+  base_url = "https://api.longcat.chat/openai/v1"
+  auth = "bearer"
+  [[provider.endpoint]]
+  id = "anthropic"
+  api = "anthropic-messages"
+  base_url = "https://api.longcat.chat/anthropic"
+  auth = "bearer"
+
+  [[provider.model]]
+  id = "LongCat-2.0"
+  name = "LongCat 2.0"
+  context = 1048576
+  max_output = 131072
+  modalities = ["text"]
+  reasoning_levels = ["on", "off"]
+  reasoning_note = "Chat/Messages 上是 thinking{type} + thinking_budget（上限 262144），没有低中高档；只有 Responses 面才有 reasoning.effort（none|minimal|low|medium|high|xhigh）"
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 2.00
+  output = 8.00
+  cache_read = 0.04
+  price_usd = { input = 0.30, output = 1.20, cache_read = 0.006 }
+  source = "https://longcat.chat/platform/docs/pricing/longcat-2.0"
+  retrieved = "2026-10-22"
+  note = "没有峰谷分段，只有企业按月消费量的阶梯折扣（月消费 ≥¥500 起 10%，≥¥40,000 到 40%）。没有月套餐，只有永不过期的预付余额加 30 天 Token Pack。"
+
+  [[provider.model]]
+  id = "LongCat-2.5-Preview"
+  name = "LongCat 2.5 Preview"
+  context = 1048576
+  max_output = 262144
+  modalities = ["text", "image"]
+  reasoning_levels = ["on", "off"]
+  doc_conflict = "官方自相矛盾：Quick Start 与 FAQ 写两个模型 max output 都是 128K，Model Parameters 页写 2.5-Preview 是 256K。检索模型接口返回的是 262144，所以按 256K 记。"
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 2.00
+  output = 8.00
+  cache_read = 0.04
+  price_usd = { input = 0.30, output = 1.20 }
+  source = "https://longcat.chat/platform/docs/pricing/longcat-2.5"
+  retrieved = "2026-10-22"
+
+  [[provider.quota_query]]
+  id = "none"
+  available = false
+  note = "官方文档未给额度端点。HTTP 402 是余额不足，403 带 insufficient_quota。"
+  retired_models = ["LongCat-Flash", "LongCat-Flash-Chat", "LongCat-Flash-Thinking", "LongCat-Flash-Lite", "LongCat-Flash-Omni-2603"]
+  retired_note = "2026-05-29 停用"
+
+[[provider]]
+id = "qwen-token-plan"
+name = "阿里百炼 · 个人 Token Plan"
+kind = "vendor"
+plan_kind = "token_plan"
+key_prefix = "sk-sp-"
+key_env = "QWEN_API_KEY"
+homepage = "https://modelstudio.console.alibabacloud.com"
+catalog = "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1/models"
+catalog_verified = "2026-10-22 返回 19 个模型（qwen3.8-max/flash、qwen3.7-*、qwen3.6-*、glm-5.2/5.3、deepseek-v4*、kimi-k3、auto、decision-model-preview 及图像/音频/视频模型）"
+retrieved = "2026-10-22"
+note = "这个主机是通义千问 MaaS 的**产品**端点，不是内置的 ap-southeast-1 国际区；套餐 key 与 DashScope 按量 key 是两份凭据。"
+
+  [[provider.endpoint]]
+  id = "openai"
+  api = "openai-completions"
+  base_url = "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1"
+  auth = "bearer"
+  [[provider.endpoint]]
+  id = "anthropic"
+  api = "anthropic-messages"
+  base_url = "https://token-plan.maas.qianwenaiapi.com/apps/anthropic"
+  auth = "bearer"
+
+  [[provider.model]]
+  id = "qwen3.8-max"
+  name = "Qwen 3.8 Max"
+  context = 1000000
+  max_output = 128000
+  max_input = 991000
+  thinking_budget_max = 256000
+  modalities = ["text", "image"]
+  reasoning_levels = ["low", "medium", "xhigh"]
+  reasoning_default = "xhigh"
+  reasoning_note = "reasoning_effort 与 thinking_budget **互斥**，同时给会报错；映射 low→4096 / medium→16384 / xhigh→262144"
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 12.00
+  output = 36.00
+  cache_read = 1.50                     # 隐式缓存命中
+  cache_write = 15.00                   # 显式缓存创建
+  cache_read_explicit = 1.00
+  batch = { input = 6.00, output = 18.00 }
+  price_usd = { input = 2.00, output = 6.00, cache_read = 0.25 }
+  source = "https://platform.qianwenai.com/docs/developer-guides/getting-started/model-prices"
+  retrieved = "2026-10-22"
+  note = "标价不区分忙闲；Token Plan 是订阅制，实际扣 Credits。百炼只对 DeepSeek 系做忙闲分段。"
+
+  [[provider.model]]
+  id = "qwen3.8-flash"
+  name = "Qwen 3.8 Flash"
+  context = 1000000
+  max_output = 128000
+  modalities = ["text", "image"]
+  reasoning_levels = ["low", "medium", "xhigh"]
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 0.80
+  output = 2.70
+  cache_read = 0.10
+  cache_write = 1.25
+  cache_read_explicit = 0.10
+  price_usd = { input = 0.16, output = 0.47, cache_read = 0.016 }
+  source = "https://platform.qianwenai.com/docs/developer-guides/getting-started/model-prices"
+  retrieved = "2026-10-22"
+
+  [[provider.model]]
+  id = "deepseek-v4.1-flash-1017"
+  name = "DeepSeek V4.1 Flash 1017（百炼转售）"
+  context = 1000000
+  max_output = 384000
+  modalities = ["text", "image"]
+  reasoning_levels = ["low", "high", "max"]
+  reasoning_default = "high"
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 2.00
+  output = 8.00
+  cache_read = 0.20
+    [[provider.model.price.band]]
+    id = "offpeak"
+    hours = [{ start = "22:00", end = "24:00" }, { start = "00:00", end = "08:00" }]
+    days = "全部"
+    input = 1.00
+    output = 4.00
+    cache_read = 0.10
+    note = "百炼的忙闲是 08:00-22:00 连续，和 DeepSeek 官方两段式不同；百炼官方没写节假日例外，所以法定节假日照算忙时。"
+    source = "https://help.aliyun.com/zh/model-studio/model-pricing"
+
+  [provider.plan]
+  name = "Token Plan（个人）"
+  region = "华北2（北京）独占"
+  tiers = { Lite = "¥60 标价 / ¥39 促销", Essential = "¥120 / ¥79", Standard = "¥180 / ¥139", Pro = "¥600 / ¥499" }
+  credits = { Lite = 11500, Essential = 25500, Standard = 45000, Pro = 180000 }
+  topup = "¥100/包 = 20,000 Credits，最多同时持有 5 包，不跨月结转"
+  night_discount = "22:00-次日 08:00：qwen3.8-* Credits 0.4×，deepseek-* Credits 0.5×；decision-model-preview 限时免费"
+  source = "https://platform.qianwenai.com/docs/token-plan/personal/token-plan-personal-overview"
+  quota_note = "官方余量查询是 `bl usage token-plan`（CLI 控制台鉴权）或 OpenAPI GetSubscriptionStats（AccessKey 签名），都没有 sk- 可用的路径"
+
+  [[provider.quota_query]]
+  id = "console-data-gateway"
+  kind = "script"
+  method = "GET"
+  url = "https://cs-data.qianwenai.com/data/api.json"
+  auth = "cookie"
+  auth_env = "QWEN_CONSOLE_COOKIE"
+  dashboard = "https://platform-home.qianwenai.com/analytics/token-plan/individual"
+  unit = "percent-left"
+  note = """
+    官方唯一路径是 ACS3-HMAC-SHA256 签名的 OpenAPI（GetSubscriptionStats，
+    https://help.aliyun.com/zh/model-studio/get-subscription-stats），要 AccessKey 而不是模型 sk-；
+    官方 CLI `bl usage token-plan` 走控制台鉴权。所以本机用控制台 Cookie 读数据网关，
+    脚本自己取 sec_token。Cookie 过期时读数是"缺失"，不是 0。
+  """
+  script = "llm/qwen.py"
+  script_env = "QWEN_CONSOLE_COOKIE"
+
+[[provider]]
+id = "qwen-dashscope"
+name = "阿里百炼 DashScope 按量"
+kind = "vendor"
+key_env = "DASHSCOPE_API_KEY"
+homepage = "https://bailian.console.aliyun.com"
+catalog = "https://dashscope.aliyuncs.com/compatible-mode/v1/models"
+catalog_verified = "2026-10-22 返回 178 个，含自营与第三方（MiniMax/MiniMax-M3.1-Flash、xiaomi/mimo-v2.6-pro-ultraspeed、stepfun/step-5-preview、kimi/kimi-k3、glm-5.3、Qwen/Zwen-Image 等）"
+retrieved = "2026-10-22"
+
+  [[provider.endpoint]]
+  id = "openai"
+  api = "openai-completions"
+  base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  auth = "bearer"
+  [[provider.endpoint]]
+  id = "qwen-native"
+  api = "openai-responses"
+  base_url = "https://dashscope.aliyuncs.com/api/v2/apps/protocols/compatible"
+  auth = "bearer"
+  note = "百炼自己的 Responses 兼容面；多数第三方模型只有 compatible-mode 一条路。"
+
+  [[provider.model]]
+  id = "qwen3.8-max"
+  name = "Qwen 3.8 Max"
+  context = 1000000
+  modalities = ["text"]
+  [provider.model.price]
+  currency = "USD"
+  unit = "per_1m_tokens"
+  input = 2.00
+  output = 6.00
+  cache_read = 0.25
+  source = "https://commandcode.ai/docs/resources/pricing-limits"
+  retrieved = "2026-10-22"
+
+  [[provider.model]]
+  id = "cmaas-qwen3.8-flash"
+  name = "Qwen 3.8 Flash（百炼托管版）"
+  context = 1000000
+  modalities = ["text"]
+  [provider.model.price]
+  currency = "USD"
+  unit = "per_1m_tokens"
+  input = 0.16
+  output = 0.47
+  cache_read = 0.016
+  source = "https://commandcode.ai/docs/resources/pricing-limits"
+  retrieved = "2026-10-22"
+
+  [[provider.quota_query]]
+  id = "none-by-api-key"
+  available = false
+  dashboard = "https://modelstudio.console.alibabacloud.com/costing-balance/usage-statistics"
+  note = "用量统计在控制台（延迟约 1 小时、只留 30 天）；没有用 sk- 就能调的额度端点。"
+
+[[provider]]
+id = "tencent-tokenhub"
+name = "腾讯云 TokenHub"
+kind = "vendor"
+key_env = "TENCENT_API_KEY"
+key_prefix = "sk-tp-"
+key_file = "@@KEY:tencent-api.txt@@"
+homepage = "https://cloud.tencent.com/product/hub"
+catalog_verified = "本机 profile 在用 hy4-preview；tokenhub 的 /models 不对外（404）"
+retrieved = "2026-10-22"
+note = """
+本机没有这把 key 的明文文件（只有 DSH 凭据引用 TENCENT_API_KEY），所以下面那个
+placeholder 取不到值，补齐时把 key 写进去，或换成 key_env 就够用。
+"""
+
+  [[provider.endpoint]]
+  id = "openai"
+  api = "openai-completions"
+  base_url = "https://tokenhub.tencentmaas.com/plan/v3"
+  auth = "bearer"
+  [[provider.endpoint]]
+  id = "anthropic"
+  api = "anthropic-messages"
+  base_url = "https://tokenhub.tencentmaas.com/plan/anthropic"
+  auth = "bearer"
+  [[provider.endpoint]]
+  id = "coding-plan"
+  api = "openai-completions"
+  base_url = "https://api.lkeap.cloud.tencent.com/coding/v3"
+  auth = "bearer"
+  key_prefix = "sk-sp-"
+  note = "Coding Plan 另一套主机；旧的 api.hunyuan.cloud.tencent.com/v1 已于 2026-09-30 停服"
+
+  [[provider.model]]
+  id = "hy4-preview"
+  name = "Hy4 Preview（腾讯混元，770B 总 / 49B 激活，Apache 2.0）"
+  context = 1024000
+  max_input = 960000
+  max_output = 64000
+  modalities = ["text"]
+  reasoning_levels = ["none", "high"]     # 官方只有这两档
+  reasoning_default = "high"
+  reasoning_field = "thinking{type} + reasoning_effort"
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 6.00
+  output = 18.00
+  cache_read = 0.30
+  price_usd = { input = 0.834, output = 2.501, cache_read = 0.042 }
+  source = "https://cloud.tencent.com/document/product/1823/130055"
+  retrieved = "2026-10-22"
+  note = "平价，没有任何峰谷分段。"
+
+  [[provider.model]]
+  id = "hy3"
+  name = "Hy3"
+  context = 262144
+  max_input = 196608
+  max_output = 131072
+  modalities = ["text"]
+  reasoning_levels = ["none", "low", "high"]
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 1.00
+  output = 4.00
+  cache_read = 0.25
+  price_usd = { input = 0.14, output = 0.58, cache_read = 0.035 }
+  source = "https://cloud.tencent.com/document/product/1823/130055"
+  retrieved = "2026-10-22"
+
+  [[provider.quota_query]]
+  id = "describe-token-plan"
+  kind = "signed-api"
+  method = "POST"
+  url = "https://tokenhub.tencentcloudapi.com/"
+  action = "DescribeTokenPlan"
+  version = "2026-03-22"
+  auth = "TC3-HMAC-SHA256"
+  auth_note = "要 SecretId/SecretKey 签名，不是 sk-tp- 模型 key；本机没有这对密钥"
+  body = { TeamId = "team-…" }
+  jsonpath = { total_quota = "Response.PackageInfo.TotalQuota", total_used = "Response.PackageInfo.TotalUsed", expire_time = "Response.PackageInfo.ExpireTime", cycle_quota = "Response.PackageInfo.CycleQuota", remain_cycles = "Response.PackageInfo.RemainCycles", status = "Response.Status", stop_reason = "Response.StopReason" }
+  source = "https://cloud.tencent.cn/document/api/1823/132270"
+  # 另外两个 TC3 action 同样要签名密钥：
+  #   DescribeUsageRankList  -> TotalToken / InputTotalToken / OutputTotalToken / CacheTotalToken / RequestCount
+  #   DescribeModelQuota    -> TPMLimit / RPMLimit（这是限流不是余额）
+
+[[provider]]
+id = "ling-gateway"
+name = "凌云 Ling.AI（多模型网关）"
+kind = "gateway"
+key_env = "LING_AI_API_KEY"
+homepage = "https://ai.lingyuncx.com"
+catalog = "https://api.lingyuncx.com/v1/models"
+catalog_verified = "路由存在但本机 key 调 /v1/models 返回 401 invalid_api_key（2026-10-22）"
+retrieved = "2026-10-22"
+note = "密钥文件叫 ling，实测 api.inclusionai.com 403，所以按 Ling.AI 收录。同名的 Ant 百灵 / Ant Ling 是另外两家，见文件末尾 ambiguous。"
+
+  [[provider.endpoint]]
+  id = "openai"
+  api = "openai-completions"
+  base_url = "https://api.lingyuncx.com/v1"
+  auth = "bearer-or-x-api-key"
+  [[provider.endpoint]]
+  id = "anthropic"
+  api = "anthropic-messages"
+  base_url = "https://api.lingyuncx.com/anthropic"
+  auth = "bearer-or-x-api-key"
+  [[provider.endpoint]]
+  id = "gemini"
+  api = "gemini-native"
+  base_url = "https://api.lingyuncx.com/gemini/v1beta"
+  auth = "x-goog-api-key"
+
+  [[provider.model]]
+  id = "qwen3.8-max"
+  name = "Qwen 3.8 Max"
+  context = 0                # 官方模型详情页写"待补充"，没公布
+  price = { currency = "CNY", input = 12.00, output = 36.00 }
+  source = "https://ai.lingyuncx.com/develop/models.html"
+  retrieved = "2026-10-22"
+
+  [[provider.model]]
+  id = "deepseek-v4.1-flash"
+  name = "DeepSeek V4.1 Flash"
+  [provider.model.price]
+  currency = "CNY"
+  input = 2.00
+  output = 8.00
+  cache_read = 0.04
+  [[provider.model.price.band]]
+  id = "offpeak"
+  hours = [{ start = "09:00", end = "12:00" }, { start = "14:00", end = "18:00" }]
+  days = ["weekend", "holiday", "rest_day", "makeup_workday"]
+  input = 1.00
+  output = 4.00
+  cache_read = 0.02
+  source = "https://ai.lingyuncx.com/develop/models.html"
+  note = "网关自己保留了 DeepSeek 的分时：忙时 08:00-22:00 连续，或工作日 09-12 / 14-18。"
+
+  [[provider.quota_query]]
+  id = "none"
+  available = false
+  note = "官方只有控制台 Usage 页与 Wallet 页；/v1/dashboard/billing/usage 与 /subscription 实测 404。"
+  console = "https://ai.lingyuncx.com"
+
+[[provider]]
+id = "dots-studio"
+name = "Dots Studio（点点，小红书）"
+kind = "vendor"
+key_env = "DOTS_API_KEY"
+key_prefix = "ak_"
+homepage = "https://dots.ai"
+docs = "https://dots.ai/platform/docs"
+catalog = "https://note3-prev-api.askdiandian.com/v1/models"
+catalog_verified = "2026-10-22 返回 dots3-note-prev"
+retrieved = "2026-10-22"
+note = """
+密钥前缀 ak_ 和 LongCat 一样，本机误当成 LongCat 打过一次也返回了目录——
+两家都用 ak_ 前缀，不能靠前缀认。真正认它的方式是响应头：这一家必须用 api-key，
+不是 Authorization: Bearer，用错就是 401 governance.missing_api_key。
+"""
+
+  [[provider.endpoint]]
+  id = "openai"
+  api = "openai-completions"
+  base_url = "https://note3-prev-api.askdiandian.com/v1"
+  auth = "api-key-header"          # 请求头名就叫 api-key，这是最容易踩的坑
+  [[provider.endpoint]]
+  id = "anthropic"
+  api = "anthropic-messages"
+  base_url = "https://note3-prev-api.askdiandian.com/v1"
+  auth = "api-key-header"
+  note = "没有 /v1/responses"
+
+  [[provider.model]]
+  id = "dots3-note-prev"
+  name = "Dots 3 Note Preview"
+  context = 524288
+  modalities = ["text", "image", "video", "audio"]
+  output_modalities = ["text"]
+  reasoning_levels = ["on", "off"]      # chat_template_kwargs.enable_thinking，默认 true
+  rate_limits = { rpm = 60, tpm = 1500000 }
+  [provider.model.price]
+  currency = "USD"
+  unit = "per_1m_tokens"
+  input = 0.14
+  output = 0.28
+  cache_read = 0.00                      # 缓存单价没公布
+  source = "https://dots.ai/platform/docs"
+  retrieved = "2026-10-22"
+  note = "当前免费体验、暂不收费，收费前会提前通知。Apache 2.0 开源权重，2026-08-14 发布。"
+
+  [[provider.quota_query]]
+  id = "none"
+  available = false
+  console = "https://dots.ai/platform/apikeys"
+  note = "只有登录后的用量管理页，没有 API。"
+
+# ---------------------------------------------------------------------------
+# 不是 LLM 的那一路：网络代理
+# ---------------------------------------------------------------------------
+# falemon 那把 flm_ 开头的密钥**不是模型 API key**，是快柠檬的网络加速服务。
+# 它另有一个 AI 助手 API（给代理客户端调），下面记的是那个，不是模型网关。
+[[provider]]
+id = "falemon"
+name = "快柠檬 Falemon（网络代理，非模型 API）"
+kind = "proxy"
+key_env = "FALEMON_TOKEN"
+homepage = "https://falemon.com"
+retrieved = "2026-10-22"
+note = "本机上的 flm CLI 在 C:/resource/kualemon-cli（mihomo），并有一个 127.0.0.1:10793 的 HTTP 代理，供 opencode-go 的 grok-* 流量走。"
+
+  [[provider.endpoint]]
+  id = "assistant-api"
+  api = "custom"
+  base_url = "https://api1f.qsvtm.com/portal/aiapi/"
+  auth = "bearer-or-x-api-key-or-token-query"
+  extra_headers = ["X-Client-Agent: APP_AI_AGENT/{name} (1.0.0; zh-CN; Scale/1; Net/wifi)"]
+  note = "这三个头是必须的：Authorization / X-Api-Key / ?token= 任选其一，再加 X-Client-Agent。限速约 30 次/分钟。"
+
+  [[provider.quota_query]]
+  id = "me"
+  method = "GET"
+  url = "https://api1f.qsvtm.com/portal/aiapi/me"
+  auth = "bearer-or-x-api-key"
+  jsonpath = { vip_level = "vip_level", vip_expire_at = "vip_expire_at", vip_remain = "vip_remain_text", flow_used = "flow_used_text", flow_left = "flow_left_text", flow_left_bytes = "flow_left_bytes", flow_reset = "flow_reset_text", balance = "balance" }
+  source = "https://api1f.qsvtm.com/portal/aiapi/skill"
+
+# ---------------------------------------------------------------------------
+# 同名但不是本机那一家的服务，留个索引免得下次再查一遍
+# ---------------------------------------------------------------------------
+[ambiguous]
+  [ambiguous.ling]
+  file = "ling-api.txt"
+  resolved_as = "ling-gateway（Ling.AI，api.lingyuncx.com）"
+  alternatives = [
+    { name = "Ant 百灵 / Ling / Ring", base = "https://api.tbox.cn/api/llm/v1", models = "Ling-1T, Ring-1T, Ling-2.5-1T", price_cny = "Ling/Ring 2.5 ¥4 in / ¥8 out；2.0 ¥4 / ¥16", free_quota = "50 万计算单元/天" },
+    { name = "Ant Ling / InclusionAI", base = "https://api.ant-ling.com/v1", models = "Ling-3.1-flash, Ling-3.0-flash(-VL)", context = 262144, price_cny = "3.1-flash ¥0.50/¥1.50/¥0.10；3.0 ¥0.14/¥0.42/¥0.028", free_quota = "50 万 token/天，QPS 2" },
+  ]
+  note = "三家都以 Ling 命名；本机实测 api.inclusionai.com 403，故按 Ling.AI 收录，但没有被 Ling.AI 验通。"
+
+  [ambiguous.dots]
+  file = "dots-api.txt"
+  resolved_as = "dots-studio（Dots Studio，note3-prev-api.askdiandian.com）"
+  alternatives = [{ name = "LongCat 平台 key", base = "https://api.longcat.chat/openai/v1", note = "两家都用 ak_ 前缀；同一把 key 在 LongCat 也能列出目录，所以前缀不能作为判据。" }]
+  note = "两边都验通过：dots 端点 200 返回 dots3-note-prev，LongCat 端点 200 返回两个 LongCat 模型。要确认到底买了哪家的套餐，看控制台账单。"
+
+  [ambiguous.falemon]
+  file = "falemon-api.txt"
+  resolved_as = "falemon（网络代理 + 助手 API），不是 LLM 网关"
+
+[[provider]]
+id = "opencode-go"
+name = "OpenCode Zen（Go 订阅）"
+kind = "gateway"
+key_env = "OPENCODE_API_KEY"
+homepage = "https://opencode.ai"
+retrieved = "2026-10-22"
+note = "本机这把 key 已过期：直接打 /zen/v1/models 返回 api_key_expired。DSH 侧走本地 127.0.0.1:10793 代理转发。"
+
+  [[provider.endpoint]]
+  id = "openai"
+  api = "openai-completions"
+  base_url = "https://opencode.ai/inference/go/openai/v1"
+  auth = "bearer"
+  extra_headers = ["x-opencode-session: <稳定的会话 id>"]
+  note = """
+    官方现在的地址。Go 套餐还要求一个能自我标识的 User-Agent 和稳定的 x-opencode-session 头。
+    旧的 /zen/go/v1 仍然活着（/models 返回 36 个模型），本机 profile 里的老地址还能用。
+    目录里的模型 id 是**裸的**（longcat-2.0、step-5-preview、deepseek-v4.1-flash），
+    没有 opencode-go/ 前缀——前缀只在 OpenCode 界面里显示。
+  """
+
+  # Go 的目录 id 是裸的；这里只记本机真用得上的几个，完整 36 个走 catalog 端点。
+  [[provider.model]]
+  id = "deepseek-v4.1-flash"
+  name = "DeepSeek V4.1 Flash"
+  endpoints = ["/chat/completions", "/responses"]
+  context = 0        # Go 套餐没公布上下文窗口
+  [provider.model.price]
+  currency = "USD"
+  input = 0.15
+  output = 0.60
+  cache_read = 0.003
+  [[provider.model.price.band]]
+  id = "peak"
+  hours = [{ start = "01:00", end = "04:00" }, { start = "06:00", end = "10:00" }]   # UTC
+  days = ["workday"]
+  input = 0.30
+  output = 1.20
+  cache_read = 0.006
+  source = "https://opencode.ai/v2/docs/console/models/"
+
+  [[provider.model]]
+  id = "minimax-m3.1-flash-free"
+  name = "MiniMax M3.1 Flash（限时免费）"
+  endpoints = ["/chat/completions"]
+  [provider.model.price]
+  currency = "USD"
+  input = 0.00
+  output = 0.00
+  cache_read = 0.00
+  source = "https://opencode.ai/v2/docs/console/models/"
+
+  [[provider.model]]
+  id = "longcat-2.0"
+  name = "LongCat 2.0"
+  endpoints = ["/chat/completions"]
+  [provider.model.price]
+  currency = "USD"
+  input = 0.30
+  output = 1.20
+  cache_read = 0.006
+  source = "https://opencode.ai/v2/docs/console/models/"
+
+  [[provider.quota_query]]
+  id = "usage"
+  method = "GET"
+  url = "https://opencode.ai/zen/go/v1/usage"
+  auth = "bearer"
+  unit = "percent-left"
+  windows = ["rolling", "weekly", "monthly"]
+  source = "C:/resource/dsh-balance/opencode-go.mjs"
+  script = "llm/opencode-go.py"
+  script_env = "OPENCODE_API_KEY"
+
+[[provider]]
+id = "local-qwen3"
+name = "本机 Ternary Bonsai 2 27B（Qwen3.8-27B 三值 1.5bit）"
+kind = "local"
+key_env = "BONSAI_API_KEY"
+base_url = "http://bonsai:8899/v1"
+served_by = "serve-bonsai.ps1"
+note = "A/B 两台机器上 `bonsai` 解析到不同地址：A 指 127.0.0.1，B 指 A 的局域网地址。配置两边逐字节相同，换机只改 hosts。"
+
+  [[provider.endpoint]]
+  id = "openai"
+  api = "openai-completions"
+  base_url = "http://bonsai:8899/v1"
+  auth = "bearer"
+
+  [[provider.model]]
+  id = "bonsai-2-27b"
+  name = "Qwen3.8-27B ternary 1.5bit (PrismML fork)"
+  context = 49152
+  max_output = 24576
+  modalities = ["text"]
+  reasoning_levels = ["off", "high"]
+  compat = { supports_store = false, supports_strict_mode = false, supports_developer_role = false, max_tokens_field = "max_tokens", thinking_format = "qwen-chat-template", requires_reasoning_content_on_assistant_messages = true, supports_reasoning_effort = false }
+  note = "id 不参与路由：llama.cpp 只加载一个模型，不校验请求里的 model。effort 映射成 null/非空，因为 enable_thinking 取 !!effort。"
+
+  [[provider.quota_query]]
+  id = "none"
+  available = false
+  note = "本机自建，无额度概念。"
+
+# ---------------------------------------------------------------------------
+# 与 DSH 的关系
+# ---------------------------------------------------------------------------
+# 这个文件目前是**只读事实源**，DSH 不读它。运行中的配置仍在
+# ~/.dsh/profiles/<profile>/cordis.patch.yml 的 llm-pi-ai / agent-default-model 行里。
+#
+# 要接线的话有三个坑，先记在这里：
+#   1. patch 是整行替换 config，不是深合并 —— 从这里生成 providers 必须给全量，
+#      否则 profile 里剩下的 provider 会被整份顶掉。
+#   2. TOML 没有 eval 通道；home 层只能用 `!!js`，得在表达式里手写一个 TOML 解析
+#      （或改成 JSON / YAML）。
+#   3. Models 页面写的是 profile 层那一行，它和 home 层会互相覆盖。
+#      在这两件事解决前，只有人手改这个文件。
+[dsh]
+consumed = false
+credential_file = "C:/Users/17124/.dsh/.credentials.yaml"
+patch_layer_profile = "C:/Users/17124/.dsh/profiles/web/cordis.patch.yml"
+patch_layer_home = "C:/Users/17124/.dsh/cordis.patch.yml"
+row_id = "llm-pi-ai"
+default_model_row = "agent-default-model"
+# 每个 provider 的 quota_query.script 是**相对本文件所在目录**的路径：脚本都在 ~/.agents/llm/
+# 下，解释器是 python（`python ~/.agents/llm/<name>.py`）。llm/probe.py 离线跑全部解析器。
+quota_plugin = "dsh-llm-quota-retry"
+
+# 换密钥时这里和 .dsh/.credentials.yaml 的 refs 要同步改，否则两边指向两把不同的 key。
+[maintenance]
+rotate_keys_with = ["C:/Users/17124/.dsh/.credentials.yaml"]
+last_verified = "2026-10-22"
+verify = [
+  "curl 每个 provider.catalog 端点，确认返回的模型 id 仍在本文件里",
+  "curl 每个 quota_query.url，确认返回体字段名未变",
+  "对比网关在售目录的命令行费用表与本文件 price 是否漂移",
+]

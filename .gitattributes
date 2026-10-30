@@ -1,0 +1,3 @@
+# 跨平台一致：脚本与配置一律 LF，免得 Windows 上的 CRLF 进仓库后
+# 让另一台机器的解释器读到多余的 \r。
+* text=auto eol=lf
