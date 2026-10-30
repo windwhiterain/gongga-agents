@@ -24,7 +24,7 @@ gongga-agents/
 | 根 | 谁的 | 说明 |
 | --- | --- | --- |
 | `~/.agents/gongga-agents/` | 社区 | 本仓库的本地 clone，gongga 维护 |
-| `~/.agents/` | 用户私有 | 手写，只有这台机器知道的东西 |
+| `~/.agents/` | 用户私有 | 可以整个不存在；只有要覆盖某个字段时才写 |
 
 - **目录不存在就 clone**：启动时异步 clone 一次；之后启动时和每小时各异步 `fetch` + 快进一次。
   断网只 warn，用本地已有副本继续，不影响 gongga 启动。
@@ -35,9 +35,16 @@ gongga-agents/
 
 ## 密钥政策
 
-**这里不写密钥。** 每个 provider 只用 `key_env` 指明环境变量名，凭据放环境变量；
-写进文件的那种私有密钥属于 `~/.agents/providers.toml`，不进这个仓库。同 id 的 provider
-在私有文件里只补 `key`（或本地 `base_url`）就够，不必把整块抄一遍。
+**这里不写密钥。** 每个 provider 只用 `key_env` 指明环境变量名。解析顺序是
+**环境变量 > 私有文件里的 `key`**，所以一台机器可以没有私有 `providers.toml`：
+
+```bash
+setx DEEPSEEK_API_KEY "sk-..."   # Windows：写进用户环境变量
+export DEEPSEEK_API_KEY=sk-...   # macOS / Linux
+```
+
+要覆盖别的东西（内网 `base_url`、自建 provider）才写 `~/.agents/providers.toml`，
+同 id 的 provider 只补差异字段即可；那个文件不进任何仓库。
 
 ## 怎么贡献
 
