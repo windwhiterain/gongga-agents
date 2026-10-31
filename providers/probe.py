@@ -38,10 +38,8 @@ def load(name):
 
 
 deepseek = load("deepseek")
-opencode = load("opencode-go")
 kimi = load("kimi-coding")
 minimax = load("minimax")
-goat = load("command-code-goat")
 qwen = load("qwen")
 
 checks = []
@@ -141,37 +139,6 @@ DEEP_WALLET = {
 UNAVAILABLE = deepseek.parse({"is_available": False, "balance_infos": [{"currency": "CNY", "total_balance": "0.00"}]})
 
 
-check("opencode-go: percent used becomes percent left, and rate limiting wins", lambda: (
-    assert_equal(OPENCODE_READING["remaining"], 12.5),
-    assert_equal(OPENCODE_READING["resetsAt"], "2026-10-05T00:00:00Z",
-                 "the reset of the window the reading comes from"),
-    assert_equal(OPENCODE_READING.get("error"), None),
-    assert_match(OPENCODE_READING["detail"], r"rolling 12% used"),
-    assert_deep(OPENCODE_READING["windows"], [
-        {"name": "rolling", "remaining": 88, "capacity": 100},
-        {"name": "weekly", "remaining": 12.5, "capacity": 100},
-        {"name": "monthly", "remaining": 60, "capacity": 100},
-    ], "every window is reported as percent left out of the full 100"),
-    assert_equal(LIMITED["remaining"], 0, "a stale low percentage cannot outrank the provider's refusal"),
-    assert_match(LIMITED.get("error"), r"rolling window is rate limited"),
-    assert_deep(LIMITED["windows"], [{"name": "rolling", "remaining": 0, "capacity": 100}],
-                "a rate-limited window reads zero"),
-    assert_raises(lambda: opencode.parse({})),
-    assert_raises(lambda: opencode.parse({"usage": {"rolling": {"status": "ok"}}})),
-))
-
-
-OPENCODE_READING = opencode.parse({
-    "usage": {
-        "rolling": {"status": "ok", "percent": 12, "resetsAt": "2026-10-01T00:00:00Z"},
-        "weekly": {"status": "ok", "percent": 87.5, "resetsAt": "2026-10-05T00:00:00Z"},
-        "monthly": {"status": "ok", "percent": 40, "resetsAt": "2026-11-01T00:00:00Z"},
-    },
-})
-LIMITED = opencode.parse({"usage": {"rolling": {"status": "rate-limited", "percent": 3,
-                                                "resetsAt": "2026-10-01T00:00:00Z"}}})
-
-
 check("kimi-coding: percentages outrank counts, and limit/used is subtracted", lambda: (
     assert_equal(COUNTS["remaining"], 30, "the least remaining of the two rows"),
     assert_match(COUNTS["detail"], r"least remaining 30"),
@@ -235,8 +202,7 @@ SHARES = kimi.parse({"usages": {"limit_5h": {"used_ratio": 0}, "limit_7d": {"use
 
 def refused_scripts():
     """Every script answers a refusal with zero, and only a refusal."""
-    for name, reader, status in [("deepseek", deepseek, 401), ("opencode-go", opencode, 403),
-                                 ("minimax-cn", minimax, 401), ("command-code-goat", goat, 403),
+    for name, reader, status in [("deepseek", deepseek, 401), ("minimax-cn", minimax, 401),
                                  ("qwen", qwen, 401), ("kimi-coding", kimi, 401)]:
         result = reader.read_balance(options(), fetch=lambda url, **kw: response(status, False, "denied"))
         assert_equal(result["reading"]["remaining"], 0, f"{name} reports the refusal as an exhausted allowance")
@@ -308,53 +274,6 @@ def datetime_ms(stamp):
 
 
 check("minimax: the language resources decide, per window, with a reset estimate", minimax_windows)
-
-
-def goat_windows():
-    payload = {
-        "credits": {"belowThreshold": False, "creditThreshold": 0, "monthlyCredits": 37.941019347,
-                    "purchasedCredits": 0, "freeCredits": 0},
-        "windowLimits": {
-            "limited": True, "exceeded": None,
-            "fiveHour": {"used": 0, "cap": 14, "exceeded": False, "resetAt": 0},
-            "weekly": {"used": 32.058980653, "cap": 35, "exceeded": False, "resetAt": 1_791_025_644_936},
-        },
-        "sandboxAccess": False, "sandboxMinutes": None,
-    }
-    reading = goat.parse(payload)
-    assert_equal(round(reading["remaining"] * 100) / 100, 2.94, "the weekly window is the tightest")
-    assert_equal(reading["resetsAt"], contract.iso_from_ms(1_791_025_644_936))
-    assert_equal(reading.get("error"), None)
-    assert_match(reading["detail"], r"monthly 37\.94 left, five-hour 14 left, weekly 2\.94 left")
-    assert_deep(reading["windows"], [
-        {"name": "monthly", "remaining": 37.941019347},
-        {"name": "five-hour", "remaining": 14, "capacity": 14},
-        {"name": "weekly", "remaining": 35 - 32.058980653, "capacity": 35},
-    ], "the endpoint states a cap for the five-hour and weekly windows only, so the monthly credit is unscored")
-
-    exhausted = goat.parse({**payload, "windowLimits": {
-        **payload["windowLimits"], "fiveHour": {"used": 14, "cap": 14, "exceeded": True,
-                                                "resetAt": 1_791_000_000_000}}})
-    assert_equal(exhausted["remaining"], 0)
-    assert_match(exhausted.get("error"), r"five-hour window is exhausted")
-    assert_equal(exhausted["resetsAt"], contract.iso_from_ms(1_791_000_000_000), "the exhausted window names the reset")
-    assert_deep(exhausted["windows"][1], {"name": "five-hour", "remaining": 0, "capacity": 14},
-                "the window still reports its own truth")
-
-    flagged = goat.parse({"credits": {"monthlyCredits": 5}, "windowLimits": {"exceeded": {"weekly": True}}})
-    assert_equal(flagged["remaining"], 0)
-    assert_match(flagged.get("error"), r"exceeded window limit")
-
-    low = goat.parse({"credits": {"monthlyCredits": 3, "belowThreshold": True}, "windowLimits": {}})
-    assert_equal(low["remaining"], 3)
-    assert_match(low.get("error"), r"below its credit threshold")
-    assert_deep(low["windows"], [{"name": "monthly", "remaining": 3}], "a response with no window limits reports the credit alone")
-
-    assert_raises(lambda: goat.parse({}))
-    assert_raises(lambda: goat.parse({"credits": {"monthlyCredits": "none"}, "windowLimits": {}}))
-
-
-check("command-code-goat: the tightest allowance decides, and an exceeded window reads zero", goat_windows)
 
 
 def qwen_parse():
@@ -453,10 +372,8 @@ check("qwen: a refused session, an unknown envelope, and a missing token each re
 
 PROVIDERS = [
     ("deepseek-official", deepseek, "DEEPSEEK_API_KEY", "https://api.deepseek.com"),
-    ("dsh-opencode-go", opencode, "OPENCODE_API_KEY", "https://opencode.ai/zen/go/v1"),
     ("kimi-coding", kimi, "KIMI_CODING_API_KEY", "https://api.kimi.com/coding/v1"),
     ("minimax-cn", minimax, "MINIMAX_CN_API_KEY", "https://www.minimax.cn"),
-    ("command-code-goat", goat, "COMMAND_CODE_GOAT_API_KEY", "https://api.commandcode.ai/alpha/billing"),
     # `key` is the console session cookie here, not an API key.
     ("qwen", qwen, "QWEN_CONSOLE_COOKIE", "https://cs-data.qianwenai.com/data/api.json"),
 ]
