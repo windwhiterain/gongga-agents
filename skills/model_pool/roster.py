@@ -7,7 +7,6 @@ required. `GONGGA_PROVIDERS_CATALOG` names one catalog instead of the pair.
 """
 
 import os
-import re
 import tomllib
 
 AGENTS = os.path.join(os.path.expanduser("~"), ".agents")
@@ -130,29 +129,8 @@ class Roster:
             return None
         return self.credential(provider)
 
-    def tier_of(self, provider_id, model_id, tiers):
-        """One model's tier: the explicit override, then the first rule that matches.
-
-        A rule word matches a *token* of the id, not a substring: `mini` must not
-        be read into the brand `MiniMax`. A word that carries a separator of its
-        own is a phrase, and is matched against the whole id instead.
-        """
-        explicit = (tiers.get("model") or {}).get(f"{provider_id}/{model_id}")
-        if explicit is None:
-            explicit = (tiers.get("model") or {}).get(model_id)
-        if explicit:
-            return explicit
-        tokens = set(tokenize(model_id))
-        lowered = model_id.lower()
-        for rule in tiers.get("rule") or []:
-            for word in rule.get("any") or []:
-                word = word.lower()
-                if matches(word, tokens, lowered):
-                    return rule["tier"]
-        return tiers.get("default") or "sota"
-
-    def routes(self, tiers, tier=None, provider_id=None):
-        """Every live model, as a `(provider, model, tier)` row.
+    def models(self, provider_id=None):
+        """Every live model as a `(provider, model)` row.
 
         An id another entry retired is not live, and a provider that serves no
         models (a proxy, an index) contributes nothing.
@@ -162,24 +140,8 @@ class Roster:
                 continue
             for model in provider.get("model") or []:
                 model_id = model.get("id")
-                if not model_id or model_id in self.retired:
-                    continue
-                model_tier = self.tier_of(provider["id"], model_id, tiers)
-                if tier and model_tier != tier:
-                    continue
-                yield provider, model, model_tier
-
-
-def tokenize(model_id):
-    """The words an id is spelled with: `MiniMax-M3.1-Flash` is minimax, m3, 1, flash."""
-    return [token for token in re.split(r"[^0-9a-z]+", model_id.lower()) if token]
-
-
-def matches(word, tokens, lowered):
-    """Whether one rule word names this id: a token, or a phrase inside it."""
-    if re.search(r"[^0-9a-z]", word):
-        return word in lowered
-    return word in tokens
+                if model_id and model_id not in self.retired:
+                    yield provider, model
 
 
 def load():

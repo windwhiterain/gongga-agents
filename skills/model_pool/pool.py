@@ -23,6 +23,7 @@ import tomllib
 import entitlement
 import quota
 import roster
+import tiers
 
 AGENTS = os.path.join(os.path.expanduser("~"), ".agents")
 CONFIG_PATH = os.path.join(AGENTS, "model_pool.toml")
@@ -55,16 +56,6 @@ DEFAULTS = {
         {"id": "pro", "weight": 0.35},
         {"id": "sota", "weight": 0.05},
     ],
-    "tiers": {
-        "default": "pro",
-        # First match wins, so the cheap variants are read out of the strong
-        # names they are spelled inside (`pro-ultraspeed` is a flash route).
-        "rule": [
-            {"tier": "flash", "any": ["flash", "mini", "lite", "highspeed", "ultraspeed", "turbo", "bonsai"]},
-            {"tier": "sota", "any": ["preview", "prev", "max", "sota", "ultra", "opus"]},
-            {"tier": "pro", "any": ["pro"]},
-        ],
-    },
 }
 
 
@@ -132,8 +123,8 @@ class Route:
         self.share = None
         self.weight = 0.0
         self.mark = None
+        self.evidence = None
         self.verdict = None
-        self.verdict_detail = None
 
     def line(self):
         return self.key
@@ -299,15 +290,25 @@ def explain_empty(catalog, config, provider_id, tier_id):
     return f"{scope} carries no model"
 
 
+def tier_settings(config):
+    """The tier rules: this machine's overrides laid over the module's defaults."""
+    return merge(tiers.DEFAULTS, config.get("tiers") or {})
+
+
 def collect(catalog, config, provider_id, tier_id):
     order, _ = weights_of(config, None)
-    tiers = config.get("tiers") or {}
+    settings = tier_settings(config)
     routes = []
     excluded = set(config["pool"].get("exclude") or [])
-    for provider, model, tier in catalog.routes(tiers, tier=tier_id, provider_id=provider_id):
+    for provider, model in catalog.models(provider_id):
+        tier, evidence = tiers.classify(provider, model, settings)
         if tier not in order or provider["id"] in excluded:
             continue
-        routes.append(Route(provider, model, tier))
+        if tier_id and tier != tier_id:
+            continue
+        route = Route(provider, model, tier)
+        route.evidence = evidence
+        routes.append(route)
     return routes
 
 
@@ -447,13 +448,18 @@ def probe_stale(state, routes, config):
 
 
 def cmd_tiers(args, config, catalog):
+    """The three tiers, their weights, and every model under the rule that placed it."""
     order, weights = weights_of(config, args.weights)
     routes = collect(catalog, config, args.provider, args.tier)
     for tier in order:
-        models = [route.key for route in routes if route.tier == tier]
-        print(f"{tier:<5} weight {weights[tier]:g}  {len(models)} model(s)")
-        for model in models:
-            print(f"      {model}")
+        rows = [route for route in routes if route.tier == tier]
+        print(f"{tier:<5} weight {weights[tier]:g}  {len(rows)} model(s)")
+        for route in rows:
+            total, active = tiers.params_of(route.model)
+            size = "-" if total is None else f"{total:g}B"
+            if total is not None and active is not None and active != total:
+                size += f"/{active:g}B"
+            print(f"      {route.key:<44} {size:>10}  {route.evidence}")
 
 
 def cmd_mark(args, config, catalog):

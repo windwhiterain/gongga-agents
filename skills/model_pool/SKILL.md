@@ -152,35 +152,75 @@ weight = 0.35
 id = "sota"
 weight = 0.05
 
-# Which id belongs in which tier: first rule that matches a token of the id.
+# the tier rules themselves: see "What the three names mean" below.
 [tiers]
+cny_per_usd = 6.9
 default = "pro"
-[[tiers.rule]]
-tier = "flash"
-any = ["flash", "mini", "lite", "highspeed", "ultraspeed", "turbo", "bonsai"]
-[[tiers.rule]]
-tier = "sota"
-any = ["preview", "prev", "max", "sota", "ultra", "opus"]
-[[tiers.rule]]
-tier = "pro"
-any = ["pro"]
+sota = "sota"
+band = [
+  { tier = "flash", max_output_usd = 1.5 },
+  { tier = "pro", max_output_usd = 5.0 },
+]
+params_band = [
+  { tier = "flash", max_total_billion = 100 },
+  { tier = "pro", max_active_billion = 50 },
+]
+rule = [
+  { tier = "flash", any = ["flash", "mini", "lite", "turbo"] },
+  { tier = "sota", any = ["max", "sota", "ultra", "opus"] },
+  { tier = "pro", any = ["pro"] },
+]
 
-# A model the rules place wrong, by `<provider>/<id>` or bare id.
+# A model you place against those rules yourself, by `<provider>/<id>` or bare id.
 [tiers.model]
-"minimax-cn/MiniMax-M3" = "sota"
+"stepfun/step-5-preview" = "sota"   # the price band says pro; you want it for hard one-offs
 ```
 
-A rule word matches a **token**, never a substring, so `mini` is not read into
-the brand `MiniMax`; a word that carries a hyphen or a dot is a phrase and is
-matched against the whole id.
+## What the three names mean
+
+`flash`, `pro` and `sota` are this tool's words, not any vendor's, so they are
+defined from the two facts the roster publishes: **price** and **size**.
+
+**A tier is a price class.** The roster's output price per million tokens decides
+it, because a pool exists to spread load across price levels:
+
+| Tier | Output price | What a draw there buys |
+|---|---|---|
+| `flash` | ≤ $1.50 | the cheap end: DeepSeek Flash, MiniMax M3.1 Flash, MiMo V2.6 Pro, Qwen3.8 Flash, dots3-note |
+| `pro` | ≤ $5.00 | the middle: DeepSeek V4 Pro, Step 5 Preview, Hy4 Preview |
+| `sota` | above | the expensive frontier: Kimi K3.1 Pro (and Highspeed), Kimi K3, Qwen3.8 Max, MiMo Pro UltraSpeed |
+
+Where the roster states no price, the parameter count decides (a local 27B build
+is not a frontier route), and where it states neither, the name does. `model_pool
+tiers` prints every model with its size and the rule that placed it, so a wrong
+placement is visible instead of guessed.
+
+**The price is not a capability ranking, and this roster proves it.** On the
+Artificial Analysis intelligence index (October 2026) DeepSeek V4.1 Flash scores
+**45** and its own V4 Pro **36**; MiMo V2.6 Pro scores **46** at $0.87 per million
+output tokens, while Kimi K3.1 Pro scores **55** at ten times that. So:
+
+- a `flash` draw is cheap and **may hand you the smartest model on the machine** —
+  that is a real property of this roster, not a bug in the tiers;
+- `--tier sota` buys the expensive frontier, which is what you want for a hard
+  one-off, not a synonym for "best answer per dollar".
+
+Sizes come from `[provider.model.params]` in the roster (total and active
+parameters in billions, each with its own source). Read them as context: a
+1.6T/49B route is not cheaper to think with than a 552B/16B one — active
+parameters, price and the vendor's post-training are three different axes.
+
+A name word matches a **token**, never a substring, so `mini` is not read into the
+brand `MiniMax`; a word that carries a hyphen or a dot is a phrase and is matched
+against the whole id.
 
 ## What it reads
 
 - **The roster** — `~/.agents/providers.toml` and
   `~/.agents/gongga-agents/providers.toml`, merged the way the server merges them
   (`GONGGA_PROVIDERS_CATALOG` names one file instead). Which models exist, which
-  ids are retired, which provider serves each, and the credential a quota script
-  takes.
+  ids are retired, which provider serves each, the price, the parameter count,
+  and the credential a quota script takes.
 - **The allowance** — each provider's `quota_query.script`, run once per
   `refresh`: the same scripts the roster publishes, read through the same
   contract. Readings are cached in `~/.model_pool/state.json` with their marks,

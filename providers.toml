@@ -150,6 +150,14 @@ retrieved = "2026-10-22"
   concurrency_limit = 2500
   retired_ids = ["deepseek-chat", "deepseek-reasoner", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"]
   retired_note = "chat/reasoner 于 2026-07-24 下线；v4-flash 与 vision-exp 仍接受但已退役，转发到 V4.1-Flash"
+  [provider.model.params]
+  unit = "billion"
+  total = 552
+  active = 16
+  note = "8B for input and 16B for output tokens"
+  source = "https://benchlm.ai/providers/deepseek"
+  retrieved = "2026-10-31"
+
   [provider.model.price]
   currency = "CNY"
   unit = "per_1m_tokens"
@@ -189,6 +197,13 @@ retrieved = "2026-10-22"
   reasoning_levels = ["none", "low", "high", "max"]
   reasoning_default = "high"
   concurrency_limit = 500
+  [provider.model.params]
+  unit = "billion"
+  total = 1600
+  active = 49
+  source = "https://huggingface.co/nvidia/DeepSeek-V4-Pro-0813-NVFP4"
+  retrieved = "2026-10-31"
+
   [provider.model.price]
   currency = "CNY"
   unit = "per_1m_tokens"
@@ -265,6 +280,14 @@ retrieved = "2026-10-22"
   reasoning_note = "这个模型**关不掉思考**：thinking{type:disabled} 或 effort:none 会直接 400（requires adaptive thinking）"
   retired_ids = ["MiniMax-M3.1-Flash-Preview", "MiniMax-M2.5", "MiniMax-M2.7"]
   retired_note = "Preview 已下线由本模型承接；M2.5/M2.7 于 2026-10-19 停新用户、2026-11-18 下线"
+  [provider.model.params]
+  unit = "billion"
+  total = 428
+  active = 23
+  note = "W4A4 routed experts"
+  source = "https://m.zhidx.com/p/604017.html"
+  retrieved = "2026-10-31"
+
   [provider.model.price]
   currency = "CNY"
   unit = "per_1m_tokens"
@@ -284,6 +307,13 @@ retrieved = "2026-10-22"
   modalities = ["text", "image", "video"]
   reasoning_default = "off"
   reasoning_note = "思考默认关闭，要用 thinking{type:adaptive} 打开；本模型没有 effort 等级"
+  [provider.model.params]
+  unit = "billion"
+  total = 428
+  active = 23
+  source = "https://www.orcarouter.ai/ja/blog/minimax-m3-1-flash-vs-minimax-m3"
+  retrieved = "2026-10-31"
+
   [provider.model.price]
   currency = "CNY"
   unit = "per_1m_tokens"
@@ -374,6 +404,14 @@ retrieved = "2026-10-22"
   reasoning_levels = ["low", "high", "max"]
   reasoning_default = "high"
   reasoning_note = "K3.1 恒开思考，没有 thinking 关：catalog 端点只报 thinking{type:only}，effort 三档"
+  [provider.model.params]
+  unit = "billion"
+  total = 2800
+  active = 104
+  note = "K3 weights, post-trained"
+  source = "https://wccftech.com/kimi-k3-1-pro-is-now-the-strongest-model-out-of-china-cyber-data-stripped-from-its-training-but-that-barely-holds-its-potential-back/"
+  retrieved = "2026-10-31"
+
   [provider.model.price]
   currency = "CNY"
   unit = "per_1m_tokens"
@@ -394,6 +432,14 @@ retrieved = "2026-10-22"
   reasoning_levels = ["low", "high", "max"]
   reasoning_default = "high"
   note = "catalog 端点的 display_name 写着 2x Usage Cost：订阅额度按两倍计，模型能力与 k3.1-pro 相同"
+  [provider.model.params]
+  unit = "billion"
+  total = 2800
+  active = 104
+  note = "same weights as k3.1-pro, served faster and billed at 2x"
+  source = "https://www.kimi.ai/zh-hans/resources/kimi-k3-1-pro-pricing"
+  retrieved = "2026-10-31"
+
   [provider.model.price]
   currency = "CNY"
   unit = "per_1m_tokens"
@@ -412,6 +458,14 @@ retrieved = "2026-10-22"
   max_output = 131072
   modalities = ["text", "image"]
   note = "K3 恒开思考，没有 thinking 关；视频输入只在按量站有，k3-256k 不支持"
+  [provider.model.params]
+  unit = "billion"
+  total = 2800
+  active = 104
+  note = "16 of 896 routed experts"
+  source = "https://github.com/moonshotai/Kimi-K3"
+  retrieved = "2026-10-31"
+
   [provider.model.price]
   currency = "CNY"
   unit = "per_1m_tokens"
@@ -430,6 +484,14 @@ retrieved = "2026-10-22"
   context = 262144
   modalities = ["text", "image"]
   note = "只在 coding plan 订阅端点上存在，按量站没有这个 id"
+  [provider.model.params]
+  unit = "billion"
+  total = 2800
+  active = 104
+  note = "same weights as k3"
+  source = "https://github.com/moonshotai/Kimi-K3"
+  retrieved = "2026-10-31"
+
   [provider.model.price]
   currency = "CNY"
   unit = "per_1m_tokens"
@@ -509,6 +571,13 @@ retrieved = "2026-10-22"
   reasoning_levels = ["low", "medium", "high"]
   reasoning_field = { openai = "reasoning_effort", anthropic = "output_config.effort", responses = "reasoning.effort" }
   reasoning_note = "CoT 在 message.reasoning；要 reasoning_content 就加 reasoning_format:\"deepseek-style\"。Step 在这些路由上不用 thinking 字段。"
+  [provider.model.params]
+  unit = "billion"
+  total = 600
+  active = 27
+  source = "https://www.subconscious.dev/providers/stepfun"
+  retrieved = "2026-10-31"
+
   [provider.model.price]
   currency = "CNY"
   unit = "per_1m_tokens"
@@ -526,6 +595,13 @@ retrieved = "2026-10-22"
   context = 256000
   modalities = ["text"]
   reasoning_levels = ["low", "medium", "high"]
+  [provider.model.params]
+  unit = "billion"
+  total = 198
+  active = 11
+  source = "https://www.subconscious.dev/providers/stepfun"
+  retrieved = "2026-10-31"
+
   [provider.model.price]
   currency = "CNY"
   unit = "per_1m_tokens"
@@ -542,6 +618,13 @@ retrieved = "2026-10-22"
   context = 256000
   modalities = ["text"]
   reasoning_levels = ["low", "high"]      # -2603 版本只有这两档
+  [provider.model.params]
+  unit = "billion"
+  total = 196
+  active = 11
+  source = "https://platform.stepfun.com/docs/zh/guides/models/step-3.5-flash"
+  retrieved = "2026-10-31"
+
   [provider.model.price]
   currency = "CNY"
   unit = "per_1m_tokens"
@@ -608,6 +691,14 @@ retrieved = "2026-10-22"
   modalities = ["text", "image", "audio", "video"]
   reasoning_levels = ["on", "off"]        # 只有 thinking{type} 开关，官方没有 effort 等级
   reasoning_default = "on"
+  [provider.model.params]
+  unit = "billion"
+  total = 1020
+  active = 42
+  note = "384 routed experts, top-8"
+  source = "https://thenextweb.com/news/xiaomi-mimo-v2-6-open-weight-model-anthropic-distillation"
+  retrieved = "2026-10-31"
+
   [provider.model.price]
   currency = "CNY"
   unit = "per_1m_tokens"
@@ -632,6 +723,14 @@ retrieved = "2026-10-22"
   max_output = 128000
   modalities = ["text", "image", "audio", "video"]
   reasoning_levels = ["on", "off"]
+  [provider.model.params]
+  unit = "billion"
+  total = 309
+  active = 15
+  note = "256 routed experts, top-8"
+  source = "https://github.com/JustVugg/colibri/pull/1813"
+  retrieved = "2026-10-31"
+
   [provider.model.price]
   currency = "CNY"
   unit = "per_1m_tokens"
@@ -648,6 +747,14 @@ retrieved = "2026-10-22"
   context = 1000000
   max_output = 128000
   modalities = ["text", "image", "audio", "video"]
+  [provider.model.params]
+  unit = "billion"
+  total = 1020
+  active = 42
+  note = "same weights as mimo-v2.6-pro, served faster"
+  source = "https://thenextweb.com/news/xiaomi-mimo-v2-6-open-weight-model-anthropic-distillation"
+  retrieved = "2026-10-31"
+
   [provider.model.price]
   currency = "CNY"
   unit = "per_1m_tokens"
@@ -707,6 +814,13 @@ retrieved = "2026-10-22"
   modalities = ["text"]
   reasoning_levels = ["on", "off"]
   reasoning_note = "Chat/Messages 上是 thinking{type} + thinking_budget（上限 262144），没有低中高档；只有 Responses 面才有 reasoning.effort（none|minimal|low|medium|high|xhigh）"
+  [provider.model.params]
+  unit = "billion"
+  total = 1600
+  active = 48
+  source = "https://tech.ifeng.com/c/8vaPZal0DaH"
+  retrieved = "2026-10-31"
+
   [provider.model.price]
   currency = "CNY"
   unit = "per_1m_tokens"
@@ -726,6 +840,14 @@ retrieved = "2026-10-22"
   modalities = ["text", "image"]
   reasoning_levels = ["on", "off"]
   doc_conflict = "官方自相矛盾：Quick Start 与 FAQ 写两个模型 max output 都是 128K，Model Parameters 页写 2.5-Preview 是 256K。检索模型接口返回的是 262144，所以按 256K 记。"
+  [provider.model.params]
+  unit = "billion"
+  total = 1600
+  active = 48
+  note = "2.0's scale, now with native image input"
+  source = "https://news.cocoloop.cn/en/2026/09/longcat-25-preview-1m-context/"
+  retrieved = "2026-10-31"
+
   [provider.model.price]
   currency = "CNY"
   unit = "per_1m_tokens"
@@ -778,6 +900,14 @@ note = "这个主机是通义千问 MaaS 的**产品**端点，不是内置的 a
   reasoning_levels = ["low", "medium", "xhigh"]
   reasoning_default = "xhigh"
   reasoning_note = "reasoning_effort 与 thinking_budget **互斥**，同时给会报错；映射 low→4096 / medium→16384 / xhigh→262144"
+  [provider.model.params]
+  unit = "billion"
+  total = 2400
+  active = 95
+  note = "Qwen3.8-2.4T-A95B, 512 experts"
+  source = "https://developer.aliyun.com/article/1777043"
+  retrieved = "2026-10-31"
+
   [provider.model.price]
   currency = "CNY"
   unit = "per_1m_tokens"
@@ -799,6 +929,14 @@ note = "这个主机是通义千问 MaaS 的**产品**端点，不是内置的 a
   max_output = 128000
   modalities = ["text", "image"]
   reasoning_levels = ["low", "medium", "xhigh"]
+  [provider.model.params]
+  unit = "billion"
+  total = 125
+  active = 6
+  note = "Flash-Next build, plus a 51B n-gram table"
+  source = "https://developer.aliyun.com/article/1777451"
+  retrieved = "2026-10-31"
+
   [provider.model.price]
   currency = "CNY"
   unit = "per_1m_tokens"
@@ -819,6 +957,14 @@ note = "这个主机是通义千问 MaaS 的**产品**端点，不是内置的 a
   modalities = ["text", "image"]
   reasoning_levels = ["low", "high", "max"]
   reasoning_default = "high"
+  [provider.model.params]
+  unit = "billion"
+  total = 552
+  active = 16
+  note = "resold DeepSeek V4.1 Flash: 8B input, 16B output"
+  source = "https://benchlm.ai/providers/deepseek"
+  retrieved = "2026-10-31"
+
   [provider.model.price]
   currency = "CNY"
   unit = "per_1m_tokens"
@@ -890,6 +1036,14 @@ retrieved = "2026-10-22"
   name = "Qwen 3.8 Max"
   context = 1000000
   modalities = ["text"]
+  [provider.model.params]
+  unit = "billion"
+  total = 2400
+  active = 95
+  note = "Qwen3.8-2.4T-A95B, 512 experts"
+  source = "https://developer.aliyun.com/article/1777043"
+  retrieved = "2026-10-31"
+
   [provider.model.price]
   currency = "USD"
   unit = "per_1m_tokens"
@@ -904,6 +1058,14 @@ retrieved = "2026-10-22"
   name = "Qwen 3.8 Flash（百炼托管版）"
   context = 1000000
   modalities = ["text"]
+  [provider.model.params]
+  unit = "billion"
+  total = 125
+  active = 6
+  note = "Flash-Next build, plus a 51B n-gram table"
+  source = "https://developer.aliyun.com/article/1777451"
+  retrieved = "2026-10-31"
+
   [provider.model.price]
   currency = "USD"
   unit = "per_1m_tokens"
@@ -962,6 +1124,14 @@ placeholder 取不到值，补齐时把 key 写进去，或换成 key_env 就够
   reasoning_levels = ["none", "high"]     # 官方只有这两档
   reasoning_default = "high"
   reasoning_field = "thinking{type} + reasoning_effort"
+  [provider.model.params]
+  unit = "billion"
+  total = 770
+  active = 49
+  note = "256 routed experts, top-8; a 10B/0.7B MTP layer on top"
+  source = "https://huggingface.co/tencent/Hy4-preview"
+  retrieved = "2026-10-31"
+
   [provider.model.price]
   currency = "CNY"
   unit = "per_1m_tokens"
@@ -981,6 +1151,13 @@ placeholder 取不到值，补齐时把 key 写进去，或换成 key_env 就够
   max_output = 131072
   modalities = ["text"]
   reasoning_levels = ["none", "low", "high"]
+  [provider.model.params]
+  unit = "billion"
+  total = 295
+  active = 21
+  source = "https://tech.ifeng.com/c/8vaPZal0DaH"
+  retrieved = "2026-10-31"
+
   [provider.model.price]
   currency = "CNY"
   unit = "per_1m_tokens"
@@ -1045,6 +1222,14 @@ note = """
   output_modalities = ["text"]
   reasoning_levels = ["on", "off"]      # chat_template_kwargs.enable_thinking，默认 true
   rate_limits = { rpm = 60, tpm = 1500000 }
+  [provider.model.params]
+  unit = "billion"
+  total = 280
+  active = 16
+  note = "MoE ViT plus an 800M audio encoder"
+  source = "https://aiweekly.co/alerts/xiaohongshu-opens-dots3-note-a-280b-moe-multimodal-model"
+  retrieved = "2026-10-31"
+
   [provider.model.price]
   currency = "USD"
   unit = "per_1m_tokens"
@@ -1130,6 +1315,14 @@ note = "A/B 两台机器上 `bonsai` 解析到不同地址：A 指 127.0.0.1，B
   reasoning_levels = ["off", "high"]
   compat = { supports_store = false, supports_strict_mode = false, supports_developer_role = false, max_tokens_field = "max_tokens", thinking_format = "qwen-chat-template", requires_reasoning_content_on_assistant_messages = true, supports_reasoning_effort = false }
   note = "id 不参与路由：llama.cpp 只加载一个模型，不校验请求里的 model。effort 映射成 null/非空，因为 enable_thinking 取 !!effort。"
+
+  [provider.model.params]
+  unit = "billion"
+  total = 27
+  active = 27
+  note = "dense ternary build, so every parameter is active"
+  source = "local build: the model's own name states Qwen3.8-27B"
+  retrieved = "2026-10-31"
 
   [[provider.quota_query]]
   id = "none"
