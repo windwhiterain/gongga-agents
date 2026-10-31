@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Entry point. Standard library only; any Python 3.11+ has tomllib.
+set -uo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# No __pycache__ beside the sources: this directory is a repository.
+export PYTHONDONTWRITEBYTECODE=1
+for c in python3 python py; do
+  if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import tomllib' >/dev/null 2>&1; then
+    exec "$c" "$here/pool.py" "$@"
+  fi
+done
+echo "no Python 3.11+ found (tomllib is needed to read the roster)" >&2
+exit 1
