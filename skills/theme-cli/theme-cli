@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Entry point. No third-party dependencies; Windows PowerShell 5.1 or newer works.
+set -uo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+for c in pwsh powershell; do
+  if command -v "$c" >/dev/null 2>&1; then
+    exec "$c" -NoProfile -ExecutionPolicy Bypass -File "$here/theme-cli.ps1" "$@"
+  fi
+done
+echo "no PowerShell found" >&2
+exit 1
