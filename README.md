@@ -19,32 +19,40 @@ gongga-agents/
 
 ## gongga 怎么找
 
-两个根，同一个形状：
-
-| 根 | 谁的 | 说明 |
-| --- | --- | --- |
-| `~/.agents/gongga-agents/` | 社区 | 本仓库的本地 clone，gongga 维护 |
-| `~/.agents/` | 用户私有 | 可以整个不存在；只有要覆盖某个字段时才写 |
+一个 roster 文件：`~/.agents/gongga-agents/providers.toml`。服务端只读它。
 
 - **目录不存在就 clone**：启动时异步 clone 一次；之后启动时和每小时各异步 `fetch` + 快进一次。
   断网只 warn，用本地已有副本继续，不影响 gongga 启动。
-- **roster 合并**：两份 `providers.toml` 按 provider `id` 合并，社区打底、私有覆盖同名字段；
-  `endpoint` / `model` 也按 `id` 合并，社区的顺序（= 默认模型的偏好顺序）保留，私有的新增排后。
-- **脚本查找**：同名脚本私有优先（`~/.agents/providers/` 先于 `~/.agents/gongga-agents/providers/`）。
-- 显式指定单文件（`GONGGA_PROVIDERS_CATALOG=/path/to/providers.toml`）时不做合并，只用那一个。
+- **不再有第二层**：以前还有一份 `~/.agents/providers.toml` 作为私有覆盖、每次读按字段合并。
+  那条路删掉了 —— 两份文件无法回答"现在这个价是哪个价"，而且本机的东西没有自己的历史。
+- **本机的东西走分支**：这台机器自己的条目（密钥、内网 `base_url`、自建 provider）在
+  clone 里的 `local` 分支上，`main` 是上游。上游更新是 `rebase`，不是合并。
+  见 [`LOCAL.md`](LOCAL.md)。
+- **脚本查找**：`quota_query.script` 是相对该文件的路径，所以只在自己的 clone 里找。
+- 显式指定单文件（`GONGGA_PROVIDERS_CATALOG=/path/to/providers.toml`）时只用那一个。
 
 ## 密钥政策
 
-**这里不写密钥。** 每个 provider 只用 `key_env` 指明环境变量名。解析顺序是
-**环境变量 > 私有文件里的 `key`**，所以一台机器可以没有私有 `providers.toml`：
+**`main` 上不写密钥。** 每个 provider 用 `key_env` 指明环境变量名，服务端按
+**环境变量 > `key` 字段**的顺序解析：
 
 ```bash
 setx DEEPSEEK_API_KEY "sk-..."   # Windows：写进用户环境变量
 export DEEPSEEK_API_KEY=sk-...   # macOS / Linux
 ```
 
-要覆盖别的东西（内网 `base_url`、自建 provider）才写 `~/.agents/providers.toml`，
-同 id 的 provider 只补差异字段即可；那个文件不进任何仓库。
+一台机器想把密钥放在磁盘上，就写在 `local` 分支的 roster 里（`key_env` 旁边），
+并且**不推那个分支**：
+
+```bash
+git -C ~/.agents/gongga-agents checkout local
+# 编辑 providers.toml，key = "..." 放在 key_env 后面
+git -C ~/.agents/gongga-agents commit -am "local: rotate the deepseek key"
+```
+
+为什么不只靠环境变量：`setx` 写的是注册表，而 Windows 上进程的环境块只在创建时从父进程
+拷贝一次。从 2026-10-26 就开着的 VS Code / pwsh 里启动 gongga，继承到的是写键之前的旧环境，
+于是"环境变量明明有，服务端却报 no key"。文件是服务端每次解析前都会重新看的东西。
 
 ## 怎么贡献
 
