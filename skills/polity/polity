@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PYTHONDONTWRITEBYTECODE=1
+for interpreter in python3 python; do
+  if command -v "$interpreter" >/dev/null 2>&1 && "$interpreter" -c '' >/dev/null 2>&1; then
+    exec "$interpreter" "$here/polity.py" "$@"
+  fi
+done
+echo 'polity: no working Python interpreter found' >&2
+exit 1
