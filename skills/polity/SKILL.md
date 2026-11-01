@@ -8,8 +8,8 @@ description: Separate understanding, planning, implementation, approval, and har
 Every role is an ordinary Gongga session, not a new server tool. The session talking
 to the user is **justice**: it already holds the user's context, so do not create a
 second justice that receives a paraphrase. Other roles read only the records they need
-instead of copies of the whole conversation. The SPEC is the authority; a role's opinion
-is not an amendment.
+instead of copies of the whole conversation. The SPEC (`@file:SPEC.md`, in the repository
+the work is in) is the authority; a role's opinion is not an amendment.
 
 ## Role contracts
 
@@ -21,7 +21,7 @@ is not an amendment.
 | HR | flash | Create and recover role sessions; monitor health; repair quota and harness failures | Make technical or SPEC judgements |
 
 Implementation subagents use flash, or pro for hard work. Draw concrete models through
-`model_pool`; never hardcode a provider/model. Justice may raise its own tier from pro
+`@skill:model_pool`; never hardcode a provider/model. Justice may raise its own tier from pro
 to sota for a difficult task.
 
 The `actor` in a record names the role accepting responsibility. The helper validates
