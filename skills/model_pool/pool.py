@@ -353,11 +353,24 @@ def collect(catalog, config, preference, provider_id, tier_id):
 
     A model whose multiplier is zero is not a candidate, because the preference
     file is a whitelist: "not encouraged" and "not drawn" have to be the same set,
-    or the draw would quietly use what the file does not name. An explicit
-    `--tier` is the one exception -- asking for the `test` tier has to reach the
-    models in it, and none of those is encouraged.
+    or the draw would quietly use what the file does not name.
+
+    An explicit `--tier` names a tier, it does not lift the whitelist. It used
+    to: asking for a tier promoted every model in it to a multiplier of 1, so
+    `--tier pro` could draw a model the file says nothing about -- the whitelist
+    was only consulted when no tier was named, which made it a rule about the
+    default draw rather than a rule about what this machine runs. Now a named
+    tier only narrows the candidates.
+
+    The one exception is a tier the preference file itself gives no weight,
+    which is `test`: its models are deliberately unencouraged, and asking for
+    that tier has to reach them. That is a property of the tier, not of the
+    argument.
     """
-    order, _ = weights_of(preference, None)
+    order, weights = weights_of(preference, None)
+    # A tier the file gives no weight is asked for by name, and its models are
+    # not in the whitelist because the file never intended to draw them.
+    reach_unlisted = bool(tier_id) and weights.get(tier_id, 0.0) <= 0
     routes = []
     excluded = set(config["pool"].get("exclude") or [])
     for provider, model in catalog.models(provider_id):
@@ -370,10 +383,10 @@ def collect(catalog, config, preference, provider_id, tier_id):
         route.evidence = evidence
         route.multiplier = multiplier_of(preference, route.key, model["id"])
         if route.multiplier <= 0:
-            if not tier_id:
+            if not reach_unlisted:
                 continue
-            # An explicit `--tier` is the caller asking for that whole tier, so
-            # every model in it competes; the whitelist governs the default draw.
+            # The tier the file weighs at nothing: asking for it by name is the
+            # only way to reach the models in it.
             route.multiplier = 1.0
             route.evidence += ", enabled by --tier"
 
@@ -551,7 +564,7 @@ def cmd_tiers(args, config, preference, catalog):
             )
 
 
-def cmd_mark(args, config, catalog):
+def cmd_mark(args, config, preference, catalog):
     state = quota.load_state()
     minutes = float(args.minutes if args.minutes is not None else config["pool"]["cooldown"] / 60)
     key = args.target
