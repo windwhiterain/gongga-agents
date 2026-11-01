@@ -27,7 +27,9 @@ Two decisions, in this order.
 
 1. **Only enabled models are candidates.** The multiplier table in
    `preference.toml` is a whitelist: a model it does not name has a multiplier of
-   zero and is not drawn. An explicit `--tier` is the one exception.
+   zero and is not drawn. Naming a tier narrows the draw to that tier; it does
+   not lift the whitelist. The one exception is a tier the file itself gives no
+   weight — `test`, whose models are deliberately unencouraged.
 2. **The tier** — `flash` / `pro` / `sota` / `test` — by the weights in
    `[tier]` (default `0.60 / 0.35 / 0.05 / 0.00`). A tier with nothing runnable
    drops out, and its weight is spread over the tiers that are left: the draw is
@@ -219,8 +221,9 @@ test  = 0.00     # 默认 0：只在你点名 --tier test 时才抽得到
 `0.5` 是"没得选才用"。抽取时：先按 `[tier]` 的权重抽档，再在档内按
 **剩余额度 × 倍率** 抽模型。
 
-唯一例外：显式 `--tier test`（或任何 `--tier`）会绕过"倍率为 0 就不抽"这条，因为你已经
-点名要那一档了。`tiers` 会把被关掉的模型标成 `off`，"为什么它从来不出现"一眼可答。
+点 `--tier` 只是把候选收窄到那一档，不会绕过白名单。唯一的例外是文件本身权重为 0 的
+那一档——`test`，它的模型本来就不被鼓励。`tiers` 会把被关掉的模型标成 `off`，
+"为什么它从来不出现"一眼可答。
 
 键可以写 `<provider>/<model>`，也可以只写 model id（对所有提供它的 provider 生效）。
 改这个文件不用重启任何东西：下一次 `pick` 就读到；`--preference` 或
