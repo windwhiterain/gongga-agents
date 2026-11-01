@@ -243,8 +243,12 @@ class PolityTest(unittest.TestCase):
                         home=str(self.home),
                     )
                 )
+        # The helper's argv starts with whatever runs the shell script: the script
+        # itself on POSIX, bash plus the script on Windows. Find the subcommand
+        # rather than counting from a fixed offset.
+        argv = run.call_args.args[0]
         self.assertEqual(
-            run.call_args.args[0][1:4], ["mark", "provider/old", "--reason"]
+            argv[argv.index("mark"):][:3], ["mark", "provider/old", "--reason"]
         )
         self.assertEqual(
             self.calls[before],

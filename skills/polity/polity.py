@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 
@@ -232,12 +233,29 @@ def pool():
     )
     if not path.is_file():
         fail(f"model_pool is not available at {path}; set POLITY_MODEL_POOL")
-    return str(path)
+    # Windows cannot execute a `#!/usr/bin/env bash` script, so on that platform
+    # the caller is bash itself. `shutil.which` first -- the shell this already
+    # runs in has one -- then the two places Git for Windows installs it.
+    if os.name == "nt":
+        shell = shutil.which("bash") or next(
+            (
+                found
+                for found in (
+                    r"C:\Program Files\Git\bin\bash.exe",
+                    r"C:\Program Files (x86)\Git\bin\bash.exe",
+                )
+                if Path(found).is_file()
+            ),
+            None,
+        )
+        if shell:
+            return [shell, str(path)]
+    return [str(path)]
 
 
 def draw_model(tier):
     done = subprocess.run(
-        [pool(), "pick", "--tier", tier],
+        [*pool(), "pick", "--tier", tier],
         capture_output=True,
         text=True,
         check=False,
@@ -495,7 +513,7 @@ def cmd_remodel(args):
     session = initial["roles"][args.role]["session"]
     if args.old_model:
         done = subprocess.run(
-            [pool(), "mark", args.old_model, "--reason", args.reason],
+            [*pool(), "mark", args.old_model, "--reason", args.reason],
             capture_output=True,
             text=True,
             check=False,
