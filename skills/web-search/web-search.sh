@@ -9,20 +9,25 @@
 # Needs no model that supports server-side search, so it works on any session.
 set -uo pipefail
 
-ROSTER="${DEEPSEEK_ROSTER:-$HOME/.agents/providers.toml}"
+AGENTS="${GONGGA_AGENTS_HOME:-$HOME/.agents}"
+KEYS="${DEEPSEEK_KEYS:-$AGENTS/keys.toml}"
 BASE="${DEEPSEEK_TOOLS_URL:-https://api.deepseek.com/v1/tools}"
 
 die() { printf '%s\n' "$*" >&2; exit 1; }
 
-# The key: the environment wins, then the first literal key in the roster. The
-# roster is the machine's own record, so a missing key there is worth naming.
+# The key: the keystore first, then the environment -- the same order the server
+# uses. A variable is copied into a process once, at creation, so one left over
+# from before a rotation would shadow the file; the file is what an edit reaches.
+# The roster carries no key at all: it is a git checkout.
 api_key() {
-  if [ -n "${DEEPSEEK_API_KEY:-}" ]; then printf '%s' "$DEEPSEEK_API_KEY"; return 0; fi
-  [ -r "$ROSTER" ] || { die "no DEEPSEEK_API_KEY and no roster at $ROSTER"; return 1; }
   local k
-  k=$(sed -n 's/^[[:space:]]*key[[:space:]]*=[[:space:]]*"\(sk-[^"]*\)".*/\1/p' "$ROSTER" | head -n1)
-  [ -n "$k" ] || { die "no DEEPSEEK_API_KEY and no key = \"sk-...\" in $ROSTER"; return 1; }
-  printf '%s' "$k"
+  if [ -r "$KEYS" ]; then
+    k=$(sed -n 's/^[[:space:]]*deepseek-official[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$KEYS" | head -n1)
+    if [ -n "$k" ]; then printf '%s' "$k"; return 0; fi
+  fi
+  if [ -n "${DEEPSEEK_API_KEY:-}" ]; then printf '%s' "$DEEPSEEK_API_KEY"; return 0; fi
+  die "no deepseek-official in $KEYS, and no DEEPSEEK_API_KEY"
+  return 1
 }
 
 # Schannel's revocation check hangs behind some corporate proxies, so Windows curl

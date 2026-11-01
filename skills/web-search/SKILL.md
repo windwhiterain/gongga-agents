@@ -47,14 +47,15 @@ $S fetch <url>                 # 一页正文转 markdown
 
 | 输出 | 原因 | 怎么办 |
 |---|---|---|
-| `no DEEPSEEK_API_KEY and no key = "sk-..." in ...` | 找不到 key | 设 `DEEPSEEK_API_KEY`，或确认 roster 里有 key |
+| `no deepseek-official in ...keys.toml, and no DEEPSEEK_API_KEY` | 找不到 key | 在 `~/.agents/keys.toml` 的 `[keys]` 里加一行 `deepseek-official`，或临时设 `DEEPSEEK_API_KEY` |
 | `HTTP 401` | key 无效 | 换 key |
 | `HTTP 400 ... 'url' must be a valid HTTP or HTTPS URL` | URL 不合法 | 带 `http(s)://` |
 | `HTTP 429` | 限流 | 等一会儿再试 |
 | `no results` | 查询太窄或无索引 | 换关键词，别加引号堆砌 |
 | `the endpoint returned no content for this URL` | 页面没有可提取正文 | 换来源 |
 
-环境变量：`DEEPSEEK_API_KEY`（优先生效）、`DEEPSEEK_ROSTER`（默认 `~/.agents/providers.toml`）、`DEEPSEEK_TOOLS_URL`（默认 `https://api.deepseek.com/v1/tools`）。
+key：`~/.agents/keys.toml` 里的 `deepseek-official` 优先，`DEEPSEEK_API_KEY` 次之（服务端也是这个顺序）。
+环境变量：`DEEPSEEK_API_KEY`、`DEEPSEEK_KEYS`（默认 `~/.agents/keys.toml`）、`DEEPSEEK_TOOLS_URL`（默认 `https://api.deepseek.com/v1/tools`）。
 
 ## 为什么不用 provider 内置搜索
 
