@@ -1,6 +1,6 @@
 ---
 name: whiting-dev
-description: The user's standing development rules for work in their repositories — how to ask before deciding, how to use a worktree, when to commit or squash, what comments and tests may contain, which file writes are forbidden, and the code-taste and line-ending constraints. Read this before any coding, refactoring, testing, committing or design task in this user's code, and before answering how a piece of work should be done.
+description: The user's standing development rules for work in their repositories — how to read, test and stop, how to ask before deciding, how to use a worktree, when to commit or squash, what comments and tests may contain, which file writes are forbidden, and the code-taste and line-ending constraints. Read this before any coding, refactoring, testing, committing or design task in this user's code, and before answering how a piece of work should be done.
 ---
 
 # Whiting dev rules
@@ -16,6 +16,23 @@ any more: read them when the task is development work in this machine's reposito
 - Superior's instruction is not golden, there can be mistake or inconsistency, you can stop
   and point out.
 - Change any Invariant/Safety is forbidden without permission.
+
+## Working rhythm
+
+- Read with intent, in batches and cascades: independent read-only calls go out together,
+  and a call that returns a little more than you need beats three that return exactly it.
+  A region already read is not read again -- read it wider next time.
+- Group related reads in one command under labelled echoes (`echo == a; sed -n ...`), and
+  cascade a dependent step with `&&` so a failed prerequisite stops the chain.
+- Start from the suite, not from the module: run it once, keep the failing names, and read
+  the code those names point at. The suite is the oracle; re-reading tests instead of
+  running them is the expensive way to learn what they already say.
+- Draft early. A first attempt that fails ten tests teaches more than twenty more reads.
+- Say what you are about to do in one sentence, then do it. When a command fails, read the
+  error before retrying. When it is green and committed, say what changed and stop.
+- Evaluate each check once: one command that proves the change, not four that restate it.
+- Leave nothing behind -- no scratch files in the tree, no probe tests, no background
+  processes.
 
 ## Worktree
 
