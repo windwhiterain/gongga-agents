@@ -1,12 +1,3 @@
-# LLM / provider 目录（gongga-agents）
-#
-# 只有 provider：端点、模型、分档、上下文、模态、思考等级、价格、额度查询。
-#
-# 本文件**不含任何密钥**：每个 provider 用 `key_env` 指明环境变量名，密钥在环境变量或
-# `~/.agents/keys.toml` 里（后者不进任何仓库）。
-#
-# 本机自建的东西（内网 base_url、自建 provider）在 `local` 分支上，见 LOCAL.md。
-#
 # 字段里的 source 记录**实际查证来源**，retrieved 是查证日期；标 unverified 的表示本机
 # 探测和官方文档都没拿到，值来自网关在售目录，不要当合同价用。
 
@@ -632,7 +623,7 @@ retrieved = "2026-10-22"
   [[provider.model]]
   id = "mimo-v2.6-pro"
   name = "MiMo V2.6 Pro"
-  tier = "flash"
+  tier = "pro"
   context = 1000000
   max_output = 128000
   modalities = ["text", "image", "audio", "video"]
@@ -692,7 +683,7 @@ retrieved = "2026-10-22"
   [[provider.model]]
   id = "mimo-v2.6-pro-ultraspeed"
   name = "MiMo V2.6 Pro UltraSpeed"
-  tier = "sota"
+  tier = "pro"
   context = 1000000
   max_output = 128000
   modalities = ["text", "image", "audio", "video"]
@@ -758,7 +749,7 @@ retrieved = "2026-10-22"
   [[provider.model]]
   id = "LongCat-2.0"
   name = "LongCat 2.0"
-  tier = "flash"
+  tier = "pro"
   context = 1048576
   max_output = 131072
   modalities = ["text"]
@@ -785,7 +776,7 @@ retrieved = "2026-10-22"
   [[provider.model]]
   id = "LongCat-2.5-Preview"
   name = "LongCat 2.5 Preview"
-  tier = "flash"
+  tier = "pro"
   context = 1048576
   max_output = 262144
   modalities = ["text", "image"]
@@ -1174,7 +1165,7 @@ note = """
   [[provider.model]]
   id = "dots3-note-prev"
   name = "Dots 3 Note Preview"
-  tier = "flash"
+  tier = "test"
   context = 524288
   modalities = ["text", "image", "video", "audio"]
   output_modalities = ["text"]
@@ -1204,32 +1195,3 @@ note = """
   console = "https://dots.ai/platform/apikeys"
   note = "只有登录后的用量管理页，没有 API。"
 
-# ---------------------------------------------------------------------------
-# 不是 LLM 的那一路：网络代理
-# ---------------------------------------------------------------------------
-# falemon 那把 flm_ 开头的密钥**不是模型 API key**，是快柠檬的网络加速服务。
-# 它另有一个 AI 助手 API（给代理客户端调），下面记的是那个，不是模型网关。
-[[provider]]
-id = "falemon"
-name = "快柠檬 Falemon（网络代理，非模型 API）"
-kind = "proxy"
-key_env = "FALEMON_TOKEN"
-homepage = "https://falemon.com"
-retrieved = "2026-10-22"
-note = "本机上的 flm CLI 在 C:/resource/kualemon-cli（mihomo），另有一个 127.0.0.1:10793 的 HTTP 代理。"
-
-  [[provider.endpoint]]
-  id = "assistant-api"
-  api = "custom"
-  base_url = "https://api1f.qsvtm.com/portal/aiapi/"
-  auth = "bearer-or-x-api-key-or-token-query"
-  extra_headers = ["X-Client-Agent: APP_AI_AGENT/{name} (1.0.0; zh-CN; Scale/1; Net/wifi)"]
-  note = "这三个头是必须的：Authorization / X-Api-Key / ?token= 任选其一，再加 X-Client-Agent。限速约 30 次/分钟。"
-
-  [[provider.quota_query]]
-  id = "me"
-  method = "GET"
-  url = "https://api1f.qsvtm.com/portal/aiapi/me"
-  auth = "bearer-or-x-api-key"
-  jsonpath = { vip_level = "vip_level", vip_expire_at = "vip_expire_at", vip_remain = "vip_remain_text", flow_used = "flow_used_text", flow_left = "flow_left_text", flow_left_bytes = "flow_left_bytes", flow_reset = "flow_reset_text", balance = "balance" }
-  source = "https://api1f.qsvtm.com/portal/aiapi/skill"
