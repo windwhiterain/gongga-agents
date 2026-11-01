@@ -2,8 +2,45 @@
 # 探测和官方文档都没拿到，值来自网关在售目录，不要当合同价用。
 
 schema = 1
-updated = "2026-10-31"
+updated = "2026-11-01"
 timezone = "Asia/Shanghai"
+
+# ---------------------------------------------------------------------------
+# 分时计费：词汇表与算法
+# ---------------------------------------------------------------------------
+# 具体价格写在每个模型的 `[provider.model.price]` 和它的 `[[...price.band]]` 里
+# （`band` 就是这个时段的价，固定的直接写死）。这里只定义那些价格表引用的**日子**，
+# 以及可选的实时计算脚本。
+#
+# ## 一句话对照（全部北京时间）
+#
+#   DeepSeek 官方   高峰 09:00-12:00 + 14:00-18:00，周一至周五，**排除法定节假日**；
+#                   调休上班的周末按空闲价。四家规则里只有它带节假日例外。
+#   阿里百炼         忙时 08:00-22:00，**每天连续、含节假日**；闲时 22:00-次日 08:00。
+#   腾讯 TokenHub   DeepSeek 系按 09:00-12:00 + 14:00-18:00 周一至周五；hy4/hy3 平价无分段。
+#   千问 Token Plan 夜间 22:00-08:00 是**扣量系数**（Qwen 系 0.4×、DeepSeek 系 0.5×），不是标价打折。
+#   MiMo Token Plan 夜间 00:00-08:00 扣量系数 0.8×。
+#   MiniMax / Kimi  没有任何峰谷机制。
+#
+# ## 五个词的意思（`price.band.days` 只允许用这几个）
+#
+#   workday          周一至周五，且不是法定节假日、也不是放假调休
+#   weekend          周六或周日，且不是调休上班日
+#   holiday          法定节假日（国务院《放假办法》列的那几天，**不含连休补休**）
+#   rest_day         放假调休 / 连休，但不是法定节假日（例如春节假期的其余几天）
+#   makeup_workday   调休上班日（某个周六周日要上班；DeepSeek 把它算空闲价）
+#
+# "法定节假日"和"连休"必须分开：2026-02-15（春节假期第一天）不是法定节假日，
+# 2026-01-02（元旦补休）也不是。把两者混在一起，高峰价就会在错误的日子生效。
+#
+# 这些日子逐年变化，写死在 roster 里必然过期，所以**没有**把日历表放在这里。
+# 需要知道"现在是不是高峰、现在什么价"时，用下面的脚本：
+#
+#     python providers/price.py --provider deepseek-official --model deepseek-flash
+#
+# 它把 chinese-days 的年度数据缓存在 `~/.agents/cache/`（30 天），法定节假日的日期写在
+# `providers/statutory.toml` 里（国务院每年发一次通知，日期固定），两者合起来算出现在落在
+# 哪个 band。不联网也能用：`--offline` 只按周几判断，结果的 `approximate` 会说明这一点。
 
 [[provider]]
 id = "deepseek-official"
@@ -49,23 +86,27 @@ retrieved = "2026-10-22"
   output = 8.00
   cache_read = 0.04
   price_usd = { input = 0.30, output = 1.20, cache_read = 0.006 }
+  # Peak first: it is the narrow exception, and a band list is read in order.
+  # Its prices are the base ones above, so it states none of its own.
+  [[provider.model.price.band]]
+  id = "peak"
+  hours = [{ start = "09:00", end = "12:00" }, { start = "14:00", end = "18:00" }]
+  days = ["workday"]
+  note = "官方原文：北京时间周一至周五（不含中国法定节假日）9:00-12:00、14:00-18:00 为高峰时段；其余全部时段（含工作日夜间、周末、法定节假日）按空闲价"
+  source = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
+  retrieved = "2026-10-22"
+  # The catch-all: no `days` and no `hours` means "whatever the bands above did not
+  # take". Declaring only the weekend here would leave a weekday night at the base
+  # price, which is the peak price -- the opposite of what the provider charges.
     [[provider.model.price.band]]
     id = "offpeak"
-    days = ["weekend", "holiday", "rest_day", "makeup_workday"]
-    note = "周末、法定节假日、连休补休、以及调休上班的周末，全天按此价"
+    note = "除高峰时段以外的一切时间：工作日 18:00-次日 09:00、12:00-14:00，以及周末与法定节假日全天"
     input = 1.00
     output = 4.00
     cache_read = 0.02
     price_usd = { input = 0.15, output = 0.60, cache_read = 0.003 }
     source = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
     retrieved = "2026-10-22"
-  [[provider.model.price.band]]
-  id = "peak"
-  hours = [{ start = "09:00", end = "12:00" }, { start = "14:00", end = "18:00" }]
-  days = ["workday"]
-  note = "官方原文：北京时间周一至周五（不含中国法定节假日）9:00-12:00、14:00-18:00 为高峰时段"
-  source = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
-  retrieved = "2026-10-22"
 
   [[provider.model]]
   id = "deepseek-v4-pro"
@@ -96,19 +137,22 @@ retrieved = "2026-10-22"
   output = 27.00
   cache_read = 0.30
   price_usd = { input = 1.32, output = 3.96, cache_read = 0.044 }
-  [[provider.model.price.band]]
-  id = "offpeak"
-  days = ["weekend", "holiday", "rest_day", "makeup_workday"]
-  input = 4.50
-  output = 13.50
-  cache_read = 0.15
-  price_usd = { input = 0.66, output = 1.98, cache_read = 0.022 }
-  source = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
-  retrieved = "2026-10-22"
+  # Peak first and the catch-all second: a band list is read in order, and the base
+  # price above is the peak rate, so `peak` states none of its own.
   [[provider.model.price.band]]
   id = "peak"
   hours = [{ start = "09:00", end = "12:00" }, { start = "14:00", end = "18:00" }]
   days = ["workday"]
+  note = "北京时间周一至周五（不含中国法定节假日）9:00-12:00、14:00-18:00；其余全部时段按空闲价"
+  source = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
+  retrieved = "2026-10-22"
+  [[provider.model.price.band]]
+  id = "offpeak"
+  note = "除高峰时段以外的一切时间：工作日 18:00-次日 09:00、12:00-14:00，以及周末与法定节假日全天"
+  input = 4.50
+  output = 13.50
+  cache_read = 0.15
+  price_usd = { input = 0.66, output = 1.98, cache_read = 0.022 }
   source = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
   retrieved = "2026-10-22"
 

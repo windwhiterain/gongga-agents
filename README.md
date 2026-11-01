@@ -10,7 +10,7 @@ gongga 启动时把它 clone 到 `~/.agents/gongga-agents/`，以后按层读。
 ```
 gongga-agents/
   providers.toml   # provider 目录：端点、模型、上下文、模态、思考等级、价格、额度查询
-  providers/       # 额度查询脚本，被 providers.toml 的 quota_query.script 引用
+  providers/       # 额度查询脚本（quota_query.script 引用）与分时价格计算（price.py）
 ```
 
 `quota_query.script` 里的路径**相对 `providers.toml` 自己所在的目录** —— 社区条目的
@@ -64,4 +64,10 @@ git -C ~/.agents/gongga-agents commit -am "local: rotate the deepseek key"
    哪个模型被鼓励用（倍率、白名单）在 `skills/model_pool/preference.toml`。
 3. 新的额度查询脚本放 `providers/`，并在对应 provider 的 `quota_query.script` 里用相对路径引用；
    `providers/probe.py` 可以离线跑全部解析器。
-4. 提交前确认：`grep -nE '"(sk|ak|flm_ak|user)_' providers.toml` 无输出。
+4. 价格分时段就写 `[[provider.model.price.band]]`：`days` 只能用 `workday` / `weekend` /
+   `holiday` / `rest_day` / `makeup_workday` 这五个词（定义在 `providers.toml` 顶部），
+   `hours` 写固定时段，价格写这个时段的数。**最宽的那个档放最后且不写 `days`**，它就是其余全部；
+   写反了会让工作日夜间按高峰价计费。想知道某时刻实际多少钱：`python providers/price.py`。
+5. 法定节假日日期写在 `providers/statutory.toml`（国务院每年一次通知），由 `price.py` 读；
+   放假调休表从 chinese-days 按年缓存到 `~/.agents/cache/`，不在仓库里。
+6. 提交前确认：`grep -nE '"(sk|ak|flm_ak|user)_' providers.toml` 无输出。
