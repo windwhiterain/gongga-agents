@@ -49,6 +49,7 @@ kind = "vendor"
 key_env = "DEEPSEEK_API_KEY"
 homepage = "https://platform.deepseek.com"
 docs = "https://api-docs.deepseek.com"
+catalog_verified = "2026-11-01 /v1/models 返回 deepseek-flash、deepseek-v4-pro，与 roster 一致；Anthropic 面在同域 /anthropic"
 retrieved = "2026-10-22"
 
   [[provider.endpoint]]
@@ -56,6 +57,12 @@ retrieved = "2026-10-22"
   api = "openai-completions"
   base_url = "https://api.deepseek.com/v1"
   auth = "bearer"
+  [[provider.endpoint]]
+  id = "anthropic"
+  api = "anthropic-messages"
+  base_url = "https://api.deepseek.com/anthropic"
+  auth = "bearer"
+  note = "官方文档与 OpenAI 面并列给出：Claude Code 这类直连这里，不是 /v1"
 
   [[provider.model]]
   id = "deepseek-flash"
@@ -175,8 +182,9 @@ kind = "vendor"
 plan_kind = "token_plan"
 key_env = "MINIMAX_CN_API_KEY"
 homepage = "https://platform.minimaxi.com"
+regions = "国内 api.minimax.cn/v1（api.minimaxi.com 是别名）· 国际 api.minimax.io/v1 —— 两套 key，用错站点直接 401"
 catalog = "https://api.minimaxi.com/v1/models"
-catalog_verified = "2026-10-31 返回 9 个模型：M3.1-Flash / M3 / M2.7 / M2.7-highspeed / M2.5 / M2.5-highspeed / M2.1 / M2.1-highspeed / M2"
+catalog_verified = "2026-11-01 本机 key 探到 9 个：M3.1-Flash / M3 / M2.7 / M2.7-highspeed / M2.5 / M2.5-highspeed / M2.1 / M2.1-highspeed / M2 —— 与 10-31 那次相同"
 retrieved = "2026-10-22"
 
   [[provider.endpoint]]
@@ -306,8 +314,9 @@ kind = "vendor"
 plan_kind = "coding_plan"
 key_env = "KIMI_CODING_API_KEY"
 homepage = "https://www.kimi.com/code"
+regions = "Kimi Coding 只有 api.kimi.com/coding 这一个产品面；Moonshot 的按量 API 是另一个产品（国内 api.moonshot.cn/v1、国际 api.moonshot.ai/v1，各自一套 key），roster 不重复收录同一批 k3 模型"
 console = "https://www.kimi.com/code/console"
-catalog_verified = "2026-11-01 catalog 端点返回 6 个 id：kimi-for-coding（= K2.8 Preview）、kimi-for-coding-highspeed、k3、k3-256k、k3.1-pro、k3.1-pro-highspeed —— 六个都已收录"
+catalog_verified = "2026-11-01 本机 key 探到 6 个：kimi-for-coding(-highspeed)、k3、k3-256k、k3.1-pro(-highspeed) —— 六个都在 roster 里"
 retrieved = "2026-10-22"
 
   [[provider.endpoint]]
@@ -352,7 +361,7 @@ retrieved = "2026-10-22"
 
   [[provider.model]]
   id = "kimi-for-coding-highspeed"
-  name = "Kimi K2.8 Preview Highspeed"
+  name = "Kimi K2.7 Code HighSpeed"
   tier = "pro"
   context = 1048576
   max_output = 32768
@@ -517,9 +526,10 @@ name = "阶跃星辰 StepFun"
 kind = "vendor"
 key_env = "STEP_API_KEY"
 homepage = "https://platform.stepfun.com"
+regions = "国内 api.stepfun.com/v1 · 国际 platform.stepfun.ai（Step Plan 的国际区是 api.stepfun.ai/step_plan）—— 两区 key 是否通用未验证"
 docs = "https://platform.stepfun.com/docs/zh/api-reference/intro"
 catalog = "https://api.stepfun.com/v1/models"
-catalog_verified = "2026-10-22 返回 33 个模型，文本对话线为 step-5-preview / step-3.7-flash / step-3.5-flash"
+catalog_verified = "2026-11-01 本机 key 探到 33 个：文本对话线仍是 step-5-preview / step-3.7-flash / step-3.5-flash(-2603)，其余是 asr/tts/audio/image 的一套；另有 step-router-v1 —— 路由器不是它自己的模型，不收"
 retrieved = "2026-10-22"
 
   [[provider.endpoint]]
@@ -621,6 +631,7 @@ retrieved = "2026-10-22"
   months_cny = { Mini = 49, Plus = 99, Pro = 199, Max = 699 }
   credits = "1 元 = 1,000,000 credit，周期末清零；加油包 ¥49/400M、¥99/1600M，有效 30 天"
   peak = { hours = [{ start = "09:00", end = "12:00" }, { start = "14:00", end = "18:00" }], days = ["workday"], credit_multiplier = 2.0 }
+  models = "Step Plan 官方只写适用 step-5-preview —— 套餐里没有别家的模型"
   effective = "2026-10-15 00:00（北京时间）起生效，之前付费的调用方有保护"
   applies_to = ["step-5-preview"]
   source = "https://platform.stepfun.com/docs/zh/step-plan/pricing"
@@ -643,7 +654,7 @@ key_env = "XIAOMI_API_KEY"
 homepage = "https://platform.xiaomimimo.com"
 docs = "https://mimo.mi.com"
 catalog = "https://api.xiaomimimo.com/v1/models"
-catalog_verified = "2026-10-22 返回 7 个：mimo-v2.6-pro / -ultraspeed / -flash、mimo-v2.5-pro、mimo-v2.5 及 asr/tts"
+catalog_verified = "2026-11-01 本机 key 探到 7 个：mimo-v2.6-flash / -pro / -pro-ultraspeed，加 mimo-v2.5-asr / tts / tts-voiceclone / tts-voicedesign —— 10-22 那次列出的 mimo-v2.5-pro 已经不在目录里"
 retrieved = "2026-10-22"
 
   [[provider.endpoint]]
@@ -753,6 +764,9 @@ retrieved = "2026-10-22"
   name = "Token Plan"
   key_prefix = "tp-"
   months_cny = { Lite = 39, Standard = 99, Pro = 329, Max = 659 }
+  months_usd = { Lite = "$6", Standard = "$16", Pro = "$50", Max = "$100" }
+  months_year = { Lite = "¥408", Standard = "¥1044", Pro = "¥3468", Max = "¥6900" }
+  regions = "同一张价目表给 ¥ 与 $ 两栏，没有独立的国际站主机；是不是同一个 key 未验证"
   credits = "Lite 41 亿、Standard 110 亿、Pro 380 亿、Max 820 亿"
   credit_per_1m_pro = "2.5 命中 / 300 未命中 / 600 输出"
   credit_per_1m_flash = "2 / 100 / 200"
@@ -776,7 +790,7 @@ key_env = "LONGCAT_API_KEY"
 key_prefix = "ak_"
 homepage = "https://longcat.chat"
 catalog = "https://api.longcat.chat/openai/v1/models"
-catalog_verified = "2026-10-22 返回 2 个：LongCat-2.5-Preview(1M/262144)、LongCat-2.0"
+catalog_verified = "2026-11-01 本机 key 探到 2 个：LongCat-2.5-Preview、LongCat-2.0"
 retrieved = "2026-10-22"
 
   [[provider.endpoint]]
@@ -860,9 +874,9 @@ key_prefix = "sk-sp-"
 key_env = "QWEN_API_KEY"
 homepage = "https://modelstudio.console.alibabacloud.com"
 catalog = "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1/models"
-catalog_verified = "2026-10-22 返回 19 个模型（qwen3.8-max/flash、qwen3.7-*、qwen3.6-*、glm-5.2/5.3、deepseek-v4*、kimi-k3、auto、decision-model-preview 及图像/音频/视频模型）"
+catalog_verified = "2026-11-01 本机套餐 key 探到 21 个：qwen3.8-max / -flash、qwen3.7-max / -plus、qwen3.6-flash、auto、decision-model-preview、glm-5.2 / glm-5.3、deepseek-v4-flash / -pro / -v4.1-flash / -v4.1-flash-1017，以及图像和音频的几个"
 retrieved = "2026-10-22"
-note = "这个主机是通义千问 MaaS 的**产品**端点，不是内置的 ap-southeast-1 国际区；套餐 key 与 DashScope 按量 key 是两份凭据。"
+note = "这个主机是通义千问 MaaS 的产品端点，不是内置的 ap-southeast-1 国际区；套餐 key 与 DashScope 按量 key 是两份凭据。套餐目录里混着 glm-5.2 / glm-5.3（智谱）和 deepseek-v4*（DeepSeek）—— 那是三方经百炼路由，不是阿里的模型，一条都不收；deepseek 的忙闲价格也不替它们算"
 
   [[provider.endpoint]]
   id = "openai"
@@ -880,10 +894,12 @@ note = "这个主机是通义千问 MaaS 的**产品**端点，不是内置的 a
   name = "Qwen 3.8 Max"
   tier = "sota"
   context = 1000000
-  max_output = 128000
-  max_input = 991000
+  max_input = 991808
+  max_output = 131072
+  modalities = ["text", "image", "video"]
   thinking_budget_max = 256000
-  modalities = ["text", "image"]
+  retired_ids = ["qwen3.8-max-preview", "qwen3.8-max-0902"]
+  retired_note = "preview 已下线，调用自动路由到 qwen3.8-max 并按 max 计 Credits；-0902 是 2026-09-02 的锁版快照，同价，不是另一个模型"
   reasoning_levels = ["low", "medium", "xhigh"]
   reasoning_default = "xhigh"
   reasoning_note = "reasoning_effort 与 thinking_budget **互斥**，同时给会报错；映射 low→4096 / medium→16384 / xhigh→262144"
@@ -914,8 +930,9 @@ note = "这个主机是通义千问 MaaS 的**产品**端点，不是内置的 a
   name = "Qwen 3.8 Flash"
   tier = "flash"
   context = 1000000
-  max_output = 128000
-  modalities = ["text", "image"]
+  max_input = 991808
+  max_output = 131072
+  modalities = ["text", "image", "video"]
   reasoning_levels = ["low", "medium", "xhigh"]
   [provider.model.params]
   unit = "billion"
@@ -937,46 +954,15 @@ note = "这个主机是通义千问 MaaS 的**产品**端点，不是内置的 a
   source = "https://platform.qianwenai.com/docs/developer-guides/getting-started/model-prices"
   retrieved = "2026-10-22"
 
-  [[provider.model]]
-  id = "deepseek-v4.1-flash-1017"
-  name = "DeepSeek V4.1 Flash 1017（百炼转售）"
-  tier = "flash"
-  context = 1000000
-  max_output = 384000
-  modalities = ["text", "image"]
-  reasoning_levels = ["low", "high", "max"]
-  reasoning_default = "high"
-  [provider.model.params]
-  unit = "billion"
-  total = 552
-  active = 16
-  note = "resold DeepSeek V4.1 Flash: 8B input, 16B output"
-  source = "https://benchlm.ai/providers/deepseek"
-  retrieved = "2026-10-31"
-
-  [provider.model.price]
-  currency = "CNY"
-  unit = "per_1m_tokens"
-  input = 2.00
-  output = 8.00
-  cache_read = 0.20
-    [[provider.model.price.band]]
-    id = "offpeak"
-    hours = [{ start = "22:00", end = "24:00" }, { start = "00:00", end = "08:00" }]
-    days = "全部"
-    input = 1.00
-    output = 4.00
-    cache_read = 0.10
-    note = "百炼的忙闲是 08:00-22:00 连续，和 DeepSeek 官方两段式不同；百炼官方没写节假日例外，所以法定节假日照算忙时。"
-    source = "https://help.aliyun.com/zh/model-studio/model-pricing"
-
   [provider.plan]
   name = "Token Plan（个人）"
   region = "华北2（北京）独占"
   tiers = { Lite = "¥60 标价 / ¥39 促销", Essential = "¥120 / ¥79", Standard = "¥180 / ¥139", Pro = "¥600 / ¥499" }
   credits = { Lite = 11500, Essential = 25500, Standard = 45000, Pro = 180000 }
-  topup = "¥100/包 = 20,000 Credits，最多同时持有 5 包，不跨月结转"
-  night_discount = "22:00-次日 08:00：qwen3.8-* Credits 0.4×，deepseek-* Credits 0.5×；decision-model-preview 限时免费"
+  tiers_usd = { Lite = "$8 标价 / $6 促销", Essential = "$16 / $10", Standard = "$25 / $18", Pro = "$80 / $68" }
+  topup = "¥100/包 = 20,000 Credits（国际 $15/包），最多同时持有 5 包，不跨月结转，需先有套餐"
+  night_discount = "22:00-次日 08:00：qwen3.8-* Credits 0.4×，deepseek-* 0.5×；国际站同一时段 qwen3.8-* 是 0.6× 而非 0.4× —— 两站各记各的"
+  limits = "Token Plan 只在新加坡区（国际站）；国内是华北2（北京）。同一实名主体限购一份，个人版与团队版可同时买；只允许交互式工具场景，禁自动化后端与共享 key；个人版暂不支持退订。"
   source = "https://platform.qianwenai.com/docs/token-plan/personal/token-plan-personal-overview"
   quota_note = "官方余量查询是 `bl usage token-plan`（CLI 控制台鉴权）或 OpenAPI GetSubscriptionStats（AccessKey 签名），都没有 sk- 可用的路径"
 
@@ -1004,8 +990,10 @@ name = "阿里百炼 DashScope 按量"
 kind = "vendor"
 key_env = "DASHSCOPE_API_KEY"
 homepage = "https://bailian.console.aliyun.com"
+regions = "国内 dashscope.aliyuncs.com/compatible-mode/v1 · 国际 dashscope-intl.aliyuncs.com/compatible-mode/v1 —— 两套 key，混用会 401 或 404"
 catalog = "https://dashscope.aliyuncs.com/compatible-mode/v1/models"
-catalog_verified = "2026-10-22 返回 178 个，含自营与第三方（MiniMax/MiniMax-M3.1-Flash、xiaomi/mimo-v2.6-pro-ultraspeed、stepfun/step-5-preview、kimi/kimi-k3、glm-5.3、Qwen/Zwen-Image 等）"
+catalog_verified = "2026-11-01 本机 key 探到 184 个：Qwen 自营（qwen3.8-max / -max-0902 / -flash、qwen3.7-*、qwen3.6-*、qwen3.5-*、qwen-max / plus / turbo / long，加图像语音）与大批三方托管（MiniMax/*、ZHIPU/*、kimi/*、deepseek-*、siliconflow/*、vanchin/*、xiaomi/*、stepfun/*，还有 cmaas- 前缀的再部署）"
+note = "按量付费目录里三方模型占了一半以上，还有 cmaas- 前缀的再部署条目；roster 只收 Qwen 自己的 id，并且用官方模型名而不是部署别名"
 retrieved = "2026-10-22"
 
   [[provider.endpoint]]
@@ -1025,7 +1013,9 @@ retrieved = "2026-10-22"
   name = "Qwen 3.8 Max"
   tier = "sota"
   context = 1000000
-  modalities = ["text"]
+  max_input = 991808
+  max_output = 131072
+  modalities = ["text", "image", "video"]
   [provider.model.params]
   unit = "billion"
   total = 2400
@@ -1035,20 +1025,25 @@ retrieved = "2026-10-22"
   retrieved = "2026-10-31"
 
   [provider.model.price]
-  currency = "USD"
+  currency = "CNY"
   unit = "per_1m_tokens"
-  input = 2.00
-  output = 6.00
-  cache_read = 0.25
-  source = "https://commandcode.ai/docs/resources/pricing-limits"
-  retrieved = "2026-10-22"
+  input = 12.00
+  output = 36.00
+  cache_read = 1.50
+  cache_write = 15.00
+  cache_read_explicit = 1.00
+  source = "https://platform.qianwenai.com/docs/developer-guides/getting-started/model-prices"
+  retrieved = "2026-11-01"
+  note = "按量与 Token Plan 同价；qwen3.8 全系不分输入区间、无忙闲档 —— 忙闲只对目录里那些 DeepSeek 三方模型生效。"
 
   [[provider.model]]
-  id = "cmaas-qwen3.8-flash"
+  id = "qwen3.8-flash"
   name = "Qwen 3.8 Flash（百炼托管版）"
   tier = "flash"
   context = 1000000
-  modalities = ["text"]
+  max_input = 991808
+  max_output = 131072
+  modalities = ["text", "image", "video"]
   [provider.model.params]
   unit = "billion"
   total = 125
@@ -1058,13 +1053,15 @@ retrieved = "2026-10-22"
   retrieved = "2026-10-31"
 
   [provider.model.price]
-  currency = "USD"
+  currency = "CNY"
   unit = "per_1m_tokens"
-  input = 0.16
-  output = 0.47
-  cache_read = 0.016
-  source = "https://commandcode.ai/docs/resources/pricing-limits"
-  retrieved = "2026-10-22"
+  input = 0.80
+  output = 2.70
+  cache_read = 0.10
+  cache_write = 1.25
+  cache_read_explicit = 0.10
+  source = "https://platform.qianwenai.com/docs/developer-guides/getting-started/model-prices"
+  retrieved = "2026-11-01"
 
   [[provider.quota_query]]
   id = "none-by-api-key"
@@ -1080,6 +1077,8 @@ key_env = "TENCENT_API_KEY"
 key_prefix = "sk-tp-"
 homepage = "https://cloud.tencent.com/product/hub"
 catalog_verified = "本机 profile 在用 hy4-preview；tokenhub 的 /models 不对外（404）"
+tokenhub_plan = "计划制，按额度包计费（DescribeTokenPlan 查余量）。官方模型清单里除混元自家外，挂着一整排三方托管：DeepSeek 全系、GLM-5.3/-5.3-Flash/-5.3-FlashX/GLM-5.2/GLM-5V-Turbo、Kimi K3.1 Pro(-Highspeed)/K3/K2.8 Preview/K2.7 Code(-Highspeed)/K2.6、MiniMax M3.1-Flash/M3/M2.7、Qwen3.5 Flash/Plus、MiMo V2.6 Pro/Flash、Vidu 图像视频 —— 都不是腾讯的模型，一条都不收"
+  plan_note = "Token Plan 个人版 Lite $7 / Standard $17 / Pro $51 / Max $103（每月，intl 文档在案；CN 价未查）；Coding Plan Lite ¥40 / Pro ¥200 每月，5 小时 / 周 / 月三档窗口。两个套餐都是「同一套餐内全模型任意切换」，也就是说三方模型也能用 —— 能用不等于该收进 roster"
 retrieved = "2026-10-22"
 note = """
 本机还没有这把 key：`~/.agents/keys.toml` 里没有 tencent-tokenhub 一行，环境里也没有
@@ -1092,11 +1091,18 @@ TENCENT_API_KEY（只有 DSH 凭据引用这个名字）。补齐时写进 keys.
   api = "openai-completions"
   base_url = "https://tokenhub.tencentmaas.com/plan/v3"
   auth = "bearer"
+  note = """
+unverified：官方「API 使用说明」给的默认接入地址是广州 https://tokenhub.tencentmaas.com 与新加坡
+https://tokenhub-intl.tencentmaas.com（另有 .cn 镜像），示例路径是 /v1/models；`/plan/v3` 这个前缀
+在 2026-11-01 那次官方文档里查不到。本机没有这把 key，探不了，先按原样留着 —— 有 key 时第一件事
+是用 /v1/models 核这一条。
+"""
   [[provider.endpoint]]
   id = "anthropic"
   api = "anthropic-messages"
   base_url = "https://tokenhub.tencentmaas.com/plan/anthropic"
   auth = "bearer"
+  note = "同上，unverified；国际站主机是 tokenhub-intl.tencentmaas.com，官方明说不能跨站点调用，所以 CN key 与 intl key 不通用"
   [[provider.endpoint]]
   id = "coding-plan"
   api = "openai-completions"
@@ -1104,6 +1110,12 @@ TENCENT_API_KEY（只有 DSH 凭据引用这个名字）。补齐时写进 keys.
   auth = "bearer"
   key_prefix = "sk-sp-"
   note = "Coding Plan 另一套主机；旧的 api.hunyuan.cloud.tencent.com/v1 已于 2026-09-30 停服"
+  [[provider.endpoint]]
+  id = "coding-plan-anthropic"
+  api = "anthropic-messages"
+  base_url = "https://api.lkeap.cloud.tencent.com/coding/anthropic"
+  auth = "bearer"
+  note = "同一套 Coding Plan key 的 Anthropic 面；unverified-official（只在社区文档见到）"
 
   [[provider.model]]
   id = "hy4-preview"
@@ -1186,7 +1198,7 @@ key_prefix = "ak_"
 homepage = "https://dots.ai"
 docs = "https://dots.ai/platform/docs"
 catalog = "https://note3-prev-api.askdiandian.com/v1/models"
-catalog_verified = "2026-10-22 返回 dots3-note-prev"
+catalog_verified = "2026-11-01 本机 key 探到 1 个：dots3-note-prev"
 retrieved = "2026-10-22"
 note = """
 密钥前缀 ak_ 和 LongCat 一样，本机误当成 LongCat 打过一次也返回了目录——
@@ -1239,3 +1251,336 @@ note = """
   console = "https://dots.ai/platform/apikeys"
   note = "只有登录后的用量管理页，没有 API。"
 
+[[provider]]
+id = "zhipu"
+name = "智谱 AI 开放平台（GLM）"
+kind = "vendor"
+plan_kind = "coding_plan"
+key_env = "ZHIPUAI_API_KEY"
+homepage = "https://bigmodel.cn"
+docs = "https://docs.bigmodel.cn"
+catalog = "https://docs.bigmodel.cn/cn/guide/start/model-overview"
+catalog_verified = "2026-11-01 官方 api-reference 未收录 /models 目录端点（只有对话补全/Response/图像/视频/语音/嵌入/搜索/解析），本机也没有 key，所以模型清单只能读文档：模型概览 + 定价页 + 对话补全的 model 枚举三处对照。收的是编程用得上的四个；glm-5.1 / glm-5-turbo / glm-4.7 / glm-4.6 / glm-5v-turbo / glm-4.6v / glm-5.3-flashx-legal / glm-4.7-flash 仍在售，但同代里已有更好的，或者只服务法律与视觉场景，不登记。"
+retrieved = "2026-11-01"
+regions = "国内 open.bigmodel.cn（人民币）· 国际 api.z.ai（美元）—— 两套 key、两套价，不通用；Coding Plan 另有 /api/coding/paas/v4 前缀"
+note = """
+没有 /models 可以探，模型清单只能从文档读。本机还没有这把 key：补齐时写进 ~/.agents/keys.toml
+的 `zhipu` 一行。变量名有三个官方叫法：`ZHIPUAI_API_KEY`（旧 SDK zhipuai 的习惯，这里用它）、
+`ZAI_API_KEY`（新 SDK zai / ZhipuAiClient）、`ANTHROPIC_API_KEY`（Anthropic 面）；同一个 key 换个名字而已。
+"""
+
+  [[provider.endpoint]]
+  id = "openai"
+  api = "openai-completions"
+  base_url = "https://open.bigmodel.cn/api/paas/v4"
+  auth = "bearer"
+  note = "国际站 https://api.z.ai/api/paas/v4；订过 Coding Plan 的 key 只能走这个协议面"
+  [[provider.endpoint]]
+  id = "responses"
+  api = "openai-responses"
+  base_url = "https://open.bigmodel.cn/api/v1"
+  auth = "bearer"
+  note = "与对话补全不是同一个基址（/api/v1 而非 /api/paas/v4），国际站 https://api.z.ai/api/v1。这一面默认 store=false、流式结束不发 `data: [DONE]`、没有 cancel、超时 7200 秒 —— 按标准 OpenAI Responses 写的客户端会在三处以上不同"
+  [[provider.endpoint]]
+  id = "anthropic"
+  api = "anthropic-messages"
+  base_url = "https://open.bigmodel.cn/api/anthropic"
+  auth = "bearer"
+  note = "Claude Code 等 Anthropic SDK 直连；国际站 https://api.z.ai/api/anthropic。官方自己说\"某些场景与 Claude 接口存在差异\""
+  [[provider.endpoint]]
+  id = "coding-plan-openai"
+  api = "openai-completions"
+  base_url = "https://open.bigmodel.cn/api/coding/paas/v4"
+  auth = "bearer"
+  note = "Coding Plan 专用主机（国际站 https://api.z.ai/api/coding/paas/v4）；用标准面的地址打套餐 key 不扣套餐"
+
+  [[provider.model]]
+  id = "glm-5.3"
+  name = "GLM-5.3"
+  tier = "sota"
+  context = 1000000
+  max_output = 131072
+  modalities = ["text"]
+  reasoning_levels = ["low", "high", "max"]
+  reasoning_default = "max"
+  reasoning_field = "thinking{type} + reasoning_effort"
+  reasoning_mapping = { minimal = "low", low = "low", medium = "high", high = "high", xhigh = "max", max = "max", ultra = "max" }
+  reasoning_note = "关不掉思考：thinking.type 只接受 enabled，给 disabled 会直接失败（迁移时先把 disabled 改成 enabled，再把 effort 设 low）。reasoning_effort 只有 low / high / max 三档，默认 max。"
+  note = "与 GLM-5.2 同一底座，提升全来自后训练；编程能力（Z.ai Code Bench）高出 50%。输入只有文本，1M 窗口、128K 输出。"
+
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 8.00
+  output = 28.00
+  cache_read = 2.00
+  cache_storage = 0.00
+  price_usd = { input = 1.40, output = 4.40, cache_read = 0.26 }
+  source = "https://docs.bigmodel.cn/cn/guide/start/pricing"
+  retrieved = "2026-11-01"
+  note = "缓存存储限时免费；不分输入区间，也没有峰谷。"
+
+  [[provider.model]]
+  id = "glm-5.3-flash"
+  name = "GLM-5.3-Flash"
+  tier = "flash"
+  context = 1000000
+  max_output = 131072
+  modalities = ["text", "image", "video"]
+  reasoning_levels = ["low", "high", "max"]
+  reasoning_default = "max"
+  reasoning_field = "thinking{type} + reasoning_effort"
+  reasoning_note = "同 5.3 系：思考关不掉。官方推荐 temperature 1、top_p 0.95、reasoning_effort max、thinking.clear_thinking false。"
+  note = "输入是视频/图像/文本/文件，输出只有文本：原生多模态，能自己看界面和渲染结果。"
+  [provider.model.params]
+  unit = "billion"
+  total = 320
+  active = 18
+  note = "稀疏注意力 + 线性注意力的混合架构；注意力计算量与 KV cache 分别降 3.01x / 4.44x"
+  source = "https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash"
+  retrieved = "2026-11-01"
+
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 0.80
+  output = 2.80
+  cache_read = 0.23
+  cache_storage = 0.00
+  price_usd = { input = 0.15, output = 0.50, cache_read = 0.03 }
+  source = "https://docs.bigmodel.cn/cn/guide/start/pricing"
+  retrieved = "2026-11-01"
+
+  [[provider.model]]
+  id = "glm-5.3-flashx"
+  name = "GLM-5.3-FlashX"
+  tier = "flash"
+  context = 1000000
+  max_output = 131072
+  modalities = ["text", "image", "video"]
+  reasoning_levels = ["low", "high", "max"]
+  reasoning_default = "max"
+  reasoning_field = "thinking{type} + reasoning_effort"
+  reasoning_note = "5.3 系，思考关不掉；这是同一模型的加速档，200 tokens/s。GLM Coding Plan 暂未开放这一档。"
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 2.00
+  output = 7.00
+  cache_read = 0.57
+  cache_storage = 0.00
+  price_usd = { input = 0.37, output = 1.25, cache_read = 0.075 }
+  source = "https://docs.bigmodel.cn/cn/guide/start/pricing"
+  retrieved = "2026-11-01"
+
+  [[provider.model]]
+  id = "glm-5.2"
+  name = "GLM-5.2"
+  tier = "pro"
+  context = 1000000
+  max_output = 131072
+  modalities = ["text"]
+  reasoning_levels = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+  reasoning_default = "max"
+  reasoning_field = "thinking{type} + reasoning_effort"
+  reasoning_mapping = { none = "none", minimal = "minimal", low = "high", medium = "high", high = "high", xhigh = "max", max = "max", ultra = "max" }
+  reasoning_note = "5.2 是**动态思考**：thinking.type 可以是 enabled（默认）或 disabled，真的能关；effort 七档，none / minimal 等于放弃思考，low 与 medium 都被官方并到 high。别照抄 5.3 的映射 —— 那一版没有 none，也没有 disabled。"
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 8.00
+  output = 28.00
+  cache_read = 2.00
+  cache_storage = 0.00
+  price_usd = { input = 1.40, output = 4.40, cache_read = 0.26 }
+  source = "https://docs.bigmodel.cn/cn/guide/start/pricing"
+  retrieved = "2026-11-01"
+  note = "与 GLM-5.3 同价：贵不在参数，在后训练。要便宜档用 -flash。"
+
+  [provider.plan]
+  name = "GLM Coding Plan"
+  months = { CN = { Lite = "¥118", Pro = "¥538", Max = "¥1078" }, intl = { Lite = "$18", Pro = "$80", Max = "$168" } }
+  discount = "连续包季 8 折（Lite ¥94.4 / Pro ¥430.4 / Max ¥862.4 每月），连续包年 7 折；国际站年付约 7 折（$12.6 / $56 / $117.6 每月）"
+  credits = { Lite = { five_hour = 2000, week = 10000 }, Pro = { five_hour = 12000, week = 60000 }, Max = { five_hour = 28000, week = 140000 } }
+  credits_note = "两个窗口同时生效：5 小时档（消耗后 5 小时滚动刷新）与每周档（自下单起每 7 天刷新）。非高峰按 50% 计分，高峰是周一至周五 14:00-18:00（UTC+8），其余时间含周末全天都算非高峰。"
+  models = "套餐里只有智谱自己的模型：GLM-5.3 全量、GLM-5.3-Flash（额度 3 倍）；GLM-5.3-FlashX 暂未开放。过期的套餐 key 也仍然只能走对话补全协议面。"
+  limits = "套餐只限指定工具使用；额度用尽不会扣账户余额，而是直接停；2026-10-16 起 key 分类型，模型 API 与 Coding Plan 各用各的。视觉理解 MCP 的后端是 GLM-4.6V。"
+  source = "https://www.bigmodel.cn/glm-coding"
+  retrieved = "2026-11-01"
+
+  [[provider.quota_query]]
+  id = "none-by-api-key"
+  available = false
+  console = "https://bigmodel.cn/usercenter/financialaccount"
+  note = "余额、账单与套餐用量都只在控制台（/coding-plan/personal/usage、/finance-center/bill/expensebill/list、z.ai/manage-apikey/billing）；官方 api-reference 里没有用 API key 就能调的额度端点。社区逆向过控制台内部接口（glm-for-copilot 的 BALANCE_PATHS / USAGE_PATHS），未验证，不当作可用来源。"
+[[provider]]
+id = "bytedance-ark"
+name = "字节跳动 火山方舟（Doubao Seed）"
+kind = "vendor"
+plan_kind = "coding_plan"
+key_env = "ARK_API_KEY"
+homepage = "https://ark.volcengine.com"
+docs = "https://docs.volcengine.com/docs/ark"
+catalog = "https://ark.volcengine.com/models.json"
+catalog_verified = "2026-11-01 方舟没有对外 /models 端点（官方索引里查不到 GET /api/v3/models）；机器可读的目录在 https://ark.volcengine.com/models.json，每模型一页 /models/<id>.md，正文可取 .md 后缀。收的是 2.1 线的三个加 evolving；2.0 系（pro/lite/mini/code，260215 快照 EOS 2026-11-24、lite/mini 已于 2026-10-22 停服）、character、translation 不登记 —— 同代里 2.1 更快更便宜。"
+retrieved = "2026-11-01"
+regions = "国内 方舟 ark.cn-beijing.volces.com（人民币）· 国际 BytePlus ModelArk ark.ap-southeast.bytepluses.com（美元）—— 两套 key。国际站的 2.1 线只有 dola-seed-2-1-turbo，没有 2.1-pro / 2.1-lite / evolving"
+note = """
+本机还没有这把 key：补齐时写进 ~/.agents/keys.toml 的 `bytedance-ark` 一行，环境变量名按官方
+示例是 ARK_API_KEY。同一把 key 既能打按量面也能打 Coding Plan 面 —— 切 base_url 决定走哪边：
+用 /api/v3 打套餐 key **不扣套餐**，会另开一笔按量账单。
+"""
+
+  [[provider.endpoint]]
+  id = "openai"
+  api = "openai-completions"
+  base_url = "https://ark.cn-beijing.volces.com/api/v3"
+  auth = "bearer"
+  note = "国际站 https://ark.ap-southeast.bytepluses.com/api/v3"
+  [[provider.endpoint]]
+  id = "responses"
+  api = "openai-responses"
+  base_url = "https://ark.cn-beijing.volces.com/api/v3"
+  auth = "bearer"
+  note = "同一个 base_url 下的 /responses；官方快速入门示例用的就是它"
+  [[provider.endpoint]]
+  id = "coding-openai"
+  api = "openai-completions"
+  base_url = "https://ark.cn-beijing.volces.com/api/coding/v3"
+  auth = "bearer"
+  note = "Coding Plan 专用面（OpenAI 协议），国际站 /api/coding/v3"
+  [[provider.endpoint]]
+  id = "coding-anthropic"
+  api = "anthropic-messages"
+  base_url = "https://ark.cn-beijing.volces.com/api/coding"
+  auth = "bearer"
+  note = "Coding Plan 专用面（Anthropic 协议），Claude Code 直连；国际站 /api/coding"
+
+  [[provider.model]]
+  id = "doubao-seed-2-1-pro-260915"
+  name = "Doubao Seed 2.1 Pro"
+  tier = "sota"
+  context = 1048576
+  max_input = 1048576
+  max_output = 262144
+  modalities = ["text", "image", "video"]
+  reasoning_levels = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+  reasoning_default = "high"
+  reasoning_field = "thinking{type} + reasoning_effort"
+  reasoning_mapping = { none = "minimal", minimal = "minimal", low = "low", medium = "medium", high = "high", xhigh = "high", max = "high", ultra = "high" }
+  reasoning_note = "两个旋钮并存：thinking.type 只有 enabled / disabled（没有 auto —— auto 是 Coding Plan 的路由模式，跟思考无关），reasoning_effort 七档。xhigh 与 max 在 2.1 系都被并到 high；none 走 minimal。"
+  alias = ["doubao-seed-2-1-pro", "doubao-seed-2.1-pro"]
+  retired_ids = ["doubao-seed-2-0-pro-260215", "doubao-seed-2-0-lite-260215", "doubao-seed-2-0-mini-260215", "doubao-seed-2-0-code-preview-260215", "doubao-seed-1.6", "doubao-seed-1.8"]
+  retired_note = "2.0 的 260215 快照：pro 与 code-preview 的 EOS 是 2026-11-24 14:00，lite / mini 已于 2026-10-22 停服并自动迁到 LTS 版；1.6 / 1.8 早已迁到 LTS。另有 2-1-pro-260628 仍在线但窗口只有 256k，不是同一个东西，别当别名"
+  note = "最大思维链 256k；模型列表还标了 GUI 任务处理与结构化输出。可调用正名是带日期的这一串，点号写法只出现在价格页展示名和 Coding Plan 的 Model Name 里。"
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 6.00
+  output = 30.00
+  cache_read = 1.20
+  cache_storage = 0.017
+  flex = { input = 3.00, output = 15.00 }
+  source = "https://docs.volcengine.com/docs/ark/model-pricing"
+  retrieved = "2026-11-01"
+  note = "输入长度 [0, 1024]k 单一档，无峰谷。flex（service_tier=flex，低优在线推理）约五折；另有批量推理一档未抄。"
+
+  [[provider.model]]
+  id = "doubao-seed-evolving"
+  name = "Doubao Seed Evolving"
+  tier = "pro"
+  context = 1048576
+  max_input = 1048576
+  max_output = 262144
+  modalities = ["text", "image", "video"]
+  reasoning_levels = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+  reasoning_default = "high"
+  reasoning_field = "thinking{type} + reasoning_effort"
+  reasoning_note = "官方定位是周级迭代的 Coding & Agent 模型：同一个 id 后面会换权重，所以名字里不带版本号。"
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 6.00
+  output = 30.00
+  cache_read = 1.20
+  cache_storage = 0.017
+  source = "https://docs.volcengine.com/docs/ark/model-pricing"
+  retrieved = "2026-11-01"
+  note = "与 2.1-pro 同价：贵在迭代速度而不是参数。"
+
+  [[provider.model]]
+  id = "doubao-seed-2-1-lite-260915"
+  name = "Doubao Seed 2.1 Lite"
+  tier = "flash"
+  context = 1048576
+  max_input = 1048576
+  max_output = 262144
+  modalities = ["text", "image", "video", "audio"]
+  reasoning_levels = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+  reasoning_default = "high"
+  reasoning_field = "thinking{type} + reasoning_effort"
+  reasoning_note = "原生全模态：文本 / 图像 / 视频 / 音频都进得来；输出只有文本。"
+  alias = ["doubao-seed-2-1-lite", "doubao-seed-2.1-lite"]
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 0.80
+  output = 2.70
+  cache_read = 0.16
+  cache_storage = 0.017
+  audio_input = 12.00
+  audio_cache_read = 2.40
+  flex = { input = 0.40, output = 1.35 }
+  source = "https://docs.volcengine.com/docs/ark/model-pricing"
+  retrieved = "2026-11-01"
+  note = "价格页这一行并排有 0.80 / 12.00 / 0.017 / 0.16 / 2.40 / 2.70 六个数，是按模态与缓存拆开的：输出是 2.70，12.00 与 2.40 只对音频输入生效 —— 别把 12.00 当输出价。"
+
+  [[provider.model]]
+  id = "doubao-seed-2-1-turbo-260628"
+  name = "Doubao Seed 2.1 Turbo"
+  tier = "flash"
+  context = 262144
+  max_input = 262144
+  max_output = 262144
+  modalities = ["text", "image", "video"]
+  reasoning_levels = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+  reasoning_default = "high"
+  reasoning_field = "thinking{type} + reasoning_effort"
+  note = "窗口只有 256k，比 lite 小一截、比 lite 贵：买的是速度。国际站这条线的 id 多一个 dola- 前缀，是唯一在 intl 有价的一条。"
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 3.00
+  output = 15.00
+  cache_read = 0.60
+  cache_storage = 0.017
+  flex = { input = 1.50, output = 7.50 }
+  price_usd = { input = 0.50, output = 2.50, cache_read = 0.10 }
+  source = "https://docs.volcengine.com/docs/ark/model-pricing"
+  retrieved = "2026-11-01"
+  note = "国际站（BytePlus）同模型叫 dola-seed-2-1-turbo-260628，USD 价就在这里；CN 与 intl 是两套 key。"
+
+  [provider.plan]
+  name = "方舟 Coding Plan"
+  months = { CN = { Lite = "¥40", Pro = "¥200" }, intl = { Lite = "unverified", Pro = "unverified" } }
+  quarterly = "CN：Lite ¥120/季、Pro ¥600/季"
+  promo = "2026-06-08 至 2026-11-08 首两月 2.5 折：Lite ¥9.9/月、Pro ¥49.9/月（第三个月起原价，名额先到先得，可叠 9.5 折裂变）；早先的「新客首购 9.9 / 49.9」已于 2026-03-17 暂停"
+  windows = { CN = { Lite = "1200 次 / 5 小时、9000 / 周、18000 / 月", Pro = "6000 / 5 小时、45000 / 周、90000 / 月" }, intl = { Lite = "1900 / 5 小时、12000 / 周、24000 / 月", Pro = "9500 / 5 小时、60000 / 周、120000 / 月" } }
+  quota_note = "次数是按「Doubao Seed 2.0 Lite、Claude Code 未开 Agent Team」估的，不是硬指标。"
+  models = "能切的自家模型：doubao-seed-evolving、doubao-seed-2.1-pro、doubao-seed-2.1-lite、doubao-seed-2.0-mini，或者填 ark-code-latest / Auto 让平台路由。"
+  third_party = "同一份套餐清单里还挂着三方模型：GLM-5.3、GLM-5.3-Flash、DeepSeek-V4-Flash、DeepSeek-V4-Pro、DeepSeek-V4.1-Flash(-Economy)、Kimi-K2.8-Preview、Kimi-K3、Kimi-K3.1-Pro、Kimi-K2.7-Code、MiniMax-M3、MiniMax-M2.7 —— 都是别家的模型经方舟路由，roster 一条都不收"
+  limits = "套餐额度**只在 AI 编程工具里生效，不能当 API 调用**；拿非编程工具刷可能被判滥用停订。"
+  source = "https://docs.volcengine.com/docs/ark/coding-plan-personal-ai-other-tools"
+  retrieved = "2026-11-01"
+
+  [[provider.quota_query]]
+  id = "signed-openapi"
+  kind = "signed-api"
+  method = "POST"
+  url = "https://ark.cn-beijing.volcengineapi.com/"
+  action = "GetInferenceUsage"
+  version = "2024-01-01"
+  auth = "Volcengine AK/SK (HMAC-SHA256)"
+  available = false
+  console = "https://console.volcengine.com/ark/region:cn-beijing/overview"
+  note = "用量能查，余额不能：GetInferenceUsage（按模型 / 接入点 / ApiKeyID 过滤）只接受 Access Key 签名，ARK_API_KEY 调不了；2026-08-12 之后新建的 key 连 AuthToken 那条旧路也没了。另有 ListModelActivations / ListEndpoints 在同一个管控面。余额只有控制台与账单页 —— unverified，不冒充端点。"

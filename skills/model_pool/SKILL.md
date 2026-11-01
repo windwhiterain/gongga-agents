@@ -1,6 +1,6 @@
 ---
 name: model_pool
-description: Pick the model a spawned agent should run on — one `<provider>/<model id>` string that `gongga-cli set_session --model` takes verbatim, drawn across three tiers (flash / pro / sota) by the weights you set, and only from models this machine can actually run right now: still in the roster, credentialed, with allowance above its floor, entitled on this account, and not marked out. Use it when a subagent has no model to name, when a spawn hit a quota wall and needs another, or when you want cheap work on flash and the hard part on pro/sota. Triggers - 挑模型 / 派子 agent 用哪个模型 / 有额度的模型 / model pool / flash pro sota 概率.
+description: Pick the model a spawned agent should run on — one `<provider>/<model id>` string that `gongga-cli set_session --model` takes verbatim, drawn across three tiers (flash / pro / sota) by the weights you set, and only from models this machine can actually run right now: still in the roster, credentialed, with allowance above its floor, entitled on this account, and not marked out. Use it when a subagent has no model to name, when a spawn hit a quota wall and needs another, or when you are placing the work itself: flash for search / explore / investigate / implement, pro for hard implement and review, sota for plan and core review. Triggers - 挑模型 / 派子 agent 用哪个模型 / 有额度的模型 / model pool / flash pro sota 概率.
 ---
 
 # Draw a model, hand it to a spawn
@@ -172,12 +172,16 @@ roster, below.
   tier = "flash"
 ```
 
-| 档 | 意思 | 派什么活 |
+| 档 | 派什么活 | 为什么是这一档 |
 |---|---|---|
-| `flash` | 便宜：够用、快、按量花不了几个钱 | 读文件、跑测试、搬代码 |
-| `pro` | 中间：贵一截，明显更能想 | 设计、疑难定位、跨文件的改 |
-| `sota` | 前沿：最贵的那批 | 一次性的硬活，别拿它跑循环 |
-| `test` | 基本不可用于编程，只用来测 harness 本身 | 验证接口通不通、看服务端起不起来 |
+| `flash` | **search、explore、investigate、implement** | 有工具、有文件、答案在眼前：查文档、读代码、跑测试、把改动落地。量大，所以必须便宜 |
+| `pro` | **hard implement、review** | 要判断的活：实现本身不难但坑深，或者要挑别人代码的错。读得懂 ≠ 看得出问题 |
+| `sota` | **plan、core review** | 一次错就全错的地方：动手前定方案，以及最核心那部分的复核。一次性，不跑循环 |
+| `test` | 只用来测 harness 本身 | 验证接口通不通、看服务端起不起来；基本不可用于编程 |
+
+派活先认活，再抽模型：**查资料、读代码、改代码都是 flash**——不是"便宜所以丢给它"，
+而是那几种活的上限就在那儿，贵的模型换不来更多。只有"要判断"（review、疑难实现）才上 pro，"错了要重来"（plan、核心 review）才上 sota。反过来用是纯浪费：让 sota 去 fetch 几个网页、
+让 flash 去定架构，两次都白花。
 
 四个档**只在这里读，不在这里猜**。改档 = 改 roster 里那一行，不用重新编译、不用改脚本。
 没有 `tier` 的模型不会被抽，`tiers` 会把它们列成"roster 没写档"——那是缺口，不是默认值。
@@ -205,8 +209,10 @@ test  = 0.00     # 默认 0：只在你点名 --tier test 时才抽得到
 "qwen-token-plan/qwen3.8-max"      = 1.0
 "qwen-dashscope/qwen3.8-max"       = 1.0
 "qwen-token-plan/qwen3.8-flash"    = 1.0
-"qwen-dashscope/cmaas-qwen3.8-flash" = 1.0
+"qwen-dashscope/qwen3.8-flash" = 1.0
 "tencent-tokenhub/hy4-preview"     = 1.0
+"zhipu/glm-5.3"                    = 1.0
+"bytedance-ark/doubao-seed-2-1-pro-260915" = 1.0
 ```
 
 **倍率里没有的模型默认为 0，也就是不抽**——这张表就是白名单。`2.0` 是"能用就用它"，

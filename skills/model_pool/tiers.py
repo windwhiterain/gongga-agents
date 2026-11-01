@@ -17,10 +17,15 @@ argued with, and this module became a reader.
 # exercise the harness.
 ORDER = ("flash", "pro", "sota", "test")
 
+# What each tier is *for*. This is the rule a spawn is placed by, so it names the
+# work and not the model: search, explore, investigate and implement are flash;
+# hard implement and review are pro; plan and core review are sota. Reading it the
+# other way round -- "flash is the cheap one, so put anything cheap there" -- is how
+# a review ends up on a model picked for its price.
 MEANING = {
-    "flash": "cheap: enough for reading, running tests, moving code",
-    "pro": "the middle: design, hard debugging, cross-file work",
-    "sota": "the expensive frontier: a one-off hard task, not a loop",
+    "flash": "search, explore, investigate, implement",
+    "pro": "hard implement, review",
+    "sota": "plan, core review",
     "test": "basically unusable for programming; only for testing the harness",
 }
 
