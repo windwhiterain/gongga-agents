@@ -397,7 +397,7 @@ plan_kind = "coding_plan"
 key_env = "KIMI_CODING_API_KEY"
 homepage = "https://www.kimi.com/code"
 console = "https://www.kimi.com/code/console"
-catalog_verified = "2026-10-31 catalog 端点返回 6 个 id：kimi-for-coding、kimi-for-coding-highspeed、k3、k3-256k、k3.1-pro、k3.1-pro-highspeed"
+catalog_verified = "2026-11-01 catalog 端点返回 6 个 id：kimi-for-coding（= K2.8 Preview）、kimi-for-coding-highspeed、k3、k3-256k、k3.1-pro、k3.1-pro-highspeed —— 六个都已收录"
 retrieved = "2026-10-22"
 
   [[provider.endpoint]]
@@ -415,6 +415,50 @@ retrieved = "2026-10-22"
   #   https://api.moonshot.cn/v1        （国内，OpenAI 兼容）
   #   https://api.moonshot.cn/anthropic （国内，Messages）
   # Kimi API 开放平台 / Kimi Code / Kimi 会员是三个互不通用计费的产品。
+
+  # K2.8 Preview 的 API id 就是 `kimi-for-coding`：2026-09-11 上线时官方原地升级了这个
+  # 名字下的模型，id 不变，所以接在旧 id 上的客户端不用改配置。同一天起它给所有会员档位
+  # 都开了 1M 上下文（K3 要 ¥199 档才有），定位是"接近 K3、更适合补全和常规开发"。
+  # 这也是 preference.toml 里 kimi-k2.8-preview 那一行的落点。
+  [[provider.model]]
+  id = "kimi-for-coding"
+  name = "Kimi K2.8 Preview"
+  tier = "pro"
+  context = 1048576
+  max_output = 32768
+  modalities = ["text", "image", "video"]
+  reasoning_levels = ["low", "high", "max"]
+  reasoning_default = "max"
+  note = "id 是 kimi-for-coding；K2.8 是原地升级，能力接近 K3，定位是代码补全与常规开发"
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 6.50
+  output = 27.00
+  cache_read = 1.70
+  price_usd = { input = 0.95, output = 4.00, cache_read = 0.19 }
+  source = "https://bailian.console.aliyun.com/cn-beijing/model/market/detail/kimi%2Fkimi-k2.8-preview"
+  retrieved = "2026-11-01"
+
+  [[provider.model]]
+  id = "kimi-for-coding-highspeed"
+  name = "Kimi K2.8 Preview Highspeed"
+  tier = "pro"
+  context = 1048576
+  max_output = 32768
+  modalities = ["text", "image", "video"]
+  reasoning_levels = ["low", "high", "max"]
+  reasoning_default = "max"
+  note = "与 kimi-for-coding 同一模型，服务更快；订阅额度按两倍计（catalog 的 display_name 如此）"
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 13.00
+  output = 54.00
+  cache_read = 1.70
+  price_usd = { input = 1.90, output = 8.00, cache_read = 0.19 }
+  source = "https://www.kimi.ai/zh-hans/resources/kimi-k3-1-pro-pricing"
+  retrieved = "2026-11-01"
 
   [[provider.model]]
   id = "k3.1-pro"
