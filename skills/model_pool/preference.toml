@@ -1,0 +1,35 @@
+# 这台机器鼓励用哪些模型，以及三档各抽多少。
+#
+# 倍率是"用户更希望 agent 用这个"的程度，不是模型好坏：`1.0` 是正常候选，
+# `2.0` 是"能用就用它"，`0.5` 是"没得选才用"。**倍率里没有的模型默认为 0**，
+# 也就是不抽——清单就是白名单，加一行才算启用。
+#
+# 改这里不用重新编译：下一次 pick 就读到。
+
+[tier]
+# 先抽档，再在档里按"剩余额度 × 倍率"抽模型。`test` 默认 0：那一档只用来测
+# harness 本身，不被日常派活抽到；要看它得显式 --tier test。
+flash = 0.60
+pro = 0.35
+sota = 0.05
+test = 0.0
+
+[model]
+# DeepSeek V4.1 Flash
+"deepseek-official/deepseek-flash" = 1.0
+# MiniMax M3.1 Flash
+"minimax-cn/MiniMax-M3.1-Flash" = 1.0
+# Kimi K3.1 Pro
+"kimi-coding/k3.1-pro" = 1.0
+# Qwen 3.8 Max（Token Plan 与 DashScope 是同一模型的两条路，两个都开）
+"qwen-token-plan/qwen3.8-max" = 1.0
+"qwen-dashscope/qwen3.8-max" = 1.0
+# Qwen 3.8 Flash
+"qwen-token-plan/qwen3.8-flash" = 1.0
+"qwen-dashscope/cmaas-qwen3.8-flash" = 1.0
+# 腾讯混元 Hy4 Preview
+"tencent-tokenhub/hy4-preview" = 1.0
+# Kimi K2.8 Preview：用户点名要开，但这台机器的 roster 里还没有这个 id
+# （kimi-coding 目前只有 k3.1-pro / k3.1-pro-highspeed / k3 / k3-256k）。
+# roster 里一出现这个名字就自动生效；在那之前它抽不到任何东西。
+"kimi-coding/k2.8-preview" = 1.0

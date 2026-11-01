@@ -111,6 +111,22 @@ mechanisms = ["price_band", "credit_multiplier", "none"]
   source = "https://mimo.mi.com/docs/zh-CN/quick-start/faq/token-plan/Usage&Quota"
 
 # ---------------------------------------------------------------------------
+# 分档（model.tier）：谁值得派活给它
+# ---------------------------------------------------------------------------
+# 每个 `[[provider.model]]` 带一个 `tier`，就是这台机器对它的定位，不再是算出来的：
+#
+#   flash  便宜档：够用、快、按量花不了几个钱。派子 agent 干读文件、跑测试、搬代码。
+#   pro    中间档：贵一截，明显更能想。设计、疑难定位、跨文件的改。
+#   sota   前沿档：最贵的那批。一次性的硬活，别拿它跑循环。
+#   test   基本不可用于编程，只用来测 harness 本身（本机小模型、试接口通不通）。
+#
+# 这是**价格档**，不是能力档：V4.1-Flash 的智能指数比 V4-Pro 还高，所以 flash 里
+# 也可能抽到最聪明的那个。改一句话就能换档——不用重新编译，也不用改 skill。
+#
+# 哪个模型被鼓励使用（倍率）在 skill 那边：~/.agents/gongga-agents/skills/model_pool/
+# preference.toml，倍率里没有的模型默认为 0（不抽）。
+
+# ---------------------------------------------------------------------------
 # provider
 # ---------------------------------------------------------------------------
 # kind: vendor = 厂商直连 | gateway = 聚合/转发，按厂商价转售 | local = 自建
@@ -140,6 +156,7 @@ retrieved = "2026-10-22"
   [[provider.model]]
   id = "deepseek-flash"
   name = "DeepSeek V4.1-Flash-1017"
+  tier = "flash"
   context = 1000000
   max_output = 384000
   modalities = ["text", "image"]
@@ -186,6 +203,7 @@ retrieved = "2026-10-22"
   [[provider.model]]
   id = "deepseek-v4-pro"
   name = "DeepSeek V4-Pro-0813"
+  tier = "pro"
   context = 1000000
   max_output = 384000
   modalities = ["text"]
@@ -271,6 +289,7 @@ retrieved = "2026-10-22"
   [[provider.model]]
   id = "MiniMax-M3.1-Flash"
   name = "MiniMax M3.1 Flash"
+  tier = "flash"
   context = 1000000            # 输入+输出合计，官方没有单独公布 max_output / max_input
   modalities = ["text", "image", "video"]
   image_limits = "JPEG/PNG/GIF/WEBP ≤10MB；视频 MP4/AVI/MOV/MKV ≤50MB（Files API 可到 512MB）"
@@ -303,6 +322,7 @@ retrieved = "2026-10-22"
   [[provider.model]]
   id = "MiniMax-M3"
   name = "MiniMax M3"
+  tier = "flash"
   context = 1000000
   modalities = ["text", "image", "video"]
   reasoning_default = "off"
@@ -399,6 +419,7 @@ retrieved = "2026-10-22"
   [[provider.model]]
   id = "k3.1-pro"
   name = "Kimi K3.1 Pro"
+  tier = "sota"
   context = 1048576
   modalities = ["text", "image", "video"]
   reasoning_levels = ["low", "high", "max"]
@@ -427,6 +448,7 @@ retrieved = "2026-10-22"
   [[provider.model]]
   id = "k3.1-pro-highspeed"
   name = "Kimi K3.1 Pro Highspeed"
+  tier = "sota"
   context = 1048576
   modalities = ["text", "image", "video"]
   reasoning_levels = ["low", "high", "max"]
@@ -454,6 +476,7 @@ retrieved = "2026-10-22"
   [[provider.model]]
   id = "k3"
   name = "Kimi K3"
+  tier = "sota"
   context = 1048576
   max_output = 131072
   modalities = ["text", "image"]
@@ -481,6 +504,7 @@ retrieved = "2026-10-22"
   [[provider.model]]
   id = "k3-256k"
   name = "Kimi K3 256K"
+  tier = "sota"
   context = 262144
   modalities = ["text", "image"]
   note = "只在 coding plan 订阅端点上存在，按量站没有这个 id"
@@ -564,6 +588,7 @@ retrieved = "2026-10-22"
   [[provider.model]]
   id = "step-5-preview"
   name = "Step 5 Preview"
+  tier = "pro"
   context = 1000000
   max_output = 64000
   modalities = ["text", "image", "video"]
@@ -592,6 +617,7 @@ retrieved = "2026-10-22"
   [[provider.model]]
   id = "step-3.7-flash"
   name = "Step 3.7 Flash"
+  tier = "flash"
   context = 256000
   modalities = ["text"]
   reasoning_levels = ["low", "medium", "high"]
@@ -615,6 +641,7 @@ retrieved = "2026-10-22"
   [[provider.model]]
   id = "step-3.5-flash"
   name = "Step 3.5 Flash"
+  tier = "flash"
   context = 256000
   modalities = ["text"]
   reasoning_levels = ["low", "high"]      # -2603 版本只有这两档
@@ -686,6 +713,7 @@ retrieved = "2026-10-22"
   [[provider.model]]
   id = "mimo-v2.6-pro"
   name = "MiMo V2.6 Pro"
+  tier = "flash"
   context = 1000000
   max_output = 128000
   modalities = ["text", "image", "audio", "video"]
@@ -719,6 +747,7 @@ retrieved = "2026-10-22"
   [[provider.model]]
   id = "mimo-v2.6-flash"
   name = "MiMo V2.6 Flash"
+  tier = "flash"
   context = 1000000
   max_output = 128000
   modalities = ["text", "image", "audio", "video"]
@@ -744,6 +773,7 @@ retrieved = "2026-10-22"
   [[provider.model]]
   id = "mimo-v2.6-pro-ultraspeed"
   name = "MiMo V2.6 Pro UltraSpeed"
+  tier = "sota"
   context = 1000000
   max_output = 128000
   modalities = ["text", "image", "audio", "video"]
@@ -809,6 +839,7 @@ retrieved = "2026-10-22"
   [[provider.model]]
   id = "LongCat-2.0"
   name = "LongCat 2.0"
+  tier = "flash"
   context = 1048576
   max_output = 131072
   modalities = ["text"]
@@ -835,6 +866,7 @@ retrieved = "2026-10-22"
   [[provider.model]]
   id = "LongCat-2.5-Preview"
   name = "LongCat 2.5 Preview"
+  tier = "flash"
   context = 1048576
   max_output = 262144
   modalities = ["text", "image"]
@@ -892,6 +924,7 @@ note = "这个主机是通义千问 MaaS 的**产品**端点，不是内置的 a
   [[provider.model]]
   id = "qwen3.8-max"
   name = "Qwen 3.8 Max"
+  tier = "sota"
   context = 1000000
   max_output = 128000
   max_input = 991000
@@ -925,6 +958,7 @@ note = "这个主机是通义千问 MaaS 的**产品**端点，不是内置的 a
   [[provider.model]]
   id = "qwen3.8-flash"
   name = "Qwen 3.8 Flash"
+  tier = "flash"
   context = 1000000
   max_output = 128000
   modalities = ["text", "image"]
@@ -952,6 +986,7 @@ note = "这个主机是通义千问 MaaS 的**产品**端点，不是内置的 a
   [[provider.model]]
   id = "deepseek-v4.1-flash-1017"
   name = "DeepSeek V4.1 Flash 1017（百炼转售）"
+  tier = "flash"
   context = 1000000
   max_output = 384000
   modalities = ["text", "image"]
@@ -1034,6 +1069,7 @@ retrieved = "2026-10-22"
   [[provider.model]]
   id = "qwen3.8-max"
   name = "Qwen 3.8 Max"
+  tier = "sota"
   context = 1000000
   modalities = ["text"]
   [provider.model.params]
@@ -1056,6 +1092,7 @@ retrieved = "2026-10-22"
   [[provider.model]]
   id = "cmaas-qwen3.8-flash"
   name = "Qwen 3.8 Flash（百炼托管版）"
+  tier = "flash"
   context = 1000000
   modalities = ["text"]
   [provider.model.params]
@@ -1117,6 +1154,7 @@ placeholder 取不到值，补齐时把 key 写进去，或换成 key_env 就够
   [[provider.model]]
   id = "hy4-preview"
   name = "Hy4 Preview（腾讯混元，770B 总 / 49B 激活，Apache 2.0）"
+  tier = "pro"
   context = 1024000
   max_input = 960000
   max_output = 64000
@@ -1146,6 +1184,7 @@ placeholder 取不到值，补齐时把 key 写进去，或换成 key_env 就够
   [[provider.model]]
   id = "hy3"
   name = "Hy3"
+  tier = "flash"
   context = 262144
   max_input = 196608
   max_output = 131072
@@ -1217,6 +1256,7 @@ note = """
   [[provider.model]]
   id = "dots3-note-prev"
   name = "Dots 3 Note Preview"
+  tier = "flash"
   context = 524288
   modalities = ["text", "image", "video", "audio"]
   output_modalities = ["text"]
@@ -1309,6 +1349,7 @@ note = "A/B 两台机器上 `bonsai` 解析到不同地址：A 指 127.0.0.1，B
   [[provider.model]]
   id = "bonsai-2-27b"
   name = "Qwen3.8-27B ternary 1.5bit (PrismML fork)"
+  tier = "test"
   context = 49152
   max_output = 24576
   modalities = ["text"]

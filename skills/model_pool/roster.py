@@ -143,6 +143,16 @@ class Roster:
                 if model_id and model_id not in self.retired:
                     yield provider, model
 
+    def tier_of(self, model):
+        """The tier the roster states for one model, or `None` when it states none.
+
+        A model with no `tier` is not placed by this tool at all: the roster is
+        the one place the judgement is written down (`providers.toml`, `model.tier`),
+        so an unstated tier is a gap to report, never a guess to make.
+        """
+        tier = model.get("tier")
+        return tier.strip().lower() if isinstance(tier, str) and tier.strip() else None
+
 
 def load():
     """The merged roster for this machine, or `None` when no catalog exists."""

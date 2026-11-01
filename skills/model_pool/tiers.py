@@ -1,80 +1,46 @@
-"""Which of the three tiers a model belongs to, and on what evidence.
+"""What the four tiers mean, and where a model's tier comes from.
 
-The three names -- `flash`, `pro`, `sota` -- are this tool's, not any vendor's, so
-something has to define them. Two facts about a model are published and can be
-defined from:
+A tier is a **fact about the model**, written in the roster next to its price
+(`[[provider.model]] tier = "..."`). So this module does not classify anything:
+it names the tiers, and reads the one the roster states.
 
-- **what it costs**, the roster's own price (the fact a pool spreads load over),
-- **how big it is**, the roster's `[provider.model.params]` (total and active).
-
-**The tier is the price class.** A pool exists to spend several allowances
-across several price levels, so the class that matters is what a request there
-costs; the bands are wide enough that the roster's own clusters sit in them.
-
-**The price is not a capability ranking, and the roster proves it.** Measured
-against the Artificial Analysis intelligence index in October 2026, DeepSeek V4.1
-Flash scores 45 and its own V4 Pro 36; MiMo V2.6 Pro scores 46 at $0.87 per
-million output tokens while Kimi K3.1 Pro scores 55 at ten times that. So a
-`flash` draw is cheap *and may be the smartest model here*, and asking for `sota`
-buys the expensive frontier, not the best answer. `model_pool tiers` prints the
-parameters and the price next to each tier so this stays visible.
-
-Order of the rules: an override, then the price, then the parameter count (for a
-model priced nowhere, such as a local build), then the name.
+That is a deliberate reversal. The tier used to be computed here from the price,
+the parameter count and the name, because nothing published it. The price turned
+out to be the wrong thing to rank by -- measured against the Artificial Analysis
+intelligence index in October 2026, DeepSeek V4.1 Flash scores 45 and its own V4
+Pro 36 -- so the judgement moved to the file a person edits, where it can be
+argued with, and this module became a reader.
 """
 
-import re
+# The tiers, in the order a draw considers them. `test` is last and, by weight,
+# never drawn unless asked for: those models cannot do the work, they are here to
+# exercise the harness.
+ORDER = ("flash", "pro", "sota", "test")
 
-DEFAULTS = {
-    # Edges in output USD per million tokens; the last band takes what is left.
-    "band": [
-        {"tier": "flash", "max_output_usd": 1.5},
-        {"tier": "pro", "max_output_usd": 5.0},
-    ],
-    "sota": "sota",
-    # Used only when the roster states a price in CNY and no USD one.
-    "cny_per_usd": 6.9,
-    # Used only for a model the roster prices nowhere.
-    "params_band": [
-        {"tier": "flash", "max_total_billion": 100},
-        {"tier": "pro", "max_active_billion": 50},
-    ],
-    "default": "pro",
-    # Used only for a model with no price and no parameter count.
-    "rule": [
-        {"tier": "flash", "any": ["flash", "mini", "lite", "turbo"]},
-        {"tier": "sota", "any": ["max", "sota", "ultra", "opus"]},
-        {"tier": "pro", "any": ["pro"]},
-    ],
-    # One model placed against the rules above, by `<provider>/<id>` or bare id.
-    "model": {},
+MEANING = {
+    "flash": "cheap: enough for reading, running tests, moving code",
+    "pro": "the middle: design, hard debugging, cross-file work",
+    "sota": "the expensive frontier: a one-off hard task, not a loop",
+    "test": "basically unusable for programming; only for testing the harness",
 }
 
 
-def output_usd(model, settings):
-    """The model's output price per million tokens in USD, or `None` when unpriced.
+def tier_of(catalog, model):
+    """`(tier, evidence)` for one roster row, with no classification of its own.
 
-    The roster's own `price_usd` wins, because a vendor states it. A price in CNY
-    is converted at the configured rate, which is a comparison and never a quote.
+    A model the roster does not place is reported as unplaced rather than filed
+    under a guess: a silent guess is how a `test` model ends up in a spawn.
     """
-    price = model.get("price") or {}
-    stated = (price.get("price_usd") or {}).get("output")
-    if isinstance(stated, (int, float)) and not isinstance(stated, bool):
-        return float(stated)
-    local = price.get("output")
-    if not isinstance(local, (int, float)) or isinstance(local, bool):
-        return None
-    currency = price.get("currency")
-    if currency == "USD":
-        return float(local)
-    if currency in ("CNY", "RMB"):
-        rate = float(settings.get("cny_per_usd") or 6.9)
-        return float(local) / rate if rate > 0 else None
-    return None
+    tier = catalog.tier_of(model)
+    if tier is None:
+        return None, "the roster states no tier"
+    if tier not in ORDER:
+        return None, f'the roster states tier "{tier}", which is not one of {", ".join(ORDER)}'
+    return tier, f"the roster says {tier}"
 
 
 def params_of(model):
-    """`(total, active)` in billions as the roster states them, and `None` where it does not."""
+    """`(total, active)` in billions as the roster states them, `None` where it does not."""
     params = model.get("params") or {}
     total = params.get("total")
     active = params.get("active")
@@ -82,57 +48,11 @@ def params_of(model):
     return (float(total) if ok(total) else None, float(active) if ok(active) else None)
 
 
-def by_price(value, settings):
-    """The tier a price lands in, or `None` when the roster states no price."""
-    if value is None:
-        return None
-    for band in settings.get("band") or []:
-        edge = band.get("max_output_usd")
-        if edge is not None and value <= float(edge):
-            return band["tier"]
-    return settings.get("sota") or "sota"
-
-
-def by_params(total, active, settings):
-    """The tier a size lands in, for a model the roster prices nowhere."""
-    for band in settings.get("params_band") or []:
-        limit_total = band.get("max_total_billion")
-        limit_active = band.get("max_active_billion")
-        if limit_total is not None and total is not None and total <= float(limit_total):
-            return band["tier"]
-        if limit_active is not None and active is not None and active <= float(limit_active):
-            return band["tier"]
-    return None
-
-
-def by_name(model_id, settings):
-    """The tier a name suggests, for a model with no price and no size."""
-    tokens = set(token for token in re.split(r"[^0-9a-z]+", model_id.lower()) if token)
-    lowered = model_id.lower()
-    for rule in settings.get("rule") or []:
-        for word in rule.get("any") or []:
-            word = word.lower()
-            if (word in lowered) if re.search(r"[^0-9a-z]", word) else (word in tokens):
-                return rule["tier"]
-    return settings.get("default") or "pro"
-
-
-def classify(provider, model, settings):
-    """`(tier, evidence)` for one roster row, in the order the module documents."""
-    override = (settings.get("model") or {}).get(f"{provider['id']}/{model['id']}")
-    if override is None:
-        override = (settings.get("model") or {}).get(model["id"])
-    if override:
-        return override, "override"
-    price = output_usd(model, settings)
-    tier = by_price(price, settings)
-    if tier:
-        return tier, f"price: {price:g} USD per 1M output tokens"
+def size_text(model):
+    """The size as one column: `552B/16B`, `27B`, or `-` when unstated."""
     total, active = params_of(model)
-    tier = by_params(total, active, settings)
-    if tier:
-        size = f"{total:g}B" if total is not None else ""
-        if total is not None and active is not None and active != total:
-            size += f" / {active:g}B active"
-        return tier, f"params: {size or 'stated'}, and the roster prices it nowhere"
-    return by_name(model["id"], settings), "name: the roster prices it nowhere and states no size"
+    if total is None:
+        return "-"
+    if active is None or active == total:
+        return f"{total:g}B"
+    return f"{total:g}B/{active:g}B"

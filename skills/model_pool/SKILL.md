@@ -25,15 +25,22 @@ goes to stderr: warnings, `--explain`, nothing to strip on the way in.
 
 Two decisions, in this order.
 
-1. **The tier** — `flash`, `pro`, `sota` — by weight (default `0.60 / 0.35 / 0.05`).
-   A tier with nothing runnable drops out, and its weight is spread over the
-   tiers that are left: the draw is always *conditional on what exists*, so a
-   provider that only serves flash and pro still splits `0.63 / 0.37`.
-2. **The model inside that tier**, in proportion to the allowance it has left:
-   the worst `remaining / capacity` window a provider reports. A provider that
-   reports a bare amount and no ceiling (a wallet) carries a nominal share, so it
-   competes instead of being shut out; a tier nobody scores falls back to roster
-   order.
+1. **Only enabled models are candidates.** The multiplier table in
+   `preference.toml` is a whitelist: a model it does not name has a multiplier of
+   zero and is not drawn. An explicit `--tier` is the one exception.
+2. **The tier** — `flash` / `pro` / `sota` / `test` — by the weights in
+   `[tier]` (default `0.60 / 0.35 / 0.05 / 0.00`). A tier with nothing runnable
+   drops out, and its weight is spread over the tiers that are left: the draw is
+   always *conditional on what exists*, so a machine that only serves flash and
+   pro still splits `0.63 / 0.37`.
+3. **The model inside that tier**, by `allowance × multiplier`: the worst
+   `remaining / capacity` window a provider reports, times how much the
+   preference file encourages that model. A provider that reports a bare amount
+   and no ceiling (a wallet) carries a nominal share, so it competes instead of
+   being shut out; a tier nobody scores falls back to roster order.
+
+The tier of a model is a line in the roster (`tier = "..."`), never a rule in
+this script: the judgement lives where a person can edit it.
 
 A model is **not** drawable when any of these holds — each one is a decision the
 provider or you already made, not a guess:
@@ -46,6 +53,7 @@ provider or you already made, not a guess:
 | The roster names no credential this machine has | `key_env` in no environment variable and no private `key` |
 | The provider denies this model for this account | one cheap probe: 401 / 402 / 403 / 404, or a body that says access was denied |
 | `fail_open` is off and nothing could be reported | `~/.agents/model_pool.toml` |
+| Its multiplier is zero | `preference.toml`, next to this skill |
 
 The credential row is why a draw never hands a spawn a model the server would
 refuse: the server resolves `--model` against the same roster, and a provider
@@ -126,9 +134,16 @@ running dry means.
 
 ## Make it this machine's
 
-The defaults live in `pool.py`; a private file overrides them without touching
-the repository, at `~/.agents/model_pool.toml` (`--config`, `MODEL_POOL_CONFIG`
-to point elsewhere):
+Two files, two jobs.
+
+**`preference.toml`** (beside this script) is the judgement: tier weights and
+the whitelist of models worth drawing. Edit it and the next `pick` reads it —
+`--preference` or `MODEL_POOL_PREFERENCE` points at another one. See
+"倍率：这台机器鼓励用哪些" below for the shape.
+
+**`~/.agents/model_pool.toml`** is the plumbing — how the allowance is read and
+what counts as usable (`--config`, `MODEL_POOL_CONFIG` to point elsewhere). Its
+defaults live in `pool.py`:
 
 ```toml
 [pool]
@@ -141,86 +156,77 @@ exclude = []             # provider ids never drawn, e.g. ["local-qwen3"]
 probe_refresh = 86400    # seconds an entitlement verdict answers for
 probe_timeout = 20       # seconds one probe may take
 minimum = { percent = 5, money = 1, other = 0 }
-
-[[tier]]
-id = "flash"
-weight = 0.60
-[[tier]]
-id = "pro"
-weight = 0.35
-[[tier]]
-id = "sota"
-weight = 0.05
-
-# the tier rules themselves: see "What the three names mean" below.
-[tiers]
-cny_per_usd = 6.9
-default = "pro"
-sota = "sota"
-band = [
-  { tier = "flash", max_output_usd = 1.5 },
-  { tier = "pro", max_output_usd = 5.0 },
-]
-params_band = [
-  { tier = "flash", max_total_billion = 100 },
-  { tier = "pro", max_active_billion = 50 },
-]
-rule = [
-  { tier = "flash", any = ["flash", "mini", "lite", "turbo"] },
-  { tier = "sota", any = ["max", "sota", "ultra", "opus"] },
-  { tier = "pro", any = ["pro"] },
-]
-
-# A model you place against those rules yourself, by `<provider>/<id>` or bare id.
-[tiers.model]
-"stepfun/step-5-preview" = "sota"   # the price band says pro; you want it for hard one-offs
 ```
 
-## What the three names mean
+Nothing here decides which tier a model is in: that is `tier = "..."` in the
+roster, below.
 
-`flash`, `pro` and `sota` are this tool's words, not any vendor's, so they are
-defined from the two facts the roster publishes: **price** and **size**.
+## 档位是 roster 里写着的，不是这里算的
 
-**A tier is a price class.** The roster's output price per million tokens decides
-it, because a pool exists to spread load across price levels:
+每个模型在自己的 `[[provider.model]]` 里带一行 `tier`：
 
-| Tier | Output price | What a draw there buys |
+```toml
+  [[provider.model]]
+  id = "deepseek-flash"
+  name = "DeepSeek V4.1-Flash-1017"
+  tier = "flash"
+```
+
+| 档 | 意思 | 派什么活 |
 |---|---|---|
-| `flash` | ≤ $1.50 | the cheap end: DeepSeek Flash, MiniMax M3.1 Flash, MiMo V2.6 Pro, Qwen3.8 Flash, dots3-note |
-| `pro` | ≤ $5.00 | the middle: DeepSeek V4 Pro, Step 5 Preview, Hy4 Preview |
-| `sota` | above | the expensive frontier: Kimi K3.1 Pro (and Highspeed), Kimi K3, Qwen3.8 Max, MiMo Pro UltraSpeed |
+| `flash` | 便宜：够用、快、按量花不了几个钱 | 读文件、跑测试、搬代码 |
+| `pro` | 中间：贵一截，明显更能想 | 设计、疑难定位、跨文件的改 |
+| `sota` | 前沿：最贵的那批 | 一次性的硬活，别拿它跑循环 |
+| `test` | 基本不可用于编程，只用来测 harness 本身 | 验证接口通不通、看服务端起不起来 |
 
-Where the roster states no price, the parameter count decides (a local 27B build
-is not a frontier route), and where it states neither, the name does. `model_pool
-tiers` prints every model with its size and the rule that placed it, so a wrong
-placement is visible instead of guessed.
+四个档**只在这里读，不在这里猜**。改档 = 改 roster 里那一行，不用重新编译、不用改脚本。
+没有 `tier` 的模型不会被抽，`tiers` 会把它们列成"roster 没写档"——那是缺口，不是默认值。
 
-**The price is not a capability ranking, and this roster proves it.** On the
-Artificial Analysis intelligence index (October 2026) DeepSeek V4.1 Flash scores
-**45** and its own V4 Pro **36**; MiMo V2.6 Pro scores **46** at $0.87 per million
-output tokens, while Kimi K3.1 Pro scores **55** at ten times that. So:
+这是**价格档，不是能力档**：这台机器上 V4.1-Flash 的智能指数（45）比 V4-Pro（36）还高，
+所以 `--tier flash` 也可能抽到最聪明的那个；`--tier sota` 买的是贵的前沿，不是"最划算的答案"。
+`[provider.model.params]` 里的规模（总/激活参数，十亿）只是参考：1.6T/49B 不比 552B/16B
+更省钱地想事情——激活参数、价格、厂商的后训练是三个不同轴。
 
-- a `flash` draw is cheap and **may hand you the smartest model on the machine** —
-  that is a real property of this roster, not a bug in the tiers;
-- `--tier sota` buys the expensive frontier, which is what you want for a hard
-  one-off, not a synonym for "best answer per dollar".
+## 倍率：这台机器鼓励用哪些
 
-Sizes come from `[provider.model.params]` in the roster (total and active
-parameters in billions, each with its own source). Read them as context: a
-1.6T/49B route is not cheaper to think with than a 552B/16B one — active
-parameters, price and the vendor's post-training are three different axes.
+`preference.toml` 就在这个 skill 目录里，两个表：
 
-A name word matches a **token**, never a substring, so `mini` is not read into the
-brand `MiniMax`; a word that carries a hyphen or a dot is a phrase and is matched
-against the whole id.
+```toml
+[tier]
+flash = 0.60     # 先抽档
+pro   = 0.35
+sota  = 0.05
+test  = 0.00     # 默认 0：只在你点名 --tier test 时才抽得到
+
+[model]
+"deepseek-official/deepseek-flash" = 1.0    # 正常候选
+"minimax-cn/MiniMax-M3.1-Flash"    = 1.0
+"kimi-coding/k3.1-pro"             = 1.0
+"qwen-token-plan/qwen3.8-max"      = 1.0
+"qwen-dashscope/qwen3.8-max"       = 1.0
+"qwen-token-plan/qwen3.8-flash"    = 1.0
+"qwen-dashscope/cmaas-qwen3.8-flash" = 1.0
+"tencent-tokenhub/hy4-preview"     = 1.0
+```
+
+**倍率里没有的模型默认为 0，也就是不抽**——这张表就是白名单。`2.0` 是"能用就用它"，
+`0.5` 是"没得选才用"。抽取时：先按 `[tier]` 的权重抽档，再在档内按
+**剩余额度 × 倍率** 抽模型。
+
+唯一例外：显式 `--tier test`（或任何 `--tier`）会绕过"倍率为 0 就不抽"这条，因为你已经
+点名要那一档了。`tiers` 会把被关掉的模型标成 `off`，"为什么它从来不出现"一眼可答。
+
+键可以写 `<provider>/<model>`，也可以只写 model id（对所有提供它的 provider 生效）。
+改这个文件不用重启任何东西：下一次 `pick` 就读到；`--preference` 或
+`MODEL_POOL_PREFERENCE` 可以指到别处。
 
 ## What it reads
 
 - **The roster** — `~/.agents/providers.toml` and
   `~/.agents/gongga-agents/providers.toml`, merged the way the server merges them
-  (`GONGGA_PROVIDERS_CATALOG` names one file instead). Which models exist, which
-  ids are retired, which provider serves each, the price, the parameter count,
-  and the credential a quota script takes.
+  (`GONGGA_PROVIDERS_CATALOG` names one file instead). Which models exist, **which
+  tier each is in**, which ids are retired, which provider serves each, the price,
+  the parameter count, and the credential a quota script takes.
 - **The allowance** — each provider's `quota_query.script`, run once per
   `refresh`: the same scripts the roster publishes, read through the same
   contract. Readings are cached in `~/.model_pool/state.json` with their marks,

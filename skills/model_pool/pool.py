@@ -29,6 +29,14 @@ AGENTS = os.path.join(os.path.expanduser("~"), ".agents")
 CONFIG_PATH = os.path.join(AGENTS, "model_pool.toml")
 CONFIG_ENV = "MODEL_POOL_CONFIG"
 
+# Beside this file, because it is this skill's own judgement: which models are
+# worth using, and how much each tier is worth. It travels with the skill, so a
+# machine that installs the skill gets the same opinion, and a machine that
+# disagrees edits one file.
+SKILL_DIR = os.path.dirname(os.path.abspath(__file__))
+PREFERENCE_PATH = os.path.join(SKILL_DIR, "preference.toml")
+PREFERENCE_ENV = "MODEL_POOL_PREFERENCE"
+
 DEFAULTS = {
     "pool": {
         # How long one reading answers for. `0` asks the provider every draw.
@@ -51,11 +59,14 @@ DEFAULTS = {
         "probe_refresh": 86400,
         "probe_timeout": 20,
     },
-    "tier": [
-        {"id": "flash", "weight": 0.60},
-        {"id": "pro", "weight": 0.35},
-        {"id": "sota", "weight": 0.05},
-    ],
+}
+
+# What a draw assumes when nothing says otherwise: the three tiers a machine
+# draws from, and no model enabled at all. A preference file replaces this, and
+# `preference.toml` beside this script is the one that ships.
+PREFERENCE_DEFAULTS = {
+    "tier": {"flash": 0.60, "pro": 0.35, "sota": 0.05, "test": 0.0},
+    "model": {},
 }
 
 
@@ -84,10 +95,29 @@ def load_config(explicit):
         return merge(DEFAULTS, tomllib.load(handle)), path, True
 
 
-def weights_of(config, overrides):
-    """Tier weights in declared order, with `flash=0.6,pro=0.35` written over them."""
-    order = [row["id"] for row in config["tier"]]
-    weights = {row["id"]: float(row.get("weight") or 0) for row in config["tier"]}
+def load_preference(explicit):
+    """This skill's own opinion: tier weights, and which models are worth using.
+
+    Defaults kept, the file laid over them. A model the file does not name has a
+    multiplier of zero -- the list is a whitelist, because "encouraged" and
+    "drawable" have to be the same set or the draw lies about what it prefers.
+    """
+    path = explicit or os.environ.get(PREFERENCE_ENV) or PREFERENCE_PATH
+    merged = copy.deepcopy(PREFERENCE_DEFAULTS)
+    if os.path.isfile(path):
+        with open(path, "rb") as handle:
+            loaded = tomllib.load(handle)
+        for tier, weight in (loaded.get("tier") or {}).items():
+            merged["tier"][tier] = float(weight)
+        for model, multiplier in (loaded.get("model") or {}).items():
+            merged["model"][model] = float(multiplier)
+    return merged, path
+
+
+def weights_of(preference, overrides):
+    """Tier weights in the roster's tier order, with `--weights` written over them."""
+    order = [tier for tier in tiers.ORDER if tier in preference["tier"]]
+    weights = {tier: float(preference["tier"].get(tier) or 0) for tier in order}
     if overrides:
         for piece in overrides.split(","):
             name, _, value = piece.partition("=")
@@ -101,6 +131,20 @@ def weights_of(config, overrides):
     if sum(weights.values()) <= 0:
         raise SystemExit("every tier weighs nothing: no draw is possible")
     return order, weights
+
+
+def multiplier_of(preference, route_key, model_id):
+    """How much this machine encourages one model; absent means zero.
+
+    Named by `<provider>/<model>` so two providers serving the same model can be
+    judged apart (they are different accounts and different allowances), with the
+    bare id as a shorthand for every provider that serves it.
+    """
+    models = preference.get("model") or {}
+    for key in (route_key, model_id):
+        if key in models:
+            return float(models[key])
+    return 0.0
 
 
 def note(text, quiet=False):
@@ -121,6 +165,7 @@ class Route:
         self.usable = None
         self.why = "not read yet"
         self.share = None
+        self.multiplier = 0.0
         self.weight = 0.0
         self.mark = None
         self.evidence = None
@@ -164,23 +209,34 @@ def readings_of(catalog, providers, config, state, refresh, timeout, cached_only
 def evaluate(route, catalog, config, state):
     """Fill in what the draw needs to know about one route.
 
-    Usable is three-valued: `True` with allowance, `False` when the provider
-    itself says there is none, and `None` when nothing could be reported on --
-    which `fail_open` then decides, unscored either way.
+    # Invariant
+
+    `usable` is a gate and `weight` is a ranking, and they are decided apart: a
+    route that cannot be drawn still carries the weight it would have had, so the
+    fallback draw ("nothing is usable, drawn anyway") ranks by the same rule as a
+    normal one instead of collapsing to roster order.
+
+    `usable` is three-valued along the way: `True` with allowance, `False` when the
+    provider itself says there is none, `None` when nothing could be reported on --
+    which `fail_open` then decides.
     """
     pool = config["pool"]
-    credential = catalog.credential(route.provider)
-    if not credential:
-        name = route.provider.get("key_env") or "no key_env"
-        route.usable = False
-        route.weight = 0.0
-        route.why = f"no credential: the roster names {name}, and neither it nor the private catalog has one"
-        return route
     query = catalog.quota_target(route.provider)
     route.unit = (query or {}).get("unit")
     cached = (state.get("readings") or {}).get(route.provider["id"]) or {}
     route.reading = cached.get("reading")
     route.share = quota.share_of(route.reading)
+    # Within a tier: how much is left, times how much this machine wants it used.
+    share = route.share if route.share is not None else float(pool.get("unscored_share", 0.5))
+    route.weight = share * route.multiplier
+
+    credential = catalog.credential(route.provider)
+    if not credential:
+        name = route.provider.get("key_env") or "no key_env"
+        route.usable = False
+        route.why = f"no credential: the roster names {name}, and neither it nor the private catalog has one"
+        return route
+
     route.usable, route.why = quota.state_of(route.reading, route.unit, pool.get("minimum") or {})
     if query is None:
         route.why = "the roster publishes no quota for this provider"
@@ -193,7 +249,7 @@ def evaluate(route, catalog, config, state):
         route.why += ", unscored"
     if cached.get("failure") and route.reading is not None:
         route.why += f" (the last query failed: {cached['failure']})"
-    route.weight = route.share if route.share is not None else float(pool.get("unscored_share", 0.5))
+
     probe = (state.get("probes") or {}).get(route.key) or {}
     inside = probe.get("at") is not None and (
         float(pool.get("probe_refresh") or 0) <= 0
@@ -201,9 +257,7 @@ def evaluate(route, catalog, config, state):
     )
     if inside and probe.get("verdict") == entitlement.REFUSED:
         route.verdict = entitlement.REFUSED
-        route.verdict_detail = probe.get("detail")
         route.usable = False
-        route.weight = 0.0
         route.why = f"probed out: {probe.get('detail') or 'the provider denies this model'}"
     for key in (route.key, route.provider["id"]):
         mark = quota.marked(state, key)
@@ -263,8 +317,8 @@ def draw(routes, order, weights, rng):
     # Nothing is usable: a spawn still has to run somewhere. Relax the marks
     # first, then the allowance, and say so on stderr.
     unmarked = [route for route in routes if route.mark is None]
-    for candidate, why in ((unmarked, "every route is out of allowance"),
-                           (routes, "every route is marked or out of allowance")):
+    for candidate, why in ((unmarked, "no route is usable"),
+                           (routes, "every route is marked or unusable")):
         if not candidate:
             continue
         by_tier = {}
@@ -277,46 +331,61 @@ def draw(routes, order, weights, rng):
     return None, "the roster has no model to draw"
 
 
-def explain_empty(catalog, config, provider_id, tier_id):
+def explain_empty(catalog, config, preference, provider_id, tier_id):
     """Why a filter matched nothing, naming what would have matched."""
     if provider_id and provider_id not in catalog.by_id:
         return f"no provider {provider_id!r}; known: {', '.join(sorted(catalog.by_id))}"
-    tiers = [row["id"] for row in config["tier"]]
-    if tier_id and tier_id not in tiers:
-        return f"no tier {tier_id!r}; declared: {', '.join(tiers)}"
+    order, _ = weights_of(preference, None)
+    if tier_id and tier_id not in order:
+        return f"no tier {tier_id!r}; declared: {', '.join(order)}"
     scope = f"provider {provider_id}" if provider_id else "the roster"
     if tier_id:
         return f"{scope} has no model in tier {tier_id!r}"
-    return f"{scope} carries no model"
+    if not (preference.get("model") or {}):
+        return f"{scope} has no model enabled: add one to {PREFERENCE_PATH}"
+    return f"no model of {scope} is enabled in {PREFERENCE_PATH}"
 
 
-def tier_settings(config):
-    """The tier rules: this machine's overrides laid over the module's defaults."""
-    return merge(tiers.DEFAULTS, config.get("tiers") or {})
+def collect(catalog, config, preference, provider_id, tier_id):
+    """Every route the roster places, with its tier and its multiplier.
 
+    # Invariant
 
-def collect(catalog, config, provider_id, tier_id):
-    order, _ = weights_of(config, None)
-    settings = tier_settings(config)
+    A model whose multiplier is zero is not a candidate, because the preference
+    file is a whitelist: "not encouraged" and "not drawn" have to be the same set,
+    or the draw would quietly use what the file does not name. An explicit
+    `--tier` is the one exception -- asking for the `test` tier has to reach the
+    models in it, and none of those is encouraged.
+    """
+    order, _ = weights_of(preference, None)
     routes = []
     excluded = set(config["pool"].get("exclude") or [])
     for provider, model in catalog.models(provider_id):
-        tier, evidence = tiers.classify(provider, model, settings)
+        tier, evidence = tiers.tier_of(catalog, model)
         if tier not in order or provider["id"] in excluded:
             continue
         if tier_id and tier != tier_id:
             continue
         route = Route(provider, model, tier)
         route.evidence = evidence
+        route.multiplier = multiplier_of(preference, route.key, model["id"])
+        if route.multiplier <= 0:
+            if not tier_id:
+                continue
+            # An explicit `--tier` is the caller asking for that whole tier, so
+            # every model in it competes; the whitelist governs the default draw.
+            route.multiplier = 1.0
+            route.evidence += ", enabled by --tier"
+
         routes.append(route)
     return routes
 
 
-def prepared(args, config, catalog):
+def prepared(args, config, preference, catalog):
     """The filtered routes, read and evaluated: `(routes, state)`."""
-    routes = collect(catalog, config, args.provider, args.tier)
+    routes = collect(catalog, config, preference, args.provider, args.tier)
     if not routes:
-        raise SystemExit(explain_empty(catalog, config, args.provider, args.tier))
+        raise SystemExit(explain_empty(catalog, config, preference, args.provider, args.tier))
     pool = config["pool"]
     state = quota.load_state()
     providers = {route.provider["id"]: route.provider for route in routes}.values()
@@ -344,9 +413,9 @@ def prepared(args, config, catalog):
     return routes, state
 
 
-def cmd_pick(args, config, catalog):
-    order, weights = weights_of(config, args.weights)
-    routes, _state = prepared(args, config, catalog)
+def cmd_pick(args, config, preference, catalog):
+    order, weights = weights_of(preference, args.weights)
+    routes, _state = prepared(args, config, preference, catalog)
     rng = random.Random(args.seed) if args.seed is not None else random.Random()
     route, how = draw(routes, order, weights, rng)
     if route is None:
@@ -359,7 +428,11 @@ def cmd_pick(args, config, catalog):
         note(f"draw: {how}", args.quiet)
         for row in routes:
             share = "-" if row.share is None else f"{row.share:.2f}"
-            note(f"  {row.tier:<5} {row.key:<44} {row.usable!s:<5} {share:<5} {row.weight:<5.2f} {row.why}", args.quiet)
+            note(
+                f"  {row.tier:<5} {row.key:<44} {row.usable!s:<5} {share:<5} "
+                f"x{row.multiplier:<4g} ={row.weight:<6.2f} {row.why}",
+                args.quiet,
+            )
     if args.json:
         print(json.dumps({
             "model": route.key,
@@ -368,6 +441,7 @@ def cmd_pick(args, config, catalog):
             "name": route.model.get("name"),
             "tier": route.tier,
             "share": route.share,
+            "multiplier": route.multiplier,
             "reason": how,
             "weights": {tier: weights[tier] for tier in order},
         }, ensure_ascii=False, separators=(",", ":")))
@@ -375,8 +449,8 @@ def cmd_pick(args, config, catalog):
     print(route.key)
 
 
-def cmd_status(args, config, catalog):
-    routes, state = prepared(args, config, catalog)
+def cmd_status(args, config, preference, catalog):
+    routes, state = prepared(args, config, preference, catalog)
     payload = []
     for route in sorted(routes, key=lambda item: (item.provider["id"], item.model["id"])):
         cached = (state.get("readings") or {}).get(route.provider["id"]) or {}
@@ -386,6 +460,7 @@ def cmd_status(args, config, catalog):
             "tier": route.tier,
             "usable": route.usable,
             "share": route.share,
+            "multiplier": route.multiplier,
             "why": route.why,
             "detail": detail,
             "read_at": cached.get("at"),
@@ -403,14 +478,17 @@ def cmd_status(args, config, catalog):
         age = ""
         if row["read_at"]:
             age = f" ({int(time.time() - float(row['read_at']))}s old)"
-        print(f"{row['tier']:<5} {row['model']:<38} {state_text:<8} {share:<5} {row['why']}{age}")
+        print(
+            f"{row['tier']:<5} {row['model']:<38} {state_text:<8} {share:<5} "
+            f"x{row['multiplier']:<5g} {row['why']}{age}"
+        )
         if row["detail"]:
             print(f"      {row['detail']}")
 
 
-def cmd_probe(args, config, catalog):
+def cmd_probe(args, config, preference, catalog):
     """Ask every live route whether this account may run it, and remember the answer."""
-    routes, state = prepared(args, config, catalog)
+    routes, state = prepared(args, config, preference, catalog)
     probes = state.setdefault("probes", {})
     timeout = float(args.timeout if args.timeout is not None else config["pool"]["probe_timeout"])
     for route in routes:
@@ -447,19 +525,30 @@ def probe_stale(state, routes, config):
     return stale
 
 
-def cmd_tiers(args, config, catalog):
-    """The three tiers, their weights, and every model under the rule that placed it."""
-    order, weights = weights_of(config, args.weights)
-    routes = collect(catalog, config, args.provider, args.tier)
+def cmd_tiers(args, config, preference, catalog):
+    """Every tier, its weight, and every model the roster places in it.
+
+    Disabled models are listed too, with `off`: "why is this never drawn" is the
+    question this command exists to answer, and leaving them out would make the
+    answer look like the model is missing from the roster.
+    """
+    order, weights = weights_of(preference, args.weights)
+    placed = []
+    excluded = set(config["pool"].get("exclude") or [])
+    for provider, model in catalog.models(args.provider):
+        tier, evidence = tiers.tier_of(catalog, model)
+        if tier is None or tier not in order or provider["id"] in excluded:
+            continue
+        placed.append((tier, Route(provider, model, tier), evidence))
     for tier in order:
-        rows = [route for route in routes if route.tier == tier]
-        print(f"{tier:<5} weight {weights[tier]:g}  {len(rows)} model(s)")
-        for route in rows:
-            total, active = tiers.params_of(route.model)
-            size = "-" if total is None else f"{total:g}B"
-            if total is not None and active is not None and active != total:
-                size += f"/{active:g}B"
-            print(f"      {route.key:<44} {size:>10}  {route.evidence}")
+        rows = [row for row in placed if row[0] == tier]
+        print(f"{tier:<5} weight {weights[tier]:g}  {len(rows)} model(s)  —  {tiers.MEANING[tier]}")
+        for _, route, evidence in rows:
+            multiplier = multiplier_of(preference, route.key, route.model["id"])
+            mark = f"x{multiplier:<4g}" if multiplier > 0 else "off  "
+            print(
+                f"      {route.key:<44} {tiers.size_text(route.model):>9}  {mark} {evidence}"
+            )
 
 
 def cmd_mark(args, config, catalog):
@@ -501,7 +590,8 @@ def build_parser():
     common.add_argument("--cached", action="store_true", help="answer from cached readings only, never run a script")
     common.add_argument("--probe", action="store_true",
                         help="also ask the providers this account is allowed to run (one cheap request per route)")
-    common.add_argument("--config", help=f"config file, default {CONFIG_PATH}")
+    common.add_argument("--config", help=f"pool settings, default {CONFIG_PATH}")
+    common.add_argument("--preference", help=f"tier weights and multipliers, default {PREFERENCE_PATH}")
     sub = parser.add_subparsers(dest="command")
 
     pick = sub.add_parser("pick", parents=[common], help="draw one model and print it (default)")
@@ -527,7 +617,7 @@ def build_parser():
     mark.add_argument("--minutes", type=float, help="how long, default the pool's cooldown")
     mark.add_argument("--reason", help="why it is out")
     mark.add_argument("--clear", action="store_true", help="release the mark instead of setting one")
-    mark.add_argument("--config", help=f"config file, default {CONFIG_PATH}")
+    mark.add_argument("--config", help=f"pool settings, default {CONFIG_PATH}")
     mark.set_defaults(handler=cmd_mark)
     return parser
 
@@ -540,10 +630,11 @@ def main(argv):
         argv = ["pick", *argv]
     args = parser.parse_args(argv)
     config, _path, _exists = load_config(getattr(args, "config", None))
+    preference, _pref_path = load_preference(getattr(args, "preference", None))
     catalog = roster.load()
     if catalog is None:
         raise SystemExit(f"no roster: neither {roster.COMMUNITY_CATALOG} nor {roster.PRIVATE_CATALOG} exists")
-    args.handler(args, config, catalog)
+    args.handler(args, config, preference, catalog)
 
 
 if __name__ == "__main__":
