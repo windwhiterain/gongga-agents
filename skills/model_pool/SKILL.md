@@ -50,7 +50,7 @@ provider or you already made, not a guess:
 | The roster retired the id | another entry's `retired_ids` |
 | The provider says the allowance is spent, or at the floor | the quota script's `remaining` / `error` |
 | You marked the provider or the route | `model_pool mark` |
-| The roster names no credential this machine has | `key_env` in no environment variable, and no `key` beside it |
+| This machine holds no credential for it | no entry in `~/.agents/keys.toml`, and `key_env` in no environment variable |
 | The provider denies this model for this account | one cheap probe: 401 / 402 / 403 / 404, or a body that says access was denied |
 | `fail_open` is off and nothing could be reported | `~/.agents/model_pool.toml` |
 | Its multiplier is zero | `preference.toml`, next to this skill |
@@ -224,11 +224,18 @@ test  = 0.00     # 默认 0：只在你点名 --tier test 时才抽得到
 
 - **The roster** — `~/.agents/gongga-agents/providers.toml`, the one file the
   server reads too (`GONGGA_PROVIDERS_CATALOG` names another). On this machine that
-  checkout is on its `local` branch, where the keys live; upstream is `main`, and
-  a `rebase` brings an upstream change down (`LOCAL.md` in that repository). Which
-  models exist, **which tier each is in**, which ids are retired, which provider
-  serves each, the price, the parameter count, and the credential a quota script
-  takes.
+  checkout is on its `local` branch, where this machine's own providers live;
+  upstream is `main`, and a `rebase` brings an upstream change down (`LOCAL.md` in
+  that repository). Which models exist, **which tier each is in**, which ids are
+  retired, which provider serves each, the price, the parameter count.
+- **The key** — `~/.agents/keys.toml`, `[keys]` mapping a provider id to its key.
+  Git does not track it, and it is read the way the server reads it: the keystore
+  first, then the variable `key_env` names, and a `key` written in the roster is
+  ignored (a roster is a checkout, so a key in one is a key in git). A provider
+  with neither is not drawn — the gate is the server's own.
+- **The credential a quota script takes** — the same one, which is what the
+  server hands the script; a variable the script reads itself (`script_env`, a
+  console cookie) comes from the environment when this machine has it.
 - **The allowance** — each provider's `quota_query.script`, run once per
   `refresh`: the same scripts the roster publishes, read through the same
   contract. Readings are cached in `~/.model_pool/state.json` with their marks,

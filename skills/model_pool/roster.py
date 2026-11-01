@@ -1,23 +1,66 @@
 """The machine's model roster: which provider serves which model, and which tier
 each model belongs to.
 
-Both roots are read the way the server reads them: the community catalog is the
-base, the private one overrides field by field, and the private file is never
-required. `GONGGA_PROVIDERS_CATALOG` names one catalog instead of the pair.
+Read the way the server reads it: one community checkout, its `local` branch
+carrying this machine's own entries, and `GONGGA_PROVIDERS_CATALOG` naming some
+other file instead. A credential is not in the roster -- it lives in the keystore
+beside it, `~/.agents/keys.toml`, which git does not track.
 """
 
 import os
 import tomllib
 
-AGENTS = os.path.join(os.path.expanduser("~"), ".agents")
+# The two roots the server resolves, by the same names: `GONGGA_AGENTS_HOME` for
+# `~/.agents`, `GONGGA_AGENTS_DIR` for the community checkout under it.
+AGENTS_HOME_ENV = "GONGGA_AGENTS_HOME"
+AGENTS_DIR_ENV = "GONGGA_AGENTS_DIR"
+AGENTS = os.environ.get(AGENTS_HOME_ENV) or os.path.join(os.path.expanduser("~"), ".agents")
 # One roster, from the community checkout. A machine's own entries are a branch of
 # that checkout (`local`), not a second file -- so nothing here merges two lists.
-CATALOG = os.path.join(AGENTS, "gongga-agents", "providers.toml")
+CATALOG = os.path.join(
+    os.environ.get(AGENTS_DIR_ENV) or os.path.join(AGENTS, "gongga-agents"),
+    "providers.toml",
+)
 CATALOG_ENV = "GONGGA_PROVIDERS_CATALOG"
+# The keystore: `[keys]` maps a provider id to its key. Never in git, edited in
+# place, re-read whenever its mtime moves -- the same stamp the server watches.
+KEYS = os.path.join(AGENTS, "keys.toml")
 
 
 class RosterError(Exception):
     """A catalog that cannot be read at all."""
+
+
+# The keystore's last read, keyed by path: `{path: (mtime, [keys])}`. Re-reading
+# is what makes a rotation take effect on the next draw, so the stamp is the
+# mtime, not "have I read this file yet".
+_KEYSTORE = {}
+
+
+def keystore(path=None):
+    """`[keys]` from `~/.agents/keys.toml`: the provider id to its key.
+
+    A file that is missing, unreadable or not TOML reads as no keys at all --
+    never as an error: a machine with only environment variables is a machine
+    that still draws.
+    """
+    path = path or KEYS
+    try:
+        stamp = os.stat(path).st_mtime_ns
+    except OSError:
+        _KEYSTORE[path] = (None, {})
+        return {}
+    seen = _KEYSTORE.get(path)
+    if seen and seen[0] == stamp:
+        return seen[1]
+    try:
+        with open(path, "rb") as handle:
+            table = tomllib.load(handle).get("keys") or {}
+    except (OSError, tomllib.TOMLDecodeError):
+        table = {}
+    keys = {name: value for name, value in table.items() if isinstance(value, str) and value}
+    _KEYSTORE[path] = (stamp, keys)
+    return keys
 
 
 def read_catalog(path):
@@ -46,10 +89,26 @@ class Roster:
         }
 
     def credential(self, provider):
-        """The provider's API credential: the environment first, then the private catalog."""
+        """The provider's API credential, from the one place a key may live.
+
+        # Invariant
+
+        Only two sources, and the keystore wins: `~/.agents/keys.toml`, keyed by
+        provider id, then the variable the roster's `key_env` names. The keystore
+        must beat the environment, not the other way round -- a variable is copied
+        into a process once, at creation, so a stale one would shadow every edit to
+        the file. The server orders them this way, and a draw that disagreed would
+        hand a spawn a model the server then refuses, or hide one it would run.
+
+        A `key` written in the roster is **ignored**, exactly as the server ignores
+        it: the roster is a git checkout, and a key in one is a key in git.
+        """
+        kept = keystore().get(provider.get("id"))
+        if kept:
+            return kept
         name = provider.get("key_env")
         from_environment = os.environ.get(name) if name else None
-        return from_environment or provider.get("key") or None
+        return from_environment or None
 
     def script_path(self, script):
         """The quota script, relative to the roster that named it."""
@@ -71,21 +130,18 @@ class Roster:
         return None
 
     def quota_credential(self, provider, query):
-        """The credential the quota script itself takes.
+        """The credential the quota script takes.
 
-        `script_env` is the variable that script reads, which is not always the
-        provider's `key_env` (a console cookie, a second account). A missing
-        script-specific variable is not replaced by the API key: the script
-        would only refuse it.
+        A variable the script reads itself (`script_env`) comes from the
+        environment when it is there -- a console cookie or a second account is
+        not an API key. Otherwise the script gets the same credential a request
+        would use, which is what the server hands it.
         """
         name = query.get("script_env")
         if name:
             from_environment = os.environ.get(name)
             if from_environment:
                 return from_environment
-            if name == provider.get("key_env"):
-                return provider.get("key") or None
-            return None
         return self.credential(provider)
 
     def models(self, provider_id=None):

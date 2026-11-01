@@ -1078,13 +1078,13 @@ name = "腾讯云 TokenHub"
 kind = "vendor"
 key_env = "TENCENT_API_KEY"
 key_prefix = "sk-tp-"
-key_file = "@@KEY:tencent-api.txt@@"
 homepage = "https://cloud.tencent.com/product/hub"
 catalog_verified = "本机 profile 在用 hy4-preview；tokenhub 的 /models 不对外（404）"
 retrieved = "2026-10-22"
 note = """
-本机没有这把 key 的明文文件（只有 DSH 凭据引用 TENCENT_API_KEY），所以下面那个
-placeholder 取不到值，补齐时把 key 写进去，或换成 key_env 就够用。
+本机还没有这把 key：`~/.agents/keys.toml` 里没有 tencent-tokenhub 一行，环境里也没有
+TENCENT_API_KEY（只有 DSH 凭据引用这个名字）。补齐时写进 keys.toml —— **不要**写进 roster，
+这里写 key 会被服务端忽略，而且 roster 是 git 检出。
 """
 
   [[provider.endpoint]]

@@ -194,7 +194,7 @@ def readings_of(catalog, providers, config, state, refresh, timeout, cached_only
         credential = catalog.quota_credential(provider, query)
         if not credential:
             item = query.get("script_env") or provider.get("key_env") or "credential"
-            quota.remember(state, provider["id"], None, f"no {item} in the environment or the private catalog")
+            quota.remember(state, provider["id"], None, f"no {item} in the keystore or the environment")
             continue
         reading, failure = quota.run_script(path, credential, timeout)
         quota.remember(state, provider["id"], reading, failure)
@@ -234,7 +234,7 @@ def evaluate(route, catalog, config, state):
     if not credential:
         name = route.provider.get("key_env") or "no key_env"
         route.usable = False
-        route.why = f"no credential: the roster names {name}, and neither it nor the private catalog has one"
+        route.why = f"no credential: the roster names {name}, and neither the keystore nor the environment has one"
         return route
 
     route.usable, route.why = quota.state_of(route.reading, route.unit, pool.get("minimum") or {})
