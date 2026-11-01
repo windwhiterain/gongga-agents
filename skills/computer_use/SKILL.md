@@ -12,9 +12,10 @@ description: 用鼠标和键盘真的操作桌面——截图看屏、按控件�
 ~/.agents/skills/computer_use/cu doctor      # 先确认这台机器能用
 ```
 
-`cu` 优先跑 `cu.py`（uv 解析内联依赖，不需要你先装任何东西），Windows 上没有
-uv/python 时回落到 `cu.ps1`。**跨平台的是 `cu.py` + 每个平台一个后端**，不是把
-PowerShell 翻译成 Python 就完事——两者调的是不同的系统 API。
+`cu` 优先跑 `cu.py`（uv 解析内联依赖，不需要你先装任何东西），没有 uv 就用
+`python3` / `python` / `py` 里第一个 3.9+ 的。**跨平台的是 `cu.py` + 每个平台一个后端**，
+没有第二份 PowerShell 实现：两套调同一件事的代码会各漂一半，这个仓库的 UIA 树遍历
+就那么在两边各坏过一次。
 
 ## 先看它能承诺什么
 
