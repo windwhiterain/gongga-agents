@@ -42,6 +42,32 @@ timezone = "Asia/Shanghai"
 # `providers/statutory.toml` 里（国务院每年发一次通知，日期固定），两者合起来算出现在落在
 # 哪个 band。不联网也能用：`--offline` 只按周几判断，结果的 `approximate` 会说明这一点。
 
+# ---------------------------------------------------------------------------
+# 缓存：保留时间与存储费
+# ---------------------------------------------------------------------------
+# 前缀缓存省的是输入费，但它**会过期**。过期时间由厂商定，且大多写着"不保证"，
+# 所以它属于 provider 级的事实，写在 `[[provider]]` 下，不是写在某个模型的价格里：
+#
+#   cache_ttl            保留多久，用厂商自己的说法（"5 分钟，命中即续期"）
+#   cache_ttl_note       它没说的那一半：写入怎么收费、能不能续期、存储怎么算
+#   cache_ttl_source     查证来源；cache_ttl_retrieved 是查证日期
+#
+# 官方没公布数字就写 `cache_ttl = "unverified —— ..."`，别拿"通常是 5 分钟"填空。
+# 这一栏空着和写着 unverified 是同一件事，但后者不会骗人。
+#
+# 价格那一侧沿用 `[provider.model.price]` 的字段：
+#
+#   cache_read            命中价（各家都收）
+#   cache_write           写一次的价（显式缓存才收；0.00 常是"限时免费"）
+#   cache_write_5m/1h     同一件事按 TTL 分档（Kimi K3 系）
+#   cache_read_explicit   显式缓存命中价，与隐式分开记（阿里百炼）
+#   cache_storage         存储价，**按小时**计，所以配 `cache_storage_unit`。
+#                         方舟 0.017、智谱 0.00 都是"元/百万 token/小时"，
+#                         单位写在 `unit = "per_1m_tokens"` 里的那个数不带时间。
+#
+# 没有写 cache_storage 的，是价格表里根本没有这一项（DeepSeek、StepFun、Kimi、MiMo），
+# 不是"漏了"。
+
 [[provider]]
 id = "deepseek-official"
 name = "DeepSeek 官方"
@@ -51,6 +77,13 @@ homepage = "https://platform.deepseek.com"
 docs = "https://api-docs.deepseek.com"
 catalog_verified = "2026-11-01 /v1/models 返回 deepseek-flash、deepseek-v4-pro，与 roster 一致；Anthropic 面在同域 /anthropic"
 retrieved = "2026-10-22"
+
+# 缓存保留时间。官方只说"几个小时到几天"，而且明确是尽力而为 —— 没有可配的 TTL 旋钮，
+# 命不命中由系统判定，所以也不要把它写进任何 SLA。
+cache_ttl = "几小时到几天 —— 官方原文：缓存不再使用后会自动被清空，时间一般为几个小时到几天"
+cache_ttl_note = "官方口径是『尽力而为』，不保证 100% 命中。另有一说线上工程配置是 Agent 流量留 3 天、聊天流量留 7 天 —— 那是推理框架文档里的数字，不是 API 承诺，unverified。写入与存储都不另收费，只有 cache_read 那一档价。"
+cache_ttl_source = "https://api-docs.deepseek.com/zh-cn/guides/kv_cache"
+cache_ttl_retrieved = "2026-11-01"
 
   [[provider.endpoint]]
   id = "openai"
@@ -187,6 +220,13 @@ catalog = "https://api.minimaxi.com/v1/models"
 catalog_verified = "2026-11-01 本机 key 探到 9 个：M3.1-Flash / M3 / M2.7 / M2.7-highspeed / M2.5 / M2.5-highspeed / M2.1 / M2.1-highspeed / M2 —— 与 10-31 那次相同"
 retrieved = "2026-10-22"
 
+# 缓存保留时间：Anthropic 面是主动缓存，cache_control: {type:"ephemeral"}，5 分钟，
+# 每次命中把有效期重新计满；一次请求最多 4 个断点，超出 400。
+cache_ttl = "5 分钟，命中即续期"
+cache_ttl_note = "『自动 Prompt 缓存』那一页没写有效期；5 分钟出自 Anthropic 兼容缓存页的『缓存过期时间』。写入不单独收费，命中按 cache_read 计费，也没有缓存存储费。"
+cache_ttl_source = "https://platform.minimaxi.com/docs/api-reference/anthropic-api-compatible-cache"
+cache_ttl_retrieved = "2026-11-01"
+
   [[provider.endpoint]]
   id = "openai"
   api = "openai-completions"
@@ -318,6 +358,12 @@ regions = "Kimi Coding 只有 api.kimi.com/coding 这一个产品面；Moonshot 
 console = "https://www.kimi.com/code/console"
 catalog_verified = "2026-11-01 本机 key 探到 6 个：kimi-for-coding(-highspeed)、k3、k3-256k、k3.1-pro(-highspeed) —— 六个都在 roster 里"
 retrieved = "2026-10-22"
+
+# 缓存保留时间：两档都明码收费，写一次付一次，命中只付 cache_read。
+cache_ttl = "5m（默认）/ 1h 两档，命中即续期"
+cache_ttl_note = "K3 系写入 5m 按 1× 输入价、1h 按 2×；超过 TTL 未命中就要重新写一次。缓存不能手动清，只能等它过期。K2 系（kimi-for-coding）只有 cache_read，不另收写入。"
+cache_ttl_source = "https://platform.kimi.com/docs/guide/context-caching"
+cache_ttl_retrieved = "2026-11-01"
 
   [[provider.endpoint]]
   id = "openai"
@@ -485,6 +531,8 @@ retrieved = "2026-10-22"
   input = 20.00
   output = 100.00
   cache_read = 2.00
+  cache_write_5m = 20.00                   # 写入费按 k3 的表记，同权重同价
+  cache_write_1h = 40.00
   source = "https://platform.moonshot.cn/docs/pricing/chat"
   retrieved = "2026-10-22"
 
@@ -531,6 +579,12 @@ docs = "https://platform.stepfun.com/docs/zh/api-reference/intro"
 catalog = "https://api.stepfun.com/v1/models"
 catalog_verified = "2026-11-01 本机 key 探到 33 个：文本对话线仍是 step-5-preview / step-3.7-flash / step-3.5-flash(-2603)，其余是 asr/tts/audio/image 的一套；另有 step-router-v1 —— 路由器不是它自己的模型，不收"
 retrieved = "2026-10-22"
+
+# 缓存保留时间：官方文档只讲命中计价，不讲保留多久 —— 不编一个数字。
+cache_ttl = "unverified —— 官方 Prompt 缓存页没有公布有效期，由系统自行淘汰"
+cache_ttl_note = "自动启用，最小缓存单元 256 token；没有 TTL 旋钮，也没有缓存写入/存储费，只剩 cache_read 一档。"
+cache_ttl_source = "https://platform.stepfun.com/docs/zh/guides/developer/prompt-cache"
+cache_ttl_retrieved = "2026-11-01"
 
   [[provider.endpoint]]
   id = "openai"
@@ -657,6 +711,12 @@ catalog = "https://api.xiaomimimo.com/v1/models"
 catalog_verified = "2026-11-01 本机 key 探到 7 个：mimo-v2.6-flash / -pro / -pro-ultraspeed，加 mimo-v2.5-asr / tts / tts-voiceclone / tts-voicedesign —— 10-22 那次列出的 mimo-v2.5-pro 已经不在目录里"
 retrieved = "2026-10-22"
 
+# 缓存保留时间：定价页只写"缓存写入限时免费"，保留多久一个字没有。
+cache_ttl = "unverified —— 定价页没有公布前缀缓存的保留时间"
+cache_ttl_note = "缓存命中有价（见 cache_read），写入 0.00 是限时免费的价，不是永久承诺；有效期没数字，别在配置里编一个。"
+cache_ttl_source = "https://mimo.mi.com/docs/zh-CN/price/pay-as-you-go"
+cache_ttl_retrieved = "2026-11-01"
+
   [[provider.endpoint]]
   id = "openai"
   api = "openai-completions"
@@ -731,6 +791,7 @@ retrieved = "2026-10-22"
   input = 1.00
   output = 2.00
   cache_read = 0.02
+  cache_write = 0.00                       # 限时免费
   price_usd = { input = 0.14, output = 0.28, cache_read = 0.0028 }
   source = "https://mimo.mi.com/docs/zh-CN/price/pay-as-you-go"
   retrieved = "2026-10-22"
@@ -756,6 +817,7 @@ retrieved = "2026-10-22"
   input = 30.00
   output = 60.00
   cache_read = 0.25
+  cache_write = 0.00                       # 限时免费，与其它两款一致
   price_usd = { input = 4.35, output = 8.70, cache_read = 0.036 }
   source = "https://mimo.mi.com/docs/zh-CN/price/pay-as-you-go"
   retrieved = "2026-10-22"
@@ -792,6 +854,12 @@ homepage = "https://longcat.chat"
 catalog = "https://api.longcat.chat/openai/v1/models"
 catalog_verified = "2026-11-01 本机 key 探到 2 个：LongCat-2.5-Preview、LongCat-2.0"
 retrieved = "2026-10-22"
+
+# 缓存保留时间：官方定价页只给缓存命中价。
+cache_ttl = "unverified —— 官方定价页没有缓存保留时间"
+cache_ttl_note = "第三方横评把它列为 Cache TTL undefined，与官方文档一致：没有可依赖的时长，只有命中价。"
+cache_ttl_source = "https://longcat.chat/platform/docs/pricing/longcat-2.0"
+cache_ttl_retrieved = "2026-11-01"
 
   [[provider.endpoint]]
   id = "openai"
@@ -877,6 +945,12 @@ catalog = "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1/models"
 catalog_verified = "2026-11-01 本机套餐 key 探到 21 个：qwen3.8-max / -flash、qwen3.7-max / -plus、qwen3.6-flash、auto、decision-model-preview、glm-5.2 / glm-5.3、deepseek-v4-flash / -pro / -v4.1-flash / -v4.1-flash-1017，以及图像和音频的几个"
 retrieved = "2026-10-22"
 note = "这个主机是通义千问 MaaS 的产品端点，不是内置的 ap-southeast-1 国际区；套餐 key 与 DashScope 按量 key 是两份凭据。套餐目录里混着 glm-5.2 / glm-5.3（智谱）和 deepseek-v4*（DeepSeek）—— 那是三方经百炼路由，不是阿里的模型，一条都不收；deepseek 的忙闲价格也不替它们算"
+
+# 缓存保留时间：两种缓存两套规则，别混成一个数。
+cache_ttl = "显式缓存 5 分钟、命中即重置；隐式缓存无固定有效期，系统定期清理长时间未使用的"
+cache_ttl_note = "显式缓存创建按输入标准价的 125% 计费（即 cache_write），命中按 10% 上下（cache_read_explicit）；隐式缓存不收写入费，命中也便宜（cache_read）。最小可缓存 1024 token，一次最多 4 个 cache_control 标记，超龄未命中即被清理。"
+cache_ttl_source = "https://help.aliyun.com/zh/model-studio/context-cache"
+cache_ttl_retrieved = "2026-11-01"
 
   [[provider.endpoint]]
   id = "openai"
@@ -996,6 +1070,12 @@ catalog_verified = "2026-11-01 本机 key 探到 184 个：Qwen 自营（qwen3.8
 note = "按量付费目录里三方模型占了一半以上，还有 cmaas- 前缀的再部署条目；roster 只收 Qwen 自己的 id，并且用官方模型名而不是部署别名"
 retrieved = "2026-10-22"
 
+# 与 Token Plan 同一条缓存规则，价格表分开记。
+cache_ttl = "显式缓存 5 分钟、命中即重置；隐式缓存无固定有效期，系统定期清理长时间未使用的"
+cache_ttl_note = "显式缓存创建按输入标准价 125% 计费（cache_write），命中按 10% 上下（cache_read_explicit）；隐式缓存不收写入费。"
+cache_ttl_source = "https://help.aliyun.com/zh/model-studio/context-cache"
+cache_ttl_retrieved = "2026-11-01"
+
   [[provider.endpoint]]
   id = "openai"
   api = "openai-completions"
@@ -1085,6 +1165,13 @@ note = """
 TENCENT_API_KEY（只有 DSH 凭据引用这个名字）。补齐时写进 keys.toml —— **不要**写进 roster，
 这里写 key 会被服务端忽略，而且 roster 是 git 检出。
 """
+
+# 缓存保留时间：官方指南讲了 TTL 的机制（prompt_cache_key / X-Session-ID 怎么喂前缀），
+# 但通篇没有给时长 —— 机制存在不等于数字存在。
+cache_ttl = "unverified —— 官方《提升 Cache 命中率指南》只讲 TTL 机制，没有给具体时长"
+cache_ttl_note = "同一份文档给了两条提高命中的手段：请求体里 prompt_cache_key 填 conversation_id、HTTP 头 X-Session-ID 把人固定到同一推理实例。本机没有这把 key，也验不了命中。"
+cache_ttl_source = "https://cloud.tencent.cn/document/product/1823/131410"
+cache_ttl_retrieved = "2026-11-01"
 
   [[provider.endpoint]]
   id = "openai"
@@ -1206,6 +1293,11 @@ note = """
 不是 Authorization: Bearer，用错就是 401 governance.missing_api_key。
 """
 
+# 缓存保留时间：平台文档没有缓存章节。
+cache_ttl = "unverified —— 平台文档没有缓存章节，缓存命中价也标着『没公布』"
+cache_ttl_source = "https://dots.ai/platform/docs"
+cache_ttl_retrieved = "2026-11-01"
+
   [[provider.endpoint]]
   id = "openai"
   api = "openai-completions"
@@ -1269,6 +1361,13 @@ note = """
 `ZAI_API_KEY`（新 SDK zai / ZhipuAiClient）、`ANTHROPIC_API_KEY`（Anthropic 面）；同一个 key 换个名字而已。
 """
 
+# 缓存保留时间：官方不卖时长，卖的是"元/百万 tokens/小时"的存储 —— 也就是说缓存是租来的，
+# 存在期间一直在计费，但没有公布过期时间。
+cache_ttl = "unverified —— 官方只按小时收缓存存储费，没有公布过期时间"
+cache_ttl_note = "存储费在缓存存在期间按自然小时累加（现价 0.00，限时免费）；社区观察约 1 小时，没有官方出处。隐式缓存，无需 cache_control。"
+cache_ttl_source = "https://docs.bigmodel.cn/cn/guide/capabilities/cache"
+cache_ttl_retrieved = "2026-11-01"
+
   [[provider.endpoint]]
   id = "openai"
   api = "openai-completions"
@@ -1314,7 +1413,8 @@ note = """
   input = 8.00
   output = 28.00
   cache_read = 2.00
-  cache_storage = 0.00
+  cache_storage = 0.00                   # 元/百万 token/小时，现价限时免费
+  cache_storage_unit = "per_1m_tokens_per_hour"
   price_usd = { input = 1.40, output = 4.40, cache_read = 0.26 }
   source = "https://docs.bigmodel.cn/cn/guide/start/pricing"
   retrieved = "2026-11-01"
@@ -1346,7 +1446,8 @@ note = """
   input = 0.80
   output = 2.80
   cache_read = 0.23
-  cache_storage = 0.00
+  cache_storage = 0.00                   # 元/百万 token/小时，现价限时免费
+  cache_storage_unit = "per_1m_tokens_per_hour"
   price_usd = { input = 0.15, output = 0.50, cache_read = 0.03 }
   source = "https://docs.bigmodel.cn/cn/guide/start/pricing"
   retrieved = "2026-11-01"
@@ -1368,7 +1469,8 @@ note = """
   input = 2.00
   output = 7.00
   cache_read = 0.57
-  cache_storage = 0.00
+  cache_storage = 0.00                   # 元/百万 token/小时，现价限时免费
+  cache_storage_unit = "per_1m_tokens_per_hour"
   price_usd = { input = 0.37, output = 1.25, cache_read = 0.075 }
   source = "https://docs.bigmodel.cn/cn/guide/start/pricing"
   retrieved = "2026-11-01"
@@ -1391,7 +1493,8 @@ note = """
   input = 8.00
   output = 28.00
   cache_read = 2.00
-  cache_storage = 0.00
+  cache_storage = 0.00                   # 元/百万 token/小时，现价限时免费
+  cache_storage_unit = "per_1m_tokens_per_hour"
   price_usd = { input = 1.40, output = 4.40, cache_read = 0.26 }
   source = "https://docs.bigmodel.cn/cn/guide/start/pricing"
   retrieved = "2026-11-01"
@@ -1430,6 +1533,12 @@ note = """
 示例是 ARK_API_KEY。同一把 key 既能打按量面也能打 Coding Plan 面 —— 切 base_url 决定走哪边：
 用 /api/v3 打套餐 key **不扣套餐**，会另开一笔按量账单。
 """
+
+# 缓存保留时间：显式缓存是**租**来的，到期不续；隐式缓存连承诺都没有。
+cache_ttl = "隐式缓存：不承诺（系统定期清理长时间未用的）；显式 Session / 前缀缓存：可指定 1 小时到 7 天，[3600, 604800] 秒"
+cache_ttl_note = "显式缓存用 expire_at 指定到期时刻（最大 7 天），且不因继续使用而续期 —— 与 Kimi 的『命中即续期』正好相反。存储按自然小时出账，不足 1 小时按 1 小时算；隐式缓存没有存储费，也不保证命中。"
+cache_ttl_source = "https://docs.volcengine.com/docs/ark/context-cache"
+cache_ttl_retrieved = "2026-11-01"
 
   [[provider.endpoint]]
   id = "openai"
@@ -1479,7 +1588,8 @@ note = """
   input = 6.00
   output = 30.00
   cache_read = 1.20
-  cache_storage = 0.017
+  cache_storage = 0.017                  # 元/百万 token/小时，不足 1 小时按 1 小时算
+  cache_storage_unit = "per_1m_tokens_per_hour"
   flex = { input = 3.00, output = 15.00 }
   source = "https://docs.volcengine.com/docs/ark/model-pricing"
   retrieved = "2026-11-01"
@@ -1503,7 +1613,8 @@ note = """
   input = 6.00
   output = 30.00
   cache_read = 1.20
-  cache_storage = 0.017
+  cache_storage = 0.017                  # 元/百万 token/小时，不足 1 小时按 1 小时算
+  cache_storage_unit = "per_1m_tokens_per_hour"
   source = "https://docs.volcengine.com/docs/ark/model-pricing"
   retrieved = "2026-11-01"
   note = "与 2.1-pro 同价：贵在迭代速度而不是参数。"
@@ -1527,7 +1638,8 @@ note = """
   input = 0.80
   output = 2.70
   cache_read = 0.16
-  cache_storage = 0.017
+  cache_storage = 0.017                  # 元/百万 token/小时，不足 1 小时按 1 小时算
+  cache_storage_unit = "per_1m_tokens_per_hour"
   audio_input = 12.00
   audio_cache_read = 2.40
   flex = { input = 0.40, output = 1.35 }
@@ -1553,7 +1665,8 @@ note = """
   input = 3.00
   output = 15.00
   cache_read = 0.60
-  cache_storage = 0.017
+  cache_storage = 0.017                  # 元/百万 token/小时，不足 1 小时按 1 小时算
+  cache_storage_unit = "per_1m_tokens_per_hour"
   flex = { input = 1.50, output = 7.50 }
   price_usd = { input = 0.50, output = 2.50, cache_read = 0.10 }
   source = "https://docs.volcengine.com/docs/ark/model-pricing"

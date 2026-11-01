@@ -77,9 +77,14 @@ roster 里的 `key = "..."` 会被**忽略**：roster 是 git 检出，写进去
    `holiday` / `rest_day` / `makeup_workday` 这五个词（定义在 `providers.toml` 顶部），
    `hours` 写固定时段，价格写这个时段的数。**最宽的那个档放最后且不写 `days`**，它就是其余全部；
    写反了会让工作日夜间按高峰价计费。想知道某时刻实际多少钱：`python providers/price.py`。
-5. 法定节假日日期写在 `providers/statutory.toml`（国务院每年一次通知），由 `price.py` 读；
+5. 缓存写在两处：**保留时间**是 provider 级的事实（`cache_ttl` / `cache_ttl_note` /
+   `cache_ttl_source`，写在 `[[provider]]` 下），**价格**照旧在 `[provider.model.price]`
+   （`cache_read` / `cache_write` / `cache_write_5m` / `cache_storage`，按小时计的另配
+   `cache_storage_unit`）。官方只写"尽力而为"或者干脆不给数字的，写 `unverified —— 原因`；
+   别用"通常 5 分钟"之类的印象填这一格。字段释义在 `providers.toml` 顶部。
+6. 法定节假日日期写在 `providers/statutory.toml`（国务院每年一次通知），由 `price.py` 读；
    放假调休表从 chinese-days 按年缓存到 `~/.agents/cache/`，不在仓库里。
-6. 提交前确认：`grep -nE '"(sk|ak|flm_ak|user)_' providers.toml` 无输出。
+7. 提交前确认：`grep -nE '"(sk|ak|flm_ak|user)_' providers.toml` 无输出。
 
 ## 提交往哪去：公共的进 `main`，本机的留 `local`
 
