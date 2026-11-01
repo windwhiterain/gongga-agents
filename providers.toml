@@ -1,142 +1,18 @@
-# 社区共建的 LLM / provider 目录（gongga-agents）
+# LLM / provider 目录（gongga-agents）
 #
-# 单一事实源：URL、模型目录、上下文、模态、思考等级、价格（含分时段）、额度查询都在这里。
-# 本文件**不含任何密钥字面量**：每个 provider 用 `key_env` 指明环境变量名，密钥放环境变量，
-# 或者写到用户私有的 ~/.agents/providers.toml 里覆盖（同 id 的 provider 按字段覆盖）。
+# 只有 provider：端点、模型、分档、上下文、模态、思考等级、价格、额度查询。
 #
-# 字段里的 source 记录的是**实际查证来源**，retrieved 是查证日期。
-# 标 unverified 的字段表示本机探测或官方文档都没拿到，值来自网关在售目录，不要当合同价用。
+# 本文件**不含任何密钥**：每个 provider 用 `key_env` 指明环境变量名，密钥在环境变量或
+# `~/.agents/keys.toml` 里（后者不进任何仓库）。
 #
-# 这里只写机器无关的事实；机器自己的东西（密钥、内网 base_url、自建 provider）
-# 属于 ~/.agents/providers.toml —— 两个文件同 id 的 provider 合并，私有字段覆盖社区字段。
+# 本机自建的东西（内网 base_url、自建 provider）在 `local` 分支上，见 LOCAL.md。
+#
+# 字段里的 source 记录**实际查证来源**，retrieved 是查证日期；标 unverified 的表示本机
+# 探测和官方文档都没拿到，值来自网关在售目录，不要当合同价用。
 
 schema = 1
 updated = "2026-10-31"
 timezone = "Asia/Shanghai"
-
-# ---------------------------------------------------------------------------
-# 日历：价格分段里的"是否节假日"由它决定
-# ---------------------------------------------------------------------------
-# 为什么不能直接用休息日：DeepSeek 官方写的是"高峰时段排除**中国法定节假日**"，
-# 而 2026-02-15（春节假期第一天，连休）不是法定节假日，2026-01-02（元旦补休）
-# 也不是。任一份公开数据集的 isOffDay 都把"连休/补休"和"法定节假日"混在一起，
-# 所以法定日必须单独列出。
-[calendar]
-timezone = "Asia/Shanghai"
-
-  [calendar.sources]
-  # 放假调休全集：holidays 33 天 / workdays 6 天 / inLieuDays 6 天（2026 实测）
-  rest_and_makeup = { name = "chinese-days", url = "https://cdn.jsdelivr.net/npm/chinese-days/dist/years/{year}.json", retrieved = "2026-10-22" }
-  # 备用：每天从 gov.cn 抓取并更新，字段少但覆盖面广
-  fallback = { name = "holiday-cn", url = "https://raw.githubusercontent.com/NateScarlet/holiday-cn/master/{year}.json", retrieved = "2026-10-22" }
-  # 法定日的定义出处
-  authority = { name = "全国年节及纪念日放假办法（国务院令第795号）", url = "https://www.gov.cn/zhengce/content/202411/content_6986380.htm" }
-  notice_2026 = { name = "国务院办公厅关于2026年部分节假日安排的通知（国办发明电〔2025〕7号）", url = "https://www.gov.cn/zhengce/zhengceku/202511/content_7047091.htm" }
-  notice_2027 = { name = "尚未发布（gov.cn 政策库检索无结果，预计 2026-11 发布）", url = "https://sousuo.www.gov.cn/search-gov/data?t=zhengcelibrary_gw&q=2027年部分节假日安排" }
-
-  # 五类日子，按顺序命中即返回，O(1) 查表
-  # 注意 workday 与 weekend 不是互补：调休上班日是"周末里的工作日"，
-  # 而补休/连休是"工作日里的休息日"。
-  [calendar.rules]
-  workday        = "周一至周五，且不在 statutory、不在 holidays(放假调休全集) 里"   # 普通工作日
-  makeup_workday = "周六或周日，且在 workdays(调休上班日) 里"                      # DeepSeek 按空闲时段计费
-  holiday        = "在 statutory 里"                                              # 法定节假日
-  rest_day       = "在 holidays 或 inLieuDays 里，但不是 statutory"               # 连休 / 补休
-  weekend        = "周六或周日，且不在 workdays、不在 statutory 里"               # 普通周末
-  unknown        = "该年份没有 statutory 表时按 weekend 兜底，并打 warning"
-  peak_eligible  = "workday"        # 只有普通工作日落在高峰时段，其余五类都是空闲时段
-
-  # 法定节假日日期（国办通知 + 放假办法）。DeepSeek 高峰价就用这张表。
-  [calendar.statutory."2026"]
-  dates = ["2026-01-01", "2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19", "2026-04-04", "2026-05-01", "2026-05-02", "2026-06-19", "2026-09-25", "2026-10-01", "2026-10-02", "2026-10-03"]
-  count = 13
-  breakdown = { "元旦" = ["2026-01-01"], "春节" = ["2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19"], "清明" = ["2026-04-04"], "劳动节" = ["2026-05-01", "2026-05-02"], "端午" = ["2026-06-19"], "中秋" = ["2026-09-25"], "国庆" = ["2026-10-01", "2026-10-02", "2026-10-03"] }
-  makeup_workdays = ["2026-01-04", "2026-02-14", "2026-02-28", "2026-05-09", "2026-09-20", "2026-10-10"]
-  # 2027 的法定日与调休安排在国务院通知发布前无法确定；已知锚点：
-  # 元旦 2027-01-01；春节除夕 2027-02-05、初一至初三 2027-02-06..08（农历推算，非官方）。
-  [calendar.statutory."2027"]
-  dates = ["2027-01-01"]
-  status = "partial"
-  note = "只放了可推算的元旦；2026-11 通知发布后补全，补全前一律按 weekend 兜底。"
-
-# ---------------------------------------------------------------------------
-# 峰谷计费：四家规则各不相同，别混用
-# ---------------------------------------------------------------------------
-# 一句话对照（全部为北京时间）：
-#   DeepSeek 官方   高峰 09:00-12:00 + 14:00-18:00，周一至周五，**排除法定节假日**；
-#                   调休上班的周末也按空闲时段计费。这是唯一带节假日规则的。
-#   阿里百炼         忙时 08:00-22:00 每天连续；闲时 22:00-次日 08:00。官方未写节假日规则（节假日照算忙时）。
-#   腾讯 TokenHub   DeepSeek 模型按 09:00-12:00 + 14:00-18:00 周一至周五；官方未写节假日规则。
-#                   hy4-preview / hy3 是平价，没有任何分段。
-#   千问 Token Plan 夜间 22:00-次日 08:00，Qwen3.8 系 Credits 0.4×、DeepSeek 系 0.5×。不是单价打折，是扣量系数。
-#   MiMo Token Plan  夜间 00:00-08:00，Credits 0.8×。同样是扣量系数。
-#   MiniMax / Kimi   官方价目里没有任何峰谷机制。
-[peak_off_peak]
-mechanisms = ["price_band", "credit_multiplier", "none"]
-
-  [peak_off_peak.deepseek_official]
-  peak = { hours = [{ start = "09:00", end = "12:00" }, { start = "14:00", end = "18:00" }], days = ["workday"] }
-  off_peak = { hours = "其余全部", days = ["workday", "weekend", "holiday", "rest_day", "makeup_workday"] }
-  multiplier = 0.5
-  source = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
-  quote = "空闲时段价格为高峰时段价格的一半。北京时间周一至周五（不含中国法定节假日）9:00-12:00、14:00-18:00 为高峰时段；其余时段，包括周末及中国法定节假日全天均为空闲时段。"
-  basis = "以平台服务端收到请求的时间为准"
-
-  [peak_off_peak.bailian_dashscope]
-  peak = { hours = [{ start = "08:00", end = "22:00" }], days = ["workday", "weekend", "holiday", "rest_day", "makeup_workday"] }
-  off_peak = { hours = [{ start = "22:00", end = "24:00" }, { start = "00:00", end = "08:00" }], days = "全部" }
-  multiplier = 0.5
-  applies_to = ["deepseek-v4.1-flash-1017", "deepseek-v4-pro-0813", "deepseek-v4-flash-0731"]
-  source = "https://help.aliyun.com/zh/model-studio/model-pricing"
-  note = "官方没写节假日例外，所以节假日仍是忙时。"
-
-  [peak_off_peak.tencent_tokenhub]
-  peak = { hours = [{ start = "09:00", end = "12:00" }, { start = "14:00", end = "18:00" }], days = ["workday"] }
-  off_peak = { hours = "其余全部", days = "全部" }
-  multiplier = 0.5
-  applies_to = ["deepseek-v4.1-flash-1017", "deepseek-v4-pro-0813", "deepseek-v4-flash-0731"]
-  flat_rate_models = ["hy4-preview", "hy3"]
-  source = "https://cloud.tencent.com/document/product/1823/130055"
-  effective = "原厂直供 2026-08-29 起，其余 DeepSeek 模型 2026-09-26 起"
-
-  [peak_off_peak.qwen_token_plan]
-  discount_window = { hours = [{ start = "22:00", end = "24:00" }, { start = "00:00", end = "08:00" }], days = "全部" }
-  credit_multiplier = { qwen3_series = 0.4, deepseek_series = 0.5 }
-  source = "https://platform.qianwenai.com/docs/token-plan/personal/token-plan-personal-overview"
-  note = "折的是 Credits 消耗量，不是标价；decision-model-preview 限时免费。"
-
-  [peak_off_peak.mimo_token_plan]
-  discount_window = { hours = [{ start = "00:00", end = "08:00" }], days = "全部" }
-  credit_multiplier = 0.8
-  source = "https://mimo.mi.com/docs/zh-CN/quick-start/faq/token-plan/Usage&Quota"
-
-# ---------------------------------------------------------------------------
-# 分档（model.tier）：谁值得派活给它
-# ---------------------------------------------------------------------------
-# 每个 `[[provider.model]]` 带一个 `tier`，就是这台机器对它的定位，不再是算出来的：
-#
-#   flash  便宜档：够用、快、按量花不了几个钱。派子 agent 干读文件、跑测试、搬代码。
-#   pro    中间档：贵一截，明显更能想。设计、疑难定位、跨文件的改。
-#   sota   前沿档：最贵的那批。一次性的硬活，别拿它跑循环。
-#   test   基本不可用于编程，只用来测 harness 本身（本机小模型、试接口通不通）。
-#
-# 这是**价格档**，不是能力档：V4.1-Flash 的智能指数比 V4-Pro 还高，所以 flash 里
-# 也可能抽到最聪明的那个。改一句话就能换档——不用重新编译，也不用改 skill。
-#
-# 哪个模型被鼓励使用（倍率）在 skill 那边：~/.agents/gongga-agents/skills/model_pool/
-# preference.toml，倍率里没有的模型默认为 0（不抽）。
-
-# ---------------------------------------------------------------------------
-# provider
-# ---------------------------------------------------------------------------
-# kind: vendor = 厂商直连 | gateway = 聚合/转发，按厂商价转售 | local = 自建
-# 本目录只收厂商直连与自建：聚合/转发网关（GOAT、OpenCode Zen、Ling.AI 这类）
-# 2026-10-31 按用户裁定整体删掉，不再收录。
-# api:  pi-ai 的协议标识：openai-completions | openai-responses | anthropic-messages
-# key_env: DSH 侧对应的凭据引用名（~/.dsh/.credentials.yaml 的 refs 条目）
-#
-# 一个 provider 可以有多个 endpoint —— 同一家的 Chat Completions / Responses /
-# Messages 常常是三个不同主机，各自 baseURL。
 
 [[provider]]
 id = "deepseek-official"
@@ -387,7 +263,6 @@ retrieved = "2026-10-22"
   jsonpath = { available = "available_amount", cash = "cash_balance", voucher = "voucher_balance", credit = "credit_balance", owed = "owed_amount" }
   source = "https://github.com/MiniMax-AI/cli"
   note = "金额字段都是字符串；这个端点同样不在公开 API 参考里，来自官方 CLI 源码。"
-
 
 [[provider]]
 id = "kimi-coding"
@@ -1267,7 +1142,6 @@ placeholder 取不到值，补齐时把 key 写进去，或换成 key_env 就够
   #   DescribeUsageRankList  -> TotalToken / InputTotalToken / OutputTotalToken / CacheTotalToken / RequestCount
   #   DescribeModelQuota    -> TPMLimit / RPMLimit（这是限流不是余额）
 
-
 [[provider]]
 id = "dots-studio"
 name = "Dots Studio（点点，小红书）"
@@ -1359,52 +1233,3 @@ note = "本机上的 flm CLI 在 C:/resource/kualemon-cli（mihomo），另有�
   auth = "bearer-or-x-api-key"
   jsonpath = { vip_level = "vip_level", vip_expire_at = "vip_expire_at", vip_remain = "vip_remain_text", flow_used = "flow_used_text", flow_left = "flow_left_text", flow_left_bytes = "flow_left_bytes", flow_reset = "flow_reset_text", balance = "balance" }
   source = "https://api1f.qsvtm.com/portal/aiapi/skill"
-
-# ---------------------------------------------------------------------------
-# 同名但不是本机那一家的服务，留个索引免得下次再查一遍
-# ---------------------------------------------------------------------------
-[ambiguous]
-  [ambiguous.dots]
-  file = "dots-api.txt"
-  resolved_as = "dots-studio（Dots Studio，note3-prev-api.askdiandian.com）"
-  alternatives = [{ name = "LongCat 平台 key", base = "https://api.longcat.chat/openai/v1", note = "两家都用 ak_ 前缀；同一把 key 在 LongCat 也能列出目录，所以前缀不能作为判据。" }]
-  note = "两边都验通过：dots 端点 200 返回 dots3-note-prev，LongCat 端点 200 返回两个 LongCat 模型。要确认到底买了哪家的套餐，看控制台账单。"
-
-  [ambiguous.falemon]
-  file = "falemon-api.txt"
-  resolved_as = "falemon（网络代理 + 助手 API），不是 LLM 网关"
-
-
-# ---------------------------------------------------------------------------
-# 与 DSH 的关系
-# ---------------------------------------------------------------------------
-# 这个文件目前是**只读事实源**，DSH 不读它。运行中的配置仍在
-# ~/.dsh/profiles/<profile>/cordis.patch.yml 的 llm-pi-ai / agent-default-model 行里。
-#
-# 要接线的话有三个坑，先记在这里：
-#   1. patch 是整行替换 config，不是深合并 —— 从这里生成 providers 必须给全量，
-#      否则 profile 里剩下的 provider 会被整份顶掉。
-#   2. TOML 没有 eval 通道；home 层只能用 `!!js`，得在表达式里手写一个 TOML 解析
-#      （或改成 JSON / YAML）。
-#   3. Models 页面写的是 profile 层那一行，它和 home 层会互相覆盖。
-#      在这两件事解决前，只有人手改这个文件。
-[dsh]
-consumed = false
-credential_file = "C:/Users/17124/.dsh/.credentials.yaml"
-patch_layer_profile = "C:/Users/17124/.dsh/profiles/web/cordis.patch.yml"
-patch_layer_home = "C:/Users/17124/.dsh/cordis.patch.yml"
-row_id = "llm-pi-ai"
-default_model_row = "agent-default-model"
-# 每个 provider 的 quota_query.script 是**相对本文件所在目录**的路径：脚本都在 ~/.agents/providers/
-# 下，解释器是 python（`python ~/.agents/providers/<name>.py`）。providers/probe.py 离线跑全部解析器。
-quota_plugin = "dsh-llm-quota-retry"
-
-# 换密钥时这里和 .dsh/.credentials.yaml 的 refs 要同步改，否则两边指向两把不同的 key。
-[maintenance]
-rotate_keys_with = ["C:/Users/17124/.dsh/.credentials.yaml"]
-last_verified = "2026-10-31"
-verify = [
-  "curl 每个 provider.catalog 端点，确认返回的模型 id 仍在本文件里",
-  "curl 每个 quota_query.url，确认返回体字段名未变",
-  "对比网关在售目录的命令行费用表与本文件 price 是否漂移",
-]
