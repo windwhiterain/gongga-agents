@@ -633,7 +633,7 @@ def main(argv):
     preference, _pref_path = load_preference(getattr(args, "preference", None))
     catalog = roster.load()
     if catalog is None:
-        raise SystemExit(f"no roster: neither {roster.COMMUNITY_CATALOG} nor {roster.PRIVATE_CATALOG} exists")
+        raise SystemExit(f"no roster at {roster.catalog_path()}")
     args.handler(args, config, preference, catalog)
 
 

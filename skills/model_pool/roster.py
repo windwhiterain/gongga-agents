@@ -10,13 +10,10 @@ import os
 import tomllib
 
 AGENTS = os.path.join(os.path.expanduser("~"), ".agents")
-COMMUNITY_CATALOG = os.path.join(AGENTS, "gongga-agents", "providers.toml")
-PRIVATE_CATALOG = os.path.join(AGENTS, "providers.toml")
+# One roster, from the community checkout. A machine's own entries are a branch of
+# that checkout (`local`), not a second file -- so nothing here merges two lists.
+CATALOG = os.path.join(AGENTS, "gongga-agents", "providers.toml")
 CATALOG_ENV = "GONGGA_PROVIDERS_CATALOG"
-
-# The roster's own script lookup: the private scripts directory shadows the
-# community one, exactly as the server orders them.
-PRIVATE_SCRIPTS = AGENTS
 
 
 class RosterError(Exception):
@@ -28,41 +25,9 @@ def read_catalog(path):
         return tomllib.load(handle)
 
 
-def merge(base, overlay):
-    """Community fields kept, private fields winning, rows carrying an `id` merged by it."""
-    if isinstance(base, dict) and isinstance(overlay, dict):
-        merged = dict(base)
-        for key, value in overlay.items():
-            merged[key] = merge(base[key], value) if key in base else value
-        return merged
-    if isinstance(base, list) and isinstance(overlay, list) and keyed_rows(base) and keyed_rows(overlay):
-        return merge_rows(base, overlay)
-    return overlay
-
-
-def keyed_rows(items):
-    return all(isinstance(item, dict) and "id" in item for item in items)
-
-
-def merge_rows(base, overlay):
-    """Overlay rows replace the base row of the same id, field by field; new rows append."""
-    merged = [dict(item) for item in base]
-    position = {item["id"]: index for index, item in enumerate(merged)}
-    for item in overlay:
-        index = position.get(item["id"])
-        if index is None:
-            position[item["id"]] = len(merged)
-            merged.append(dict(item))
-        else:
-            merged[index] = merge(merged[index], item)
-    return merged
-
-
-def catalog_paths():
-    explicit = os.environ.get(CATALOG_ENV)
-    if explicit:
-        return [explicit]
-    return [COMMUNITY_CATALOG, PRIVATE_CATALOG]
+def catalog_path():
+    """The one roster file: an override, else the community checkout."""
+    return os.environ.get(CATALOG_ENV) or CATALOG
 
 
 class Roster:
@@ -87,17 +52,11 @@ class Roster:
         return from_environment or provider.get("key") or None
 
     def script_path(self, script):
-        """The quota script, the private root shadowing the community one."""
+        """The quota script, relative to the roster that named it."""
         if not script:
             return None
-        roots = [os.path.dirname(self.path)]
-        if not os.environ.get(CATALOG_ENV):
-            roots = [PRIVATE_SCRIPTS, os.path.dirname(COMMUNITY_CATALOG)] + roots
-        for root in roots:
-            candidate = os.path.join(root, script)
-            if os.path.isfile(candidate):
-                return candidate
-        return None
+        candidate = os.path.join(os.path.dirname(self.path), script)
+        return candidate if os.path.isfile(candidate) else None
 
     def quota_target(self, provider):
         """The first quota query the roster gives a script for.
@@ -155,18 +114,12 @@ class Roster:
 
 
 def load():
-    """The merged roster for this machine, or `None` when no catalog exists."""
-    merged = {}
-    used = None
-    for path in catalog_paths():
-        if not os.path.isfile(path):
-            continue
-        try:
-            catalog = read_catalog(path)
-        except (OSError, tomllib.TOMLDecodeError) as error:
-            raise RosterError(f"{path}: {error}") from error
-        merged = merge(merged, catalog) if merged else catalog
-        used = used or path
-    if not merged:
+    """The roster this machine reads, or `None` when there is no file."""
+    path = catalog_path()
+    if not os.path.isfile(path):
         return None
-    return Roster(merged, used)
+    try:
+        catalog = read_catalog(path)
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        raise RosterError(f"{path}: {error}") from error
+    return Roster(catalog, path)
