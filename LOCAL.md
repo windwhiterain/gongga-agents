@@ -39,5 +39,6 @@ git push origin main
 ```
 
 `local` 永远只在本地：它讲的是这台机器的事（内网 host、自建 provider），别人用不上。
+公共提交压在 `local` 上时怎么搬回 `main`，写在 `README.md` 的「提交往哪去」（第三节）。
 密钥不在这条分支上，所以"推错分支"不再是泄密路径 —— 那是 `keys.toml` 的活儿，
 它根本不在仓库里。
