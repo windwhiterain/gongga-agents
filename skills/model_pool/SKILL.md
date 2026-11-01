@@ -50,7 +50,7 @@ provider or you already made, not a guess:
 | The roster retired the id | another entry's `retired_ids` |
 | The provider says the allowance is spent, or at the floor | the quota script's `remaining` / `error` |
 | You marked the provider or the route | `model_pool mark` |
-| The roster names no credential this machine has | `key_env` in no environment variable and no private `key` |
+| The roster names no credential this machine has | `key_env` in no environment variable, and no `key` beside it |
 | The provider denies this model for this account | one cheap probe: 401 / 402 / 403 / 404, or a body that says access was denied |
 | `fail_open` is off and nothing could be reported | `~/.agents/model_pool.toml` |
 | Its multiplier is zero | `preference.toml`, next to this skill |
@@ -222,11 +222,13 @@ test  = 0.00     # 默认 0：只在你点名 --tier test 时才抽得到
 
 ## What it reads
 
-- **The roster** — `~/.agents/providers.toml` and
-  `~/.agents/gongga-agents/providers.toml`, merged the way the server merges them
-  (`GONGGA_PROVIDERS_CATALOG` names one file instead). Which models exist, **which
-  tier each is in**, which ids are retired, which provider serves each, the price,
-  the parameter count, and the credential a quota script takes.
+- **The roster** — `~/.agents/gongga-agents/providers.toml`, the one file the
+  server reads too (`GONGGA_PROVIDERS_CATALOG` names another). On this machine that
+  checkout is on its `local` branch, where the keys live; upstream is `main`, and
+  a `rebase` brings an upstream change down (`LOCAL.md` in that repository). Which
+  models exist, **which tier each is in**, which ids are retired, which provider
+  serves each, the price, the parameter count, and the credential a quota script
+  takes.
 - **The allowance** — each provider's `quota_query.script`, run once per
   `refresh`: the same scripts the roster publishes, read through the same
   contract. Readings are cached in `~/.model_pool/state.json` with their marks,
