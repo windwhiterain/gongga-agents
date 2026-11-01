@@ -1375,45 +1375,6 @@ note = "本机上的 flm CLI 在 C:/resource/kualemon-cli（mihomo），另有�
   resolved_as = "falemon（网络代理 + 助手 API），不是 LLM 网关"
 
 
-[[provider]]
-id = "local-qwen3"
-name = "本机 Ternary Bonsai 2 27B（Qwen3.8-27B 三值 1.5bit）"
-kind = "local"
-key_env = "BONSAI_API_KEY"
-base_url = "http://bonsai:8899/v1"
-served_by = "serve-bonsai.ps1"
-note = "A/B 两台机器上 `bonsai` 解析到不同地址：A 指 127.0.0.1，B 指 A 的局域网地址。配置两边逐字节相同，换机只改 hosts。"
-
-  [[provider.endpoint]]
-  id = "openai"
-  api = "openai-completions"
-  base_url = "http://bonsai:8899/v1"
-  auth = "bearer"
-
-  [[provider.model]]
-  id = "bonsai-2-27b"
-  name = "Qwen3.8-27B ternary 1.5bit (PrismML fork)"
-  tier = "test"
-  context = 49152
-  max_output = 24576
-  modalities = ["text"]
-  reasoning_levels = ["off", "high"]
-  compat = { supports_store = false, supports_strict_mode = false, supports_developer_role = false, max_tokens_field = "max_tokens", thinking_format = "qwen-chat-template", requires_reasoning_content_on_assistant_messages = true, supports_reasoning_effort = false }
-  note = "id 不参与路由：llama.cpp 只加载一个模型，不校验请求里的 model。effort 映射成 null/非空，因为 enable_thinking 取 !!effort。"
-
-  [provider.model.params]
-  unit = "billion"
-  total = 27
-  active = 27
-  note = "dense ternary build, so every parameter is active"
-  source = "local build: the model's own name states Qwen3.8-27B"
-  retrieved = "2026-10-31"
-
-  [[provider.quota_query]]
-  id = "none"
-  available = false
-  note = "本机自建，无额度概念。"
-
 # ---------------------------------------------------------------------------
 # 与 DSH 的关系
 # ---------------------------------------------------------------------------
