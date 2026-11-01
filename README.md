@@ -80,8 +80,12 @@ roster 里的 `key = "..."` 会被**忽略**：roster 是 git 检出，写进去
 5. 缓存写在两处：**保留时间**是 provider 级的事实（`cache_ttl` / `cache_ttl_note` /
    `cache_ttl_source`，写在 `[[provider]]` 下），**价格**照旧在 `[provider.model.price]`
    （`cache_read` / `cache_write` / `cache_write_5m` / `cache_storage`，按小时计的另配
-   `cache_storage_unit`）。官方只写"尽力而为"或者干脆不给数字的，写 `unverified —— 原因`；
-   别用"通常 5 分钟"之类的印象填这一格。字段释义在 `providers.toml` 顶部。
+   `cache_storage_unit`）。字段释义在 `providers.toml` 顶部。
+   **保留时间要填两层**：`cache_ttl` 只放官方口径，官方没公布就写 `unverified —— 原因`；
+   `cache_ttl_estimate` 放拿来规划用的那个数，宁可是猜的也要有，**并标出处**：
+   `cache_ttl_estimate_basis` 用 `community`（第三方实测/横评）/ `inferred`（按官方机制推）/
+   `guess`（纯猜），`cache_ttl_estimate_source` 写 URL，纯猜的写"来源是猜的"和猜法。
+   价格同样：官方没给的写进 `note` 并标明"估计、未核实"，不要伪装成价目表里的一行。
 6. 法定节假日日期写在 `providers/statutory.toml`（国务院每年一次通知），由 `price.py` 读；
    放假调休表从 chinese-days 按年缓存到 `~/.agents/cache/`，不在仓库里。
 7. 提交前确认：`grep -nE '"(sk|ak|flm_ak|user)_' providers.toml` 无输出。

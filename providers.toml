@@ -48,12 +48,16 @@ timezone = "Asia/Shanghai"
 # 前缀缓存省的是输入费，但它**会过期**。过期时间由厂商定，且大多写着"不保证"，
 # 所以它属于 provider 级的事实，写在 `[[provider]]` 下，不是写在某个模型的价格里：
 #
-#   cache_ttl            保留多久，用厂商自己的说法（"5 分钟，命中即续期"）
-#   cache_ttl_note       它没说的那一半：写入怎么收费、能不能续期、存储怎么算
-#   cache_ttl_source     查证来源；cache_ttl_retrieved 是查证日期
+#   cache_ttl                  保留多久，用厂商自己的说法（"5 分钟，命中即续期"）
+#   cache_ttl_note             它没说的那一半：写入怎么收费、能不能续期、存储怎么算
+#   cache_ttl_source           查证来源；cache_ttl_retrieved 是查证日期
+#   cache_ttl_estimate         拿来做规划的那个数 —— 官方不给的时候也要有，可以带"约"
+#   cache_ttl_estimate_basis   community（第三方实测/横评）| inferred（按官方机制推）| guess（纯猜）
+#   cache_ttl_estimate_source  估计的出处；纯猜的写"来源是猜的"并说清怎么猜的
 #
-# 官方没公布数字就写 `cache_ttl = "unverified —— ..."`，别拿"通常是 5 分钟"填空。
-# 这一栏空着和写着 unverified 是同一件事，但后者不会骗人。
+# 这两层必须分开写，因为它们的用途不同：`cache_ttl` 回答"厂商承诺了什么"，只有官方能填；
+# `cache_ttl_estimate` 回答"我该按多少秒去做超时/重发/前缀稳定性"，宁可是猜的也要有个数。
+# 官方没公布时 `cache_ttl` 写 `unverified —— ...`，估计值照填 —— 留空等于没有这个信息。
 #
 # 价格那一侧沿用 `[provider.model.price]` 的字段：
 #
@@ -81,9 +85,12 @@ retrieved = "2026-10-22"
 # 缓存保留时间。官方只说"几个小时到几天"，而且明确是尽力而为 —— 没有可配的 TTL 旋钮，
 # 命不命中由系统判定，所以也不要把它写进任何 SLA。
 cache_ttl = "几小时到几天 —— 官方原文：缓存不再使用后会自动被清空，时间一般为几个小时到几天"
-cache_ttl_note = "官方口径是『尽力而为』，不保证 100% 命中，文档里也没有 TTL 参数。定价页只有 cache_read 一档，没有写入价与存储价（没列不等于承诺免费）；另有一说线上留 3 天 / 7 天，出自推理框架文档而非 API 承诺，未核实，不采信。"
+cache_ttl_note = "官方口径是『尽力而为』，不保证 100% 命中，文档里也没有 TTL 参数。定价页只有 cache_read 一档，没有写入价与存储价 —— 估计写入与存储不另收费，是从价目表缺项推的，未向官方确认。"
 cache_ttl_source = "https://api-docs.deepseek.com/zh-cn/guides/kv_cache"
 cache_ttl_retrieved = "2026-11-01"
+cache_ttl_estimate = "Agent 流量约 3 天，聊天流量约 7 天（按流量类型分，不是按模型）"
+cache_ttl_estimate_basis = "community"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
+cache_ttl_estimate_source = "https://cloud.tencent.cn/developer/article/2765995 —— 转述 DeepInfer 开源推理框架的工程文档，不是 API 承诺；实测命中率 96% 也出自同一份文档"
 
   [[provider.endpoint]]
   id = "openai"
@@ -126,6 +133,7 @@ cache_ttl_retrieved = "2026-11-01"
   output = 8.00
   cache_read = 0.04
   price_usd = { input = 0.30, output = 1.20, cache_read = 0.006 }
+  # 价目表只有这三栏；写入与存储没有列价，估计不计费（推断，未确认）。
   # Peak first: it is the narrow exception, and a band list is read in order.
   # Its prices are the base ones above, so it states none of its own.
   [[provider.model.price.band]]
@@ -223,9 +231,12 @@ retrieved = "2026-10-22"
 # 缓存保留时间：Anthropic 面是主动缓存，cache_control: {type:"ephemeral"}，5 分钟，
 # 每次命中把有效期重新计满；一次请求最多 4 个断点，超出 400。
 cache_ttl = "5 分钟，命中即续期"
-cache_ttl_note = "『自动 Prompt 缓存』那一页没写有效期；5 分钟出自 Anthropic 兼容缓存页的『缓存过期时间』。计费公式只有两项（新增输入 × 输入价 + 命中 × 命中价），没有写入项，也没有存储项。"
+cache_ttl_note = "『自动 Prompt 缓存』那一页没写有效期；5 分钟出自 Anthropic 兼容缓存页的『缓存过期时间』。计费公式只有两项（新增输入 × 输入价 + 命中 × 命中价），所以没有写入与存储这一笔 —— 这是从公式推的，推测而非逐字声明。"
 cache_ttl_source = "https://platform.minimaxi.com/docs/api-reference/anthropic-api-compatible-cache"
 cache_ttl_retrieved = "2026-11-01"
+cache_ttl_estimate = "5 分钟；只要相邻两次请求间隔 < 5 分钟就一直在续期，实际可无限延长"
+cache_ttl_estimate_basis = "inferred"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
+cache_ttl_estimate_source = "由官方『每次命中把有效期重置为 5 分钟』推出，非实测"
 
   [[provider.endpoint]]
   id = "openai"
@@ -361,9 +372,12 @@ retrieved = "2026-10-22"
 
 # 缓存保留时间：两档都明码收费，写一次付一次，命中只付 cache_read。
 cache_ttl = "5m（默认）/ 1h 两档，命中即续期"
-cache_ttl_note = "官方只对 K3 系收写入费：5m 按 1× 输入价、1h 按 2×，超时未命中要重新写一次；命中后续期，不重复收写入。缓存不能手动清，只能等它过期。K2 系（kimi-for-coding）的价格表里没有写入这一项。"
+cache_ttl_note = "官方只对 K3 系收写入费：5m 按 1× 输入价、1h 按 2×，超时未命中要重新写一次；命中后续期，不重复收写入。缓存不能手动清，只能等它过期。K2 系（kimi-for-coding）的价格表里没有写入这一项，估计不收写入费（推断，未确认）。"
 cache_ttl_source = "https://platform.kimi.com/docs/guide/context-caching"
 cache_ttl_retrieved = "2026-11-01"
+cache_ttl_estimate = "不指定就落 5 分钟档；多轮间隔常超过 5 分钟的会话换 1h 档，写入价翻倍但少写几次就回本"
+cache_ttl_estimate_basis = "inferred"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
+cache_ttl_estimate_source = "由官方价目表（5m = 1× 输入价、1h = 2×）反推，非实测"
 
   [[provider.endpoint]]
   id = "openai"
@@ -533,6 +547,7 @@ cache_ttl_retrieved = "2026-11-01"
   cache_read = 2.00
   source = "https://platform.moonshot.cn/docs/pricing/chat"
   retrieved = "2026-10-22"
+  write_fee_estimate = "5m ¥20.00 / 1h ¥40.00（照 k3 抄，同权重同价；官方价目页没有这个 id，未核实）"
 
   [provider.plan]
   name = "Kimi 会员"
@@ -578,11 +593,14 @@ catalog = "https://api.stepfun.com/v1/models"
 catalog_verified = "2026-11-01 本机 key 探到 33 个：文本对话线仍是 step-5-preview / step-3.7-flash / step-3.5-flash(-2603)，其余是 asr/tts/audio/image 的一套；另有 step-router-v1 —— 路由器不是它自己的模型，不收"
 retrieved = "2026-10-22"
 
-# 缓存保留时间：官方文档只讲命中计价，不讲保留多久 —— 不编一个数字。
+# 缓存保留时间：官方文档只讲命中计价，不讲保留多久 —— 官方值是 unverified，估计值见下。
 cache_ttl = "unverified —— 官方 Prompt 缓存页没有公布有效期，由系统自行淘汰"
-cache_ttl_note = "自动启用，最小缓存单元 256 token；文档里没有 TTL 参数。定价表只有 cache_read 一档，写入与存储都没有列价（没列不等于承诺免费）。"
+cache_ttl_note = "自动启用，最小缓存单元 256 token；文档里没有 TTL 参数。定价表只有 cache_read 一档 —— 估计写入与存储不另收费，是从缺项推的，未确认。"
 cache_ttl_source = "https://platform.stepfun.com/docs/zh/guides/developer/prompt-cache"
 cache_ttl_retrieved = "2026-11-01"
+cache_ttl_estimate = "约 5 分钟"
+cache_ttl_estimate_basis = "guess"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
+cache_ttl_estimate_source = "来源是猜的：官方不给数字，按多数厂商卡在 5 分钟这一档估，没有实测支撑"
 
   [[provider.endpoint]]
   id = "openai"
@@ -709,11 +727,14 @@ catalog = "https://api.xiaomimimo.com/v1/models"
 catalog_verified = "2026-11-01 本机 key 探到 7 个：mimo-v2.6-flash / -pro / -pro-ultraspeed，加 mimo-v2.5-asr / tts / tts-voiceclone / tts-voicedesign —— 10-22 那次列出的 mimo-v2.5-pro 已经不在目录里"
 retrieved = "2026-10-22"
 
-# 缓存保留时间：定价页只写"缓存写入限时免费"，保留多久一个字没有。
+# 缓存保留时间：定价页只写"缓存写入限时免费"，保留多久一个字没有 —— 官方值留空，估计值见下。
 cache_ttl = "unverified —— 定价页没有公布前缀缓存的保留时间"
 cache_ttl_note = "缓存命中有价（见 cache_read），写入 0.00 是限时免费的价，不是永久承诺；有效期没数字，别在配置里编一个。"
 cache_ttl_source = "https://mimo.mi.com/docs/zh-CN/price/pay-as-you-go"
 cache_ttl_retrieved = "2026-11-01"
+cache_ttl_estimate = "数小时量级（粗估 1–6 小时）"
+cache_ttl_estimate_basis = "inferred"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
+cache_ttl_estimate_source = "依据是官方自述基于 SGLang HiCache 把 KV 在 GPU / CPU 内存 / SSD 之间分层：落到 SSD 的那部分不会 5 分钟就没，https://eu.36kr.com/zh/p/3828341593641605"
 
   [[provider.endpoint]]
   id = "openai"
@@ -853,11 +874,14 @@ catalog = "https://api.longcat.chat/openai/v1/models"
 catalog_verified = "2026-11-01 本机 key 探到 2 个：LongCat-2.5-Preview、LongCat-2.0"
 retrieved = "2026-10-22"
 
-# 缓存保留时间：官方定价页只给缓存命中价。
+# 缓存保留时间：官方定价页只给缓存命中价，估计值按同档厂商填。
 cache_ttl = "unverified —— 官方定价页没有缓存保留时间"
 cache_ttl_note = "第三方横评把它列为 Cache TTL undefined，与官方文档一致：没有可依赖的时长，只有命中价。"
 cache_ttl_source = "https://longcat.chat/platform/docs/pricing/longcat-2.0"
 cache_ttl_retrieved = "2026-11-01"
+cache_ttl_estimate = "约 5 分钟"
+cache_ttl_estimate_basis = "guess"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
+cache_ttl_estimate_source = "来源是猜的：官方与第三方横评都写 TTL undefined，按 5 分钟档估"
 
   [[provider.endpoint]]
   id = "openai"
@@ -949,6 +973,9 @@ cache_ttl = "显式缓存 5 分钟、命中即重置；隐式缓存无固定有�
 cache_ttl_note = "通用规则：显式缓存创建按输入标准价 125% 计（cache_write）、命中按 10%（cache_read_explicit）；隐式缓存写入按输入价 100%、命中通常 20%（cache_read）。**本 provider 收的两个模型都是官方点名的例外**——qwen3.8-max 命中不是 10%，qwen3.8-flash 创建与命中都不是 125% / 10% 且分区不同，所以以价格表里的数（和百炼控制台）为准，别用比例去算。最小可缓存 1024 token，一次最多 4 个 cache_control 标记。"
 cache_ttl_source = "https://help.aliyun.com/zh/model-studio/context-cache"
 cache_ttl_retrieved = "2026-11-01"
+cache_ttl_estimate = "隐式缓存约 5 分钟；显式缓存官方就是 5 分钟（命中重置）"
+cache_ttl_estimate_basis = "community"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
+cache_ttl_estimate_source = "https://github.com/Coffeiz/Gugu-web/blob/main/docs/reports/2026-08-21-OPT-CACHE-TUNING.md —— 第三方对 Qwen 连续多轮的实测：修好前缀稳定性后后两轮命中 98%+，间隔过长则首轮不命中"
 
   [[provider.endpoint]]
   id = "openai"
@@ -1073,6 +1100,9 @@ cache_ttl = "显式缓存 5 分钟、命中即重置；隐式缓存无固定有�
 cache_ttl_note = "通用规则：显式创建 125%（cache_write）、显式命中 10%（cache_read_explicit）、隐式写入 100%、隐式命中通常 20%（cache_read）；qwen3.8-max 与 qwen3.8-flash 是官方点名的例外，按价格表里的数走，别用比例算。"
 cache_ttl_source = "https://help.aliyun.com/zh/model-studio/context-cache"
 cache_ttl_retrieved = "2026-11-01"
+cache_ttl_estimate = "隐式缓存约 5 分钟；显式缓存官方就是 5 分钟（命中重置）"
+cache_ttl_estimate_basis = "community"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
+cache_ttl_estimate_source = "https://github.com/Coffeiz/Gugu-web/blob/main/docs/reports/2026-08-21-OPT-CACHE-TUNING.md —— 第三方对 Qwen 连续多轮的实测：修好前缀稳定性后后两轮命中 98%+，间隔过长则首轮不命中"
 
   [[provider.endpoint]]
   id = "openai"
@@ -1165,11 +1195,14 @@ TENCENT_API_KEY（只有 DSH 凭据引用这个名字）。补齐时写进 keys.
 """
 
 # 缓存保留时间：官方指南讲了 TTL 的机制（prompt_cache_key / X-Session-ID 怎么喂前缀），
-# 但通篇没有给时长 —— 机制存在不等于数字存在。
+# 但通篇没有给时长 —— 机制存在不等于数字存在，官方值留空，估计值按同档填。
 cache_ttl = "unverified —— 官方《提升 Cache 命中率指南》只讲 TTL 机制，没有给具体时长"
 cache_ttl_note = "同一份文档给了两条提高命中的手段：请求体里 prompt_cache_key 填 conversation_id、HTTP 头 X-Session-ID 把人固定到同一推理实例。本机没有这把 key，也验不了命中。"
 cache_ttl_source = "https://cloud.tencent.cn/document/product/1823/131410"
 cache_ttl_retrieved = "2026-11-01"
+cache_ttl_estimate = "约 5 分钟"
+cache_ttl_estimate_basis = "guess"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
+cache_ttl_estimate_source = "来源是猜的：官方指南讲 TTL 机制却不给时长，按 5 分钟档估；本机没 key，无法实测"
 
   [[provider.endpoint]]
   id = "openai"
@@ -1291,10 +1324,13 @@ note = """
 不是 Authorization: Bearer，用错就是 401 governance.missing_api_key。
 """
 
-# 缓存保留时间：平台文档没有缓存章节。
+# 缓存保留时间：平台文档没有缓存章节，估计值按同档厂商填。
 cache_ttl = "unverified —— 平台文档没有缓存章节，缓存命中价也标着『没公布』"
 cache_ttl_source = "https://dots.ai/platform/docs"
 cache_ttl_retrieved = "2026-11-01"
+cache_ttl_estimate = "约 5 分钟"
+cache_ttl_estimate_basis = "guess"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
+cache_ttl_estimate_source = "来源是猜的：文档没有缓存章节，按 5 分钟档估"
 
   [[provider.endpoint]]
   id = "openai"
@@ -1365,6 +1401,9 @@ cache_ttl = "unverified —— 官方只按小时收缓存存储费，没有公�
 cache_ttl_note = "存储按『元/百万 Tokens/小时』计，现价 0.00（限时免费），官方明说免费期结束后才会公布标准价；过期时间未公布——社区有『约 1 小时』的说法，没有官方出处，这里不采用。隐式缓存，无需 cache_control。"
 cache_ttl_source = "https://docs.bigmodel.cn/cn/guide/capabilities/cache"
 cache_ttl_retrieved = "2026-11-01"
+cache_ttl_estimate = "约 1 小时"
+cache_ttl_estimate_basis = "community"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
+cache_ttl_estimate_source = "https://aiproducthub.cn/status/68539.html —— 第三方横评《藏在 TTL 里的钱：各家计时》：阿里与 Kimi 默认五分钟，智谱约一小时；社区观察，无官方出处"
 
   [[provider.endpoint]]
   id = "openai"
@@ -1537,6 +1576,9 @@ cache_ttl = "隐式缓存：不承诺（系统定期清理长时间未用的）�
 cache_ttl_note = "显式缓存用 expire_at 指定到期时刻（最大 7 天），且不因继续使用而续期 —— 与 Kimi 的『命中即续期』正好相反。存储按自然小时出账，不足 1 小时按 1 小时算；隐式缓存没有存储费，也不保证命中。"
 cache_ttl_source = "https://docs.volcengine.com/docs/ark/context-cache"
 cache_ttl_retrieved = "2026-11-01"
+cache_ttl_estimate = "显式缓存按自己设的 expire_at 走（1 小时够大多数会话，最长 7 天）；隐式缓存按 5 分钟档估，且随时可能被淘汰"
+cache_ttl_estimate_basis = "inferred"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
+cache_ttl_estimate_source = "显式部分来自官方 expire_at 语义；隐式那个 5 分钟是按同档厂商估的，没有实测"
 
   [[provider.endpoint]]
   id = "openai"
