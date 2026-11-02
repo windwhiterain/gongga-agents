@@ -55,6 +55,8 @@ timezone = "Asia/Shanghai"
 #   cache_ttl_estimate_basis   community（第三方实测/横评）| inferred（按官方机制推）| guess（纯猜）
 #   cache_ttl_estimate_source  估计的出处；纯猜的写"来源是猜的"并说清怎么猜的
 #   cache_ttl_secs             上面那个估计的**数字形式**，单位秒；服务端只用这一个
+#   cache_ttl_tier             那个秒数是**哪一档**：请求不指定缓存时长时落的那一档
+#   cache_ttl_tiers            该 provider 还有别的、能明确要到且长度不同的档（秒）；服务端不读
 #
 # 这两层必须分开写，因为它们的用途不同：`cache_ttl` 回答"厂商承诺了什么"，只有官方能填；
 # `cache_ttl_estimate` 回答"我该按多少秒去做超时/重发/前缀稳定性"，宁可是猜的也要有个数。
@@ -63,6 +65,19 @@ timezone = "Asia/Shanghai"
 # 散文和数字必须成对：`cache_ttl_estimate` 给人读，`cache_ttl_secs` 给程序算 —— prefix cache
 # 的前缀过期时间是照后者算的，所以改了口径就要同步改数字，否则读文件的人和服务端各信各的。
 # 不写 `cache_ttl_secs` 等于"厂商没表态"，服务端据此当作永不过期，而不是去猜散文里的"约"。
+#
+# "缓存多久"往往不是一个数，而是"哪一档 + 那一档多久"：Kimi 是 5m / 1h 两档，火山方舟是
+# 隐式（不承诺）+ 显式 expire_at（1 小时到 7 天），阿里百炼是隐式（无固定有效期）+ 显式（5 分钟）。
+# 服务端今天**不发任何缓存指令**（没有 cache_control、没有 expire_at、没有 prompt_cache_retention），
+# 所以每次都落在 `cache_ttl_tier` 说的那一档，规划也只该用那一档 —— 拿 1h 的时长去规划 5m 的现实，
+# 只会让它挑一条已经冷掉的链，静默地按全价重发。
+#
+# 档与档的差别还不只在长度，**命中是否续期**也不一样：Kimi / MiniMax / 百炼显式"命中即续期"，
+# 火山方舟显式是 expire_at 到点就没了、继续用也不续。服务端的规划按"最后一次发出去 + 时长"算过期，
+# 只对前者成立；要租后一种档，得先改那个算法（见 docs/notes/server-prefix-cache.md）。
+#
+# `cache_ttl_tiers` 只写"另一档能明确要到、且长度不同"的情况；只差在计费方式（显式 / 隐式的单价）
+# 而不差在时长时，写进 `cache_ttl_note` 就够了。
 #
 # 价格那一侧沿用 `[provider.model.price]` 的字段：
 #
@@ -96,7 +111,8 @@ cache_ttl_retrieved = "2026-11-01"
 cache_ttl_estimate = "Agent 流量约 3 天，聊天流量约 7 天（按流量类型分，不是按模型）"
 cache_ttl_estimate_basis = "community"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
 cache_ttl_estimate_source = "https://cloud.tencent.cn/developer/article/2765995 —— 转述 DeepInfer 开源推理框架的工程文档，不是 API 承诺；实测命中率 96% 也出自同一份文档"
-cache_ttl_secs = 259200                # 上一条估计的秒数；服务端只用这个
+cache_ttl_secs = 259200               # 规划用的数：`cache_ttl_tier` 那一档
+cache_ttl_tier = "隐式（唯一一档，尽力而为）"
 
   [[provider.endpoint]]
   id = "openai"
@@ -243,7 +259,8 @@ cache_ttl_retrieved = "2026-11-01"
 cache_ttl_estimate = "5 分钟；只要相邻两次请求间隔 < 5 分钟就一直在续期，实际可无限延长"
 cache_ttl_estimate_basis = "inferred"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
 cache_ttl_estimate_source = "由官方『每次命中把有效期重置为 5 分钟』推出，非实测"
-cache_ttl_secs = 300                # 上一条估计的秒数；服务端只用这个
+cache_ttl_secs = 300                  # 规划用的数：`cache_ttl_tier` 那一档
+cache_ttl_tier = "隐式（唯一一档，5 分钟，命中即续期）"
 
   [[provider.endpoint]]
   id = "openai"
@@ -385,7 +402,9 @@ cache_ttl_retrieved = "2026-11-01"
 cache_ttl_estimate = "不指定就落 5 分钟档；多轮间隔常超过 5 分钟的会话换 1h 档，写入价翻倍但少写几次就回本"
 cache_ttl_estimate_basis = "inferred"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
 cache_ttl_estimate_source = "由官方价目表（5m = 1× 输入价、1h = 2×）反推，非实测"
-cache_ttl_secs = 300                # 上一条估计的秒数；服务端只用这个
+cache_ttl_secs = 300                  # 规划用的数：`cache_ttl_tier` 那一档
+cache_ttl_tier = "5m（默认档：请求不指定缓存时长就落这里）"
+cache_ttl_tiers = { "5m" = 300, "1h" = 3600 }              # 另一档能明确要到、且长度不同
 
   [[provider.endpoint]]
   id = "openai"
@@ -609,7 +628,8 @@ cache_ttl_retrieved = "2026-11-01"
 cache_ttl_estimate = "约 5 分钟"
 cache_ttl_estimate_basis = "guess"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
 cache_ttl_estimate_source = "来源是猜的：官方不给数字，按多数厂商卡在 5 分钟这一档估，没有实测支撑"
-cache_ttl_secs = 300                # 上一条估计的秒数；服务端只用这个
+cache_ttl_secs = 300                  # 规划用的数：`cache_ttl_tier` 那一档
+cache_ttl_tier = "隐式（唯一一档）"
 
   [[provider.endpoint]]
   id = "openai"
@@ -744,7 +764,8 @@ cache_ttl_retrieved = "2026-11-01"
 cache_ttl_estimate = "数小时量级（粗估 1–6 小时）"
 cache_ttl_estimate_basis = "inferred"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
 cache_ttl_estimate_source = "依据是官方自述基于 SGLang HiCache 把 KV 在 GPU / CPU 内存 / SSD 之间分层：落到 SSD 的那部分不会 5 分钟就没，https://eu.36kr.com/zh/p/3828341593641605"
-cache_ttl_secs = 3600                # 上一条估计的秒数；服务端只用这个
+cache_ttl_secs = 3600                 # 规划用的数：`cache_ttl_tier` 那一档
+cache_ttl_tier = "隐式（唯一一档，1–6 小时）"
 
   [[provider.endpoint]]
   id = "openai"
@@ -892,7 +913,8 @@ cache_ttl_retrieved = "2026-11-01"
 cache_ttl_estimate = "约 5 分钟"
 cache_ttl_estimate_basis = "guess"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
 cache_ttl_estimate_source = "来源是猜的：官方与第三方横评都写 TTL undefined，按 5 分钟档估"
-cache_ttl_secs = 300                # 上一条估计的秒数；服务端只用这个
+cache_ttl_secs = 300                  # 规划用的数：`cache_ttl_tier` 那一档
+cache_ttl_tier = "隐式（唯一一档）"
 
   [[provider.endpoint]]
   id = "openai"
@@ -987,7 +1009,8 @@ cache_ttl_retrieved = "2026-11-01"
 cache_ttl_estimate = "隐式缓存约 5 分钟；显式缓存官方就是 5 分钟（命中重置）"
 cache_ttl_estimate_basis = "community"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
 cache_ttl_estimate_source = "https://github.com/Coffeiz/Gugu-web/blob/main/docs/reports/2026-08-21-OPT-CACHE-TUNING.md —— 第三方对 Qwen 连续多轮的实测：修好前缀稳定性后后两轮命中 98%+，间隔过长则首轮不命中"
-cache_ttl_secs = 300                # 上一条估计的秒数；服务端只用这个
+cache_ttl_secs = 300                  # 规划用的数：`cache_ttl_tier` 那一档
+cache_ttl_tier = "隐式（不指定 cache_control 就落这里；显式另算，见 cache_ttl_note）"
 
   [[provider.endpoint]]
   id = "openai"
@@ -1115,7 +1138,8 @@ cache_ttl_retrieved = "2026-11-01"
 cache_ttl_estimate = "隐式缓存约 5 分钟；显式缓存官方就是 5 分钟（命中重置）"
 cache_ttl_estimate_basis = "community"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
 cache_ttl_estimate_source = "https://github.com/Coffeiz/Gugu-web/blob/main/docs/reports/2026-08-21-OPT-CACHE-TUNING.md —— 第三方对 Qwen 连续多轮的实测：修好前缀稳定性后后两轮命中 98%+，间隔过长则首轮不命中"
-cache_ttl_secs = 300                # 上一条估计的秒数；服务端只用这个
+cache_ttl_secs = 300                  # 规划用的数：`cache_ttl_tier` 那一档
+cache_ttl_tier = "隐式（不指定 cache_control 就落这里；显式另算，见 cache_ttl_note）"
 
   [[provider.endpoint]]
   id = "openai"
@@ -1216,7 +1240,8 @@ cache_ttl_retrieved = "2026-11-01"
 cache_ttl_estimate = "约 5 分钟"
 cache_ttl_estimate_basis = "guess"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
 cache_ttl_estimate_source = "来源是猜的：官方指南讲 TTL 机制却不给时长，按 5 分钟档估；本机没 key，无法实测"
-cache_ttl_secs = 300                # 上一条估计的秒数；服务端只用这个
+cache_ttl_secs = 300                  # 规划用的数：`cache_ttl_tier` 那一档
+cache_ttl_tier = "隐式（唯一一档）"
 
   [[provider.endpoint]]
   id = "openai"
@@ -1345,7 +1370,8 @@ cache_ttl_retrieved = "2026-11-01"
 cache_ttl_estimate = "约 5 分钟"
 cache_ttl_estimate_basis = "guess"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
 cache_ttl_estimate_source = "来源是猜的：文档没有缓存章节，按 5 分钟档估"
-cache_ttl_secs = 300                # 上一条估计的秒数；服务端只用这个
+cache_ttl_secs = 300                  # 规划用的数：`cache_ttl_tier` 那一档
+cache_ttl_tier = "隐式（唯一一档）"
 
   [[provider.endpoint]]
   id = "openai"
@@ -1419,7 +1445,8 @@ cache_ttl_retrieved = "2026-11-01"
 cache_ttl_estimate = "约 1 小时"
 cache_ttl_estimate_basis = "community"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
 cache_ttl_estimate_source = "https://aiproducthub.cn/status/68539.html —— 第三方横评《藏在 TTL 里的钱：各家计时》：阿里与 Kimi 默认五分钟，智谱约一小时；社区观察，无官方出处"
-cache_ttl_secs = 3600                # 上一条估计的秒数；服务端只用这个
+cache_ttl_secs = 3600                 # 规划用的数：`cache_ttl_tier` 那一档
+cache_ttl_tier = "隐式（唯一一档；过期时间官方 unverified，1 小时是社区估计）"
 
   [[provider.endpoint]]
   id = "openai"
@@ -1595,7 +1622,9 @@ cache_ttl_retrieved = "2026-11-01"
 cache_ttl_estimate = "显式缓存按自己设的 expire_at 走（1 小时够大多数会话，最长 7 天）；隐式缓存按 5 分钟档估，且随时可能被淘汰"
 cache_ttl_estimate_basis = "inferred"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
 cache_ttl_estimate_source = "显式部分来自官方 expire_at 语义；隐式那个 5 分钟是按同档厂商估的，没有实测"
-cache_ttl_secs = 300                # 上一条估计的秒数；服务端只用这个
+cache_ttl_secs = 300                  # 规划用的数：`cache_ttl_tier` 那一档
+cache_ttl_tier = "隐式（不设 expire_at 就落这里）"
+cache_ttl_tiers = { implicit = 300, explicit_1h = 3600, explicit_7d = 604800 } # 另一档能明确要到、且长度不同
 
   [[provider.endpoint]]
   id = "openai"
