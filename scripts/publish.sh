@@ -190,6 +190,12 @@ for mark in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; d
   fi
 done
 
+if [ "$shape" = split ] && ! gitq check-ignore -q "$wt_rel/x" 2>/dev/null; then
+  die "$wt_rel is not ignored in this checkout, so it would show up as untracked
+  everywhere and this script would keep tripping over it. add it once:
+    printf '%s\\n' '$wt_rel/' >> $repo/.gitignore"
+fi
+
 if [ "$shape" = split ]; then
   pub_dirty=$(gitw status --porcelain)
   if [ -n "$pub_dirty" ]; then
@@ -201,13 +207,17 @@ fi
 
 # Read line by line, not with `mapfile`: macOS still ships bash 3.2, and this
 # is meant to be run by whoever cloned the repository.
+# The worktree this script uses is not content, even in a checkout whose
+# .gitignore does not know about it: it is dropped here, before anything can be
+# selected, kept aside or stashed.
+mine() { case $1 in "$wt_rel" | "$wt_rel"/*) return 1 ;; *) return 0 ;; esac; }
 modified=()
 while IFS= read -r line; do
-  [ -n "$line" ] && modified+=("$line")
+  [ -n "$line" ] && mine "$line" && modified+=("$line")
 done < <(gitq diff --name-only HEAD)
 newer=()
 while IFS= read -r line; do
-  [ -n "$line" ] && newer+=("$line")
+  [ -n "$line" ] && mine "$line" && newer+=("$line")
 done < <(gitq ls-files --others --exclude-standard)
 all=("${modified[@]}" "${newer[@]}")
 if [ ${#all[@]} -eq 0 ]; then die "nothing to publish: the working tree is clean"; fi

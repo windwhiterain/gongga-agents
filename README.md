@@ -300,3 +300,44 @@ git -C ~/.agents/gongga-agents rev-parse main origin/main   # 推过之后两个
 
 `git reflog` 能回到上面任何一步，所以这不是丢历史的操作；但也别对它用 `push --force` ——
 `main` 只快进，`--all` / `--mirror` 不用。
+
+#### 想验一个会推东西的东西：给它一个假远端，别给真的
+
+**判据：一次验证里，「推」这个动作只允许推到一个能随手删掉的地方。**
+
+这里踩过一次，代价很具体：想证明 `publish.sh` 在「别人的 clone」里也能用，就在本机 clone 了一份，
+结果那个 clone 的 `origin` 指回本仓库的 `.git` —— 它推的 `main` 就是**真的** `main`。
+于是本地 `main` 领先了 `origin/main`，正是上一段说「不允许」的那个状态。抢救只有一条：
+
+```bash
+git -C ~/.agents/gongga-agents branch -f main origin/main   # 拨回来，主检出不离开 local
+```
+
+那条探针提交没上 GitHub，只留在本地 reflog 里；但**它本来可能上去**。同样的三分钟，用假远端不会
+留下任何要收拾的东西：
+
+```bash
+scratch=.dev/scratch                        # 仓库里建，别用 /tmp，用完删掉
+rm -rf "$scratch"; mkdir -p "$scratch"
+git init -q --bare "$scratch/origin.git"
+git -C "$scratch/origin.git" symbolic-ref HEAD refs/heads/main
+git clone -q "$scratch/origin.git" "$scratch/repo"     # 裸的，什么都没有
+
+# 把要验的东西放进去，然后**在 clone 里**指一个假 upstream 再推：
+git -C "$scratch/repo" remote add probe "$scratch/origin.git"
+```
+
+`scripts/publish.sh` 的 `--remote` 就是为这件事留的（`GONGGA_PUBLISH_REMOTE` 也可）：
+
+```bash
+bash scripts/publish.sh -m "scripts: probe" --path scripts/publish.sh --remote probe
+```
+
+三条不变量，任何一次「会推」的验证都该断言它们，而不是断言「脚本没说错话」：
+
+1. 演练之后的 `origin/main` 与开始时**相同**（真远端没被碰过）；
+2. 主检出的 `branch --show-current` 还是 `local`，`git status --short` 干净；
+3. 本地 `main` 没有落后也没有领先：`git rev-parse main origin/main` 两个 sha 相等。
+
+第 2、3 条就是上一段那六行校验里最容易破的两条 —— 破的时候它们**不会报错**，只会让这台机器
+在旧基上跑、或者让整点同步再也快进不了。
