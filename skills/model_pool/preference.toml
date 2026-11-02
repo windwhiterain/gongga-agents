@@ -38,8 +38,6 @@ test = 0.0
 # 智谱 GLM（还没有 key，有 key 就自动参与抽取）
 "zhipu/glm-5.3" = 1.0
 "zhipu/glm-5.3-flash" = 1.0
-"zhipu/glm-5.2" = 1.0
 # 字节 Doubao Seed（同上）
-"bytedance-ark/doubao-seed-2-1-pro-260915" = 1.0
 "bytedance-ark/doubao-seed-evolving" = 1.0
 "bytedance-ark/doubao-seed-2-1-lite-260915" = 1.0
