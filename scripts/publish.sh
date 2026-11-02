@@ -2,9 +2,12 @@
 # Turn the main checkout's uncommitted changes into a public commit on `main`,
 # and rebase `local` onto it, without the main checkout ever leaving `local`.
 #
-#   scripts/publish.sh -m "model_pool: weights" --dry-run
-#   scripts/publish.sh -m "model_pool: weights"                     # every changed path
-#   scripts/publish.sh -m "providers: glm" --path providers.toml    # only these paths
+#   bash scripts/publish.sh -m "model_pool: weights" --dry-run
+#   bash scripts/publish.sh -m "model_pool: weights"                     # every changed path
+#   bash scripts/publish.sh -m "providers: glm" --path providers.toml    # only these paths
+#
+# Run it with `bash`, never as ./scripts/publish.sh: this machine's git records
+# no file modes (core.fileMode=false), so the file is 100644 in every clone.
 #
 # README.md's 「提交往哪去」 is five commands in three directories, and the one
 # checkout that must not move is the one the server is reading. The order is the
