@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
-# Turn the main checkout's uncommitted changes into a public commit on `main`,
-# and rebase `local` onto it, without the main checkout ever leaving `local`.
+# Turn uncommitted changes into one public commit that carries exactly the paths
+# you name. What "public" means depends on the checkout it finds:
+#
+#   a plain clone (no branch named `local`)
+#       commit those paths on the current branch and push to origin. One step.
+#
+#   this machine (a `local` branch exists)
+#       commit them on the worktree's `pub` at origin/main, push, fast-forward
+#       `main`, then rebase `local` onto it -- the checkout the server reads
+#       never leaves `local`, so the machine keeps working while it happens.
 #
 #   bash scripts/publish.sh -m "model_pool: weights" --dry-run
 #   bash scripts/publish.sh -m "model_pool: weights"                     # every changed path
@@ -138,7 +146,27 @@ leave_as_found() {
 }
 
 gitq rev-parse --git-dir >/dev/null 2>&1 || die "$repo is not a git checkout"
-if [ ! -d "$wt" ]; then
+head=$(gitq rev-parse --abbrev-ref HEAD)
+
+# Two shapes of checkout, and they need different things.
+#
+#   plain   somebody's clone of the repository: one branch, straight to the
+#           remote. Nothing to keep out of the way, so the commit is made here.
+#   split   this machine: `local` is read by the server and carries machine
+#           commits, `main` is the public line. The commit is made in a worktree
+#           so the checkout the server reads never leaves `local`.
+if gitq rev-parse -q --verify local >/dev/null; then
+  shape=split
+else
+  shape=plain
+fi
+
+if [ "$shape" = plain ] && [ "$head" = local ]; then
+  die "this checkout has a branch named local but publish needs it to stay here;
+  run this from a clone without one, or say --repo"
+fi
+
+if [ "$shape" = split ] && [ ! -d "$wt" ]; then
   # A fresh clone has no worktree yet. Making one does not move this checkout,
   # so it is safe to do here -- and a contributor should not have to read the
   # README twice to publish one change.
@@ -149,10 +177,11 @@ if [ ! -d "$wt" ]; then
   say "made a worktree at $wt_rel (branch $pub) -- this checkout stayed on local"
 fi
 
-head=$(gitq rev-parse --abbrev-ref HEAD)
-[ "$head" = local ] || die "the main checkout is on '$head', not 'local'.
+if [ "$shape" = split ] && [ "$head" != local ]; then
+  die "the main checkout is on '$head', not 'local'.
   the server reads this working tree, so it stays on local:
     git -C $repo checkout local"
+fi
 
 gitdir=$(cd "$repo" && cd "$(gitq rev-parse --git-dir)" && pwd)
 for mark in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
@@ -161,11 +190,13 @@ for mark in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; d
   fi
 done
 
-pub_dirty=$(gitw status --porcelain)
-if [ -n "$pub_dirty" ]; then
-  die "the worktree $wt_rel has uncommitted changes:
+if [ "$shape" = split ]; then
+  pub_dirty=$(gitw status --porcelain)
+  if [ -n "$pub_dirty" ]; then
+    die "the worktree $wt_rel has uncommitted changes:
 $pub_dirty
   it is a workspace: commit or discard them, then run this again"
+  fi
 fi
 
 # Read line by line, not with `mapfile`: macOS still ships bash 3.2, and this
@@ -218,10 +249,15 @@ if [ "$dry" = 1 ]; then
     say "  new: $p ($(wc -l <"$repo/$p" 2>/dev/null | tr -d ' ') lines)"
   done
   step "then"
-  say "  commit on $pub at $remote/$branch: \"$message\""
-  say "  push it to $remote $branch, fast-forward $branch, rebase local onto it"
-  if [ ${#rest[@]} -gt 0 ]; then
-    say "  keep aside and put back after the rebase: ${rest[*]}"
+  if [ "$shape" = plain ]; then
+    say "  commit $head: \"$message\""
+    say "  push it to $remote $head"
+  else
+    say "  commit on $pub at $remote/$branch: \"$message\""
+    say "  push it to $remote $branch, fast-forward $branch, rebase local onto it"
+    if [ ${#rest[@]} -gt 0 ]; then
+      say "  keep aside and put back after the rebase: ${rest[*]}"
+    fi
   fi
   exit 0
 fi
@@ -237,6 +273,40 @@ for p in "${sel[@]}"; do
       ;;
   esac
 done
+
+if [ "$shape" = plain ]; then
+  # One branch, one remote, no machine content to keep apart: commit here and
+  # push. `--only` limits the commit to the selected paths, so anything left in
+  # the working tree stays uncommitted and untouched.
+  step "commit and push on $head"
+  phase=publish
+  gitq add -A -- "${sel[@]}"
+  if ! gitq commit -q -m "$message" -- "${sel[@]}"; then
+    die "the commit did not happen -- the working tree is as it was"
+  fi
+  # The commit must name exactly the selected paths: nothing else may ride
+  # along, and an untouched path must not be in it.
+  got=$(gitq show --name-only --pretty=format: HEAD | sed '/^[[:space:]]*$/d' | LC_ALL=C sort | tr '\n' ' ')
+  want=$(printf '%s\n' "${sel[@]}" | LC_ALL=C sort | tr '\n' ' ')
+  if [ "$got" != "$want" ]; then
+    say "!! the commit carries [$got] but these paths changed [$want]"
+    say "   undo it with: git -C $repo reset --soft HEAD~1"
+    exit 1
+  fi
+  if ! gitq push -q "$remote" "$head:$head"; then
+    say "!! the commit is local; the push was refused (fetch first, then push again)"
+    exit 1
+  fi
+  say "  pushed $(gitq rev-parse --short HEAD) to $remote/$head"
+  step "checks"
+  left=$(gitq status --short)
+  if [ -n "$left" ]; then
+    say "  still uncommitted (not published):"
+    printf '   %s\n' "$left"
+  fi
+  say "done: $(gitq rev-parse --short HEAD) on $head ($remote agrees)"
+  exit 0
+fi
 
 step "the patch"
 mkdir -p "$gitdir/publish"

@@ -177,10 +177,19 @@ bash scripts/publish.sh -m "providers: glm" --path providers.toml   # 只发这�
 （一律用 `bash` 起头：有的 clone 不记录执行位（`core.fileMode=false`，Windows 上的 git
 默认如此），文件在仓库里存成 `100644`，`./scripts/publish.sh` 在那种 clone 上会被拒绝执行。）
 
+脚本认出两种 checkout，按它看到的做事：
+
+| 形状 | 判据 | 它做什么 |
+| --- | --- | --- |
+| 普通 clone | 没有叫 `local` 的分支 | 就在当前分支上提交这几个路径、推给 `origin`。没有 worktree、没有 rebase |
+| 本机（本文上面的流程） | 有 `local` 分支 | 在 `.worktrees/work` 里对 `origin/main` 提交、推送、快进 `main`、把 `local` rebase 上去 |
+
 **第一次在别人的 clone 上跑不会缺东西**：没有 `.worktrees/work` 就自己建一个（不切换主检出），
 只依赖 bash 3.2 和 git —— macOS 自带的 bash 也能跑，不需要装别的东西。
 它留在身后的只有 `.git/publish/` 里的几份 diff（最近 10 份，`KEEP_PATCHES` 可改），
 那个目录在 `.git` 里，任何提交都碰不到它，工作区里不会多出文件。
+`.gitignore` 也把脚本跑起来会掉在工作区里的东西挡住了（`__pycache__/`、`.ruff_cache/`、
+`*.orig`、`*.rej`），所以 `git status` 里看到的只有你自己的改动。
 
 它做的正是上面那一节，一次做完，**主检出全程停在 `local`**：把工作区的改动写成一份 patch
 （新文件也算）→ 在 `pub` 上落到 `origin/main`、提交、推送 → 快进 `main`、把 `local` rebase
