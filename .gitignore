@@ -1,1 +1,4 @@
 **/*.pyc
+# Branch work happens in a worktree beside this checkout; the checkout itself
+# stays on `local`, because the server reads this working tree and not a branch.
+.worktrees/
