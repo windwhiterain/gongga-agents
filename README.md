@@ -90,6 +90,11 @@ roster 里的 `key = "..."` 会被**忽略**：roster 是 git 检出，写进去
    `cache_ttl_estimate_basis` 用 `community`（第三方实测/横评）/ `inferred`（按官方机制推）/
    `guess`（纯猜），`cache_ttl_estimate_source` 写 URL，纯猜的写"来源是猜的"和猜法。
    价格同样：官方没给的写进 `note` 并标明"估计、未核实"，不要伪装成价目表里的一行。
+   **第三层是数字**：`cache_ttl_secs` 是那个估计的秒数，`cache_ttl_tier` 说它是哪一档
+   （= 请求不指定缓存时长时落的那一档），`cache_ttl_tiers` 只在"另一档能明确要到且长度不同"
+   时才写。厂商常常卖多档（Kimi 5m/1h、火山方舟隐式 + 显式 1h–7d、百炼隐式 + 显式 5m），
+   而 gongga 今天不发任何缓存指令，所以规划只许用在役那一档；另外"命中是否续期"也是档与档的
+   差别（Kimi/百炼续期，火山显式 expire_at 不续），写在 `cache_ttl_note` 里。
 6. 法定节假日日期写在 `providers/statutory.toml`（国务院每年一次通知），由 `price.py` 读；
    放假调休表从 chinese-days 按年缓存到 `~/.agents/cache/`，不在仓库里。
 7. 提交前确认：`grep -nE '"(sk|ak|flm_ak|user)_' providers.toml` 无输出。
