@@ -1,15 +1,20 @@
 ---
 name: proxy
 description: 让某台机器的某个 host 走指定的上游（HTTP/SOCKS5/直连），并证明它真的走了；同时直接驱动跑着的 mihomo/clash core——列策略组、换节点、测延迟和吞吐、切模式、热重载。任何"这个 API 连不上/到底有没有走代理/怎么只让某个域名走代理/换哪个节点/哪个节点快"的问题用它。
+metadata:
+  entry: proxy
 ---
 
 # 按 host 路由，并证明它真的走了
 
-`~/.agents/skills/proxy/proxy` 是一个**自己实现的路由代理**：纯 Python 标准库，按规则把
+`$SKILL_DIR/proxy` 是一个**自己实现的路由代理**：纯 Python 标准库，按规则把
 每个连接送到指定上游，并把每条决定记下来。没有第三方包，不需要装任何东西。
 
 ```bash
-~/.agents/skills/proxy/proxy doctor      # 先看这条链每一环
+# 本 skill 的目录：`@skill:` 展开里 `SKILL.md: <path>` 的父目录（`index_skill` 的 path 列同源）。
+# gongga 里更短：`gongga-cli skill <name> …`，它跑 frontmatter 里声明的入口。
+SKILL_DIR=<本 SKILL.md 所在目录>
+"$SKILL_DIR/proxy" doctor      # 先看这条链每一环
 ```
 
 ## 为什么不是「配个代理」
@@ -28,37 +33,37 @@ description: 让某台机器的某个 host 走指定的上游（HTTP/SOCKS5/直�
 
 ```bash
 # HTTP 代理（最常见）
-~/.agents/skills/proxy/proxy upstream add corp 127.0.0.1:8080 --kind http
-~/.agents/skills/proxy/proxy upstream add corp 127.0.0.1:8080 --kind http --auth user:pass
+"$SKILL_DIR/proxy" upstream add corp 127.0.0.1:8080 --kind http
+"$SKILL_DIR/proxy" upstream add corp 127.0.0.1:8080 --kind http --auth user:pass
 
 # SOCKS5
-~/.agents/skills/proxy/proxy upstream add tun 127.0.0.1:1080 --kind socks5
+"$SKILL_DIR/proxy" upstream add tun 127.0.0.1:1080 --kind socks5
 
 # 另一个按流量计费的服务，一个上游一个名字即可，规则里按名字选
-~/.agents/skills/proxy/proxy upstream add premium api.example.com:3128 --kind http
+"$SKILL_DIR/proxy" upstream add premium api.example.com:3128 --kind http
 ```
 
 然后决定谁走它：
 
 ```bash
-~/.agents/skills/proxy/proxy add github.com       --via corp          # 后缀匹配（含子域）
-~/.agents/skills/proxy/proxy add api.openai.com   --via premium --type exact
-~/.agents/skills/proxy/proxy add 10.0.0.0/8       --via direct  --type cidr
+"$SKILL_DIR/proxy" add github.com       --via corp          # 后缀匹配（含子域）
+"$SKILL_DIR/proxy" add api.openai.com   --via premium --type exact
+"$SKILL_DIR/proxy" add 10.0.0.0/8       --via direct  --type cidr
 ```
 
 ## 三条命令的主线
 
 ```bash
 # 1. 改配置后重启，规则在启动时读入
-~/.agents/skills/proxy/proxy serve                 # 前台；要常驻用 detached bash
+"$SKILL_DIR/proxy" serve                 # 前台；要常驻用 detached bash
 
 # 2. 让客户端指向它
-~/.agents/skills/proxy/proxy env                   # 打印 export，含 git 那行
+"$SKILL_DIR/proxy" env                   # 打印 export，含 git 那行
 export HTTPS_PROXY=http://127.0.0.1:7899
 export NO_PROXY=localhost,127.0.0.1,::1
 
 # 3. 证明这个 host 真的走了你指定的上游
-~/.agents/skills/proxy/proxy check github.com
+"$SKILL_DIR/proxy" check github.com
 ```
 
 `check` 的输出形如：
@@ -105,7 +110,7 @@ mixed-port: 7897          # 客户端要指向的端口——不是 API 端口
 ```
 
 ```bash
-~/.agents/skills/proxy/proxy core doctor
+"$SKILL_DIR/proxy" core doctor
 ```
 
 `doctor` 按这个顺序找，并且**打印它用的是哪一条**：

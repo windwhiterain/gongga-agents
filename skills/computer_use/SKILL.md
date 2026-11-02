@@ -1,15 +1,20 @@
 ---
 name: computer_use
 description: 用鼠标和键盘真的操作桌面——截图看屏、按控件树定位、点击/打字/按键，然后截图确认。任何只能通过图形界面完成的事（原生应用、装不了 CLI 的软件、拖拽、菜单）用它。Windows 已验证，macOS/Linux 后端已写但未实测。
+metadata:
+  entry: cu
 ---
 
 # 操作桌面
 
-`~/.agents/skills/computer_use/cu` 是一条命令，三个平台：`shot`、`tree`、`click`、
+`$SKILL_DIR/cu` 是一条命令，三个平台：`shot`、`tree`、`click`、
 `type`、`key`、`focus`、`windows`、`doctor` 在哪儿都叫这个名字，只有后端换掉。
 
 ```bash
-~/.agents/skills/computer_use/cu doctor      # 先确认这台机器能用
+# 本 skill 的目录：`@skill:` 展开里 `SKILL.md: <path>` 的父目录（`index_skill` 的 path 列同源）。
+# gongga 里更短：`gongga-cli skill <name> …`，它跑 frontmatter 里声明的入口。
+SKILL_DIR=<本 SKILL.md 所在目录>
+"$SKILL_DIR/cu" doctor      # 先确认这台机器能用
 ```
 
 `cu` 优先跑 `cu.py`（uv 解析内联依赖，不需要你先装任何东西），没有 uv 就用

@@ -1,11 +1,20 @@
 ---
 name: windows-dev
 description: Windows 上 agentic 开发的四类环境坑的诊断与治理——行尾符（CRLF/LF）、字符编码（GBK/UTF-8/BOM）、文件路径（260 长路径/保留设备名/大小写冲突）、系统环境（执行策略/长路径开关/Git autocrlf）。当 agent 在 Windows 上批量写文件或跑脚本后出错、shell 脚本报 `\r: command not found`、git diff 出现满屏假变更、中文变成乱码、或读写某个路径失败时使用。默认 doctor 只做只读体检；eol 与 encoding 可按要求改写文件。
+metadata:
+  entry: windows-dev.ps1
 ---
 
 # Windows agentic 开发环境体检与治理
 
-给 agent 用的 Windows 环境诊断工具。跑 `windows-dev.ps1`（与本文件同目录）。
+给 agent 用的 Windows 环境诊断工具，跑 `windows-dev.ps1`（与本文件同目录）。
+
+```bash
+# 本 skill 的目录：`@skill:` 展开里 `SKILL.md: <path>` 的父目录（`index_skill` 的 path 列同源）。
+# 下面每条 `powershell … -File` 里的 $SKILL_DIR 是**这台 shell** 展开的，不是 PowerShell 变量；
+# gongga 里更短：`gongga-cli skill windows-dev <参数>`，路径拼法由它负责。
+SKILL_DIR=<本 SKILL.md 所在目录>
+```
 
 Windows 上 agent 写脚本时遇到的"莫名其妙的错误"，绝大多数来自四类问题，它们的
 共同特点是**不报错，或者报一个跟原因毫无关系的错**：
@@ -31,7 +40,7 @@ Windows 上 agent 写脚本时遇到的"莫名其妙的错误"，绝大多数来
 1. **先 doctor**（只读，不改任何文件）：
 
    ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\.agents\gongga-agents\skills\windows-dev\windows-dev.ps1" doctor <目录>
+   powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/windows-dev.ps1" doctor <目录>
    ```
 
    四个维度全扫一遍，出一份汇总报告，末尾给出对应的修复命令。

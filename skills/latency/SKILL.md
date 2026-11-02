@@ -1,6 +1,8 @@
 ---
 name: latency
 description: 定位延迟到底丢在哪一层，再在瓶颈之前把它整形掉——判断是不是代理/TUN 接管了流量、逐跳找出从哪一跳开始尖峰、同机同钟采集出流量与 RTT 并报分布、读 mihomo /connections 找出谁在吃上行、Windows QoS 限速与 DSCP 优先级。任何"游戏/API 延迟高、是不是代理的锅、谁占了带宽、怎么给某台机器限速"的问题用它。Windows 已实测；Linux 的 tc/HTB 未实现。
+metadata:
+  entry: latency
 ---
 
 # 先定位到哪一层，再整形
@@ -9,8 +11,11 @@ description: 定位延迟到底丢在哪一层，再在瓶颈之前把它整形�
 （别人的机器把上行打满）。所以这里的顺序是固定的：**先证明是哪一层，再动任何开关。**
 
 ```bash
-~/.agents/skills/latency/latency doctor --app Overwatch.exe   # 是代理吗？
-~/.agents/skills/latency/latency hops --dest 223.5.5.5       # 从哪一跳开始炸？
+# 本 skill 的目录：`@skill:` 展开里 `SKILL.md: <path>` 的父目录（`index_skill` 的 path 列同源）。
+# gongga 里更短：`gongga-cli skill <name> …`，它跑 frontmatter 里声明的入口。
+SKILL_DIR=<本 SKILL.md 所在目录>
+"$SKILL_DIR/latency" doctor --app Overwatch.exe   # 是代理吗？
+"$SKILL_DIR/latency" hops --dest 223.5.5.5       # 从哪一跳开始炸？
 ```
 
 ## 判断链

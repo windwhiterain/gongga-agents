@@ -1,6 +1,8 @@
 ---
 name: polity
 description: Separate understanding, planning, implementation, approval, and harness operations across justice, advisor, premier, and HR sessions. Use for multi-stage work that needs SPEC-based approval or a SPEC amendment; do not start the full workflow for a simple direct task.
+metadata:
+  entry: polity
 ---
 
 # Polity: separate judgement from execution
@@ -50,7 +52,11 @@ task ID, and records stay the same.
 ## Start
 
 ```bash
-P=~/.agents/skills/polity/polity
+# This skill's own directory: the parent of the `SKILL.md: <path>` that `@skill:`
+# expands to (the `path` column of `index_skill` names the same file).
+# In gongga, `gongga-cli skill <name> ...` runs the entry the frontmatter declares.
+SKILL_DIR=<the directory this SKILL.md is in>
+P="$SKILL_DIR/polity"
 $P start --task <task_id> --spec /absolute/path/to/SPEC.md \
   --goal '<user goal and constraints>' --cwd /absolute/path/to/project
 ```

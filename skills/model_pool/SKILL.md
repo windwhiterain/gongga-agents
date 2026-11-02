@@ -1,6 +1,8 @@
 ---
 name: model_pool
 description: Pick the model a spawned agent should run on — one `<provider>/<model id>` string that `gongga-cli set_session --model` takes verbatim, drawn across three tiers (flash / pro / sota) by the weights you set, and only from models this machine can actually run right now: still in the roster, credentialed, with allowance above its floor, entitled on this account, and not marked out. Use it when a subagent has no model to name, when a spawn hit a quota wall and needs another, or when you are placing the work itself: flash for search / explore / investigate / implement, pro for hard implement and review, sota for plan and core review. Triggers - 挑模型 / 派子 agent 用哪个模型 / 有额度的模型 / model pool / flash pro sota 概率.
+metadata:
+  entry: model_pool
 ---
 
 # Draw a model, hand it to a spawn
@@ -8,7 +10,11 @@ description: Pick the model a spawned agent should run on — one `<provider>/<m
 One command, one line, and that line is already the argument:
 
 ```bash
-S=~/.agents/gongga-agents/skills/model_pool/model_pool
+# This skill's own directory: the parent of the `SKILL.md: <path>` that `@skill:`
+# expands to (the `path` column of `index_skill` names the same file).
+# In gongga, `gongga-cli skill <name> ...` runs the entry the frontmatter declares.
+SKILL_DIR=<the directory this SKILL.md is in>
+S="$SKILL_DIR/model_pool"
 $S pick --provider deepseek-official      # -> deepseek-official/deepseek-flash
 ```
 

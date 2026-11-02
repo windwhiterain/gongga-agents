@@ -1,13 +1,24 @@
 ---
 name: clean-disk
 description: Windows 全量磁盘清理，一次清掉临时文件、浏览器/应用/编辑器缓存、崩溃转储、Windows 更新残留、DISM 组件、包管理器缓存和所有盘回收站；加 -ProjectRoot 可顺带清理指定代码根内的 target/node_modules 等构建产物。用户说"清理 C 盘/磁盘空间不足/系统垃圾/清理缓存/clean disk/释放磁盘空间"时使用。只删可自动重建的内容，不用于删除个人文件、聊天记录或卸载软件。
+metadata:
+  entry: clean-disk.ps1
 ---
 
 # Windows 全量磁盘清理
 
-给用户跑 `scripts/../clean-disk.ps1`（与本文件同目录）。脚本**没有清理项开关**——
+给用户跑 `clean-disk.ps1`（与本文件同目录）。
+
+脚本**没有清理项开关**——
 所有"删掉后会自动重建"的东西默认全清；`-DryRun` 是安全预览，不是开关。
 另一个参数 `-ProjectRoot` 是**范围**参数，见下文「项目构建产物」。
+
+```bash
+# 本 skill 的目录：`@skill:` 展开里 `SKILL.md: <path>` 的父目录（`index_skill` 的 path 列同源）。
+# 下面每条 `powershell … -File` 里的 $SKILL_DIR 是**这台 shell** 展开的，不是 PowerShell 变量；
+# gongga 里更短：`gongga-cli skill clean-disk <参数>`，路径拼法由它负责。
+SKILL_DIR=<本 SKILL.md 所在目录>
+```
 
 ## 何时用 / 不要用来干什么
 
@@ -24,14 +35,14 @@ description: Windows 全量磁盘清理，一次清掉临时文件、浏览器/�
 1. **先 DryRun**，把各项占用汇报给用户（不删除、不提权、不弹 UAC）：
 
    ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\.agents\gongga-agents\skills\clean-disk\clean-disk.ps1" -DryRun
+   powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/clean-disk.ps1" -DryRun
    ```
 
 2. 用户确认（或本来就直接要求清理）后实跑。实跑会自动弹**一次 UAC**：
    同意 → 用户级 + 系统级全清；取消 → 只清用户级，系统级项目打印跳过，不算失败。
 
    ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\.agents\gongga-agents\skills\clean-disk\clean-disk.ps1"
+   powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/clean-disk.ps1"
    ```
 
    提权后的窗口带 `-NoExit`，跑完留着给用户看汇总。DISM 组件清理可能要几分钟，
@@ -65,7 +76,7 @@ description: Windows 全量磁盘清理，一次清掉临时文件、浏览器/�
 
 ```powershell
 # 先 DryRun（项目产物清理不需要管理员，DryRun 同样不提权）
-powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\.agents\gongga-agents\skills\clean-disk\clean-disk.ps1" -DryRun -ProjectRoot C:\resource
+powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/clean-disk.ps1" -DryRun -ProjectRoot C:\resource
 # 多个根用逗号分隔；实跑时 -ProjectRoot 会经 UAC 提权原样透传到新窗口
 ...\clean-disk.ps1 -ProjectRoot C:\resource,D:\code
 ```

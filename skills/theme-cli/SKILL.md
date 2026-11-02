@@ -1,6 +1,8 @@
 ---
 name: theme-cli
 description: 切换 Windows 系统暗色/亮色主题，可以手动切换，也可以设置每天定时自动切换。任何"怎么让 Windows 定时换主题""暗色模式怎么自动开""把系统改成亮色/暗色""theme-cli 怎么用""theme-cli --help"的问题用它。Windows 已实测；macOS/Linux 未实现。
+metadata:
+  entry: theme-cli
 ---
 
 # 定时切换 Windows 明暗主题
@@ -211,11 +213,14 @@ theme-cli: Invalid time '25:99'. Use HH:mm in 24-hour format, for example 08:00.
 
 ## 装在哪
 
+本文件与三个入口在同一个目录里，下文用 `$SKILL_DIR` 指它（`@skill:` 展开里
+`SKILL.md: <path>` 的父目录；gongga 里 `gongga-cli skill theme-cli …` 直接跑入口）。
+
 | 路径 | 作用 |
 |---|---|
-| `~/.agents/skills/theme-cli/theme-cli.ps1` | 核心实现 |
-| `~/.agents/skills/theme-cli/theme-cli` | bash 入口 |
-| `~/.agents/skills/theme-cli/theme-cli.cmd` | cmd 入口 |
+| `$SKILL_DIR/theme-cli.ps1` | 核心实现 |
+| `$SKILL_DIR/theme-cli` | bash 入口 |
+| `$SKILL_DIR/theme-cli.cmd` | cmd 入口 |
 | `~/.local/bin/theme-cli` | bash 全局入口（`~/.local/bin` 已在 PATH 里） |
 | `~/.local/bin/theme-cli.cmd` | cmd 全局入口 |
 
@@ -238,5 +243,5 @@ PowerShell 7（`pwsh`）都能跑，不需要管理员权限，不需要装任�
 theme-cli schedule --remove
 ```
 
-然后删掉 `~/.agents/skills/theme-cli/` 和 `~/.local/bin/theme-cli{,.cmd}`。当前主题不受影响，
+然后删掉本 skill 的目录（`$SKILL_DIR`）和 `~/.local/bin/theme-cli{,.cmd}`。当前主题不受影响，
 可以继续在 设置 > 个性化 > 颜色 里手动改。
