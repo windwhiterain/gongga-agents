@@ -271,6 +271,15 @@ if ! gitw apply --whitespace=nowarn "$patch"; then
      there is a machine change -- commit it on local with a 'local:' message."
 fi
 gitw add -A -- "${sel[@]}"
+# A patch that changes only a file mode applies to nothing here: `git apply`
+# drops mode changes when core.fileMode is false, which is how a Windows clone
+# is configured. Say so instead of failing at `git commit`.
+if gitw diff --cached --quiet; then
+  die "the patch applied to no content on $pub -- nothing to commit.
+  a mode-only change is the usual cause: this checkout records no file modes
+  ('git config core.fileMode' is $(gitq config --get core.fileMode || echo unset)),
+  so 'git apply' drops it. the main checkout was not touched."
+fi
 gitw commit -q -m "$message"
 got=$(gitw show --name-only --pretty=format: HEAD | sed '/^[[:space:]]*$/d' | LC_ALL=C sort | tr '\n' ' ')
 if [ "$got" != "$want" ]; then

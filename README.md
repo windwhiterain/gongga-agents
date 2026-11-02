@@ -169,10 +169,13 @@ git rebase main                                 # 本机提交跟着挪到新 ma
 把「哪些算公共的」交给 `--path`，剩下的原样留在工作区：
 
 ```bash
-scripts/publish.sh -m "model_pool: weights" --dry-run          # 只说要做什么
-scripts/publish.sh -m "model_pool: weights"                    # 所有改动都发出去
-scripts/publish.sh -m "providers: glm" --path providers.toml   # 只发这一个
+bash scripts/publish.sh -m "model_pool: weights" --dry-run          # 只说要做什么
+bash scripts/publish.sh -m "model_pool: weights"                    # 所有改动都发出去
+bash scripts/publish.sh -m "providers: glm" --path providers.toml   # 只发这一个
 ```
+
+（一律用 `bash` 起头：这台机器的 git 不记录执行位（`core.fileMode=false`），所以文件在
+仓库里永远存成 `100644`，`./scripts/publish.sh` 在有的 clone 上会被拒绝执行。）
 
 它做的正是上面那一节，一次做完，**主检出全程停在 `local`**：把工作区的改动写成一份 patch
 （新文件也算）→ 在 `pub` 上落到 `origin/main`、提交、推送 → 快进 `main`、把 `local` rebase
