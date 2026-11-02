@@ -11,6 +11,8 @@ gongga 启动时把它 clone 到 `~/.agents/gongga-agents/`，以后按层读。
 gongga-agents/
   providers.toml   # provider 目录：端点、模型、上下文、模态、思考等级、价格、额度查询
   providers/       # 额度查询脚本（quota_query.script 引用）与分时价格计算（price.py）
+  skills/          # model_pool 等技能（`~/.agents/skills/*` 指向这里）
+  scripts/         # publish.sh：把主检出里还没提交的改动做成一次公开提交
 ```
 
 `quota_query.script` 里的路径**相对 `providers.toml` 自己所在的目录** —— 社区条目的
@@ -160,6 +162,32 @@ git rebase main                                 # 本机提交跟着挪到新 ma
 - `git fetch . refs/heads/pub:refs/heads/main` 被拒，说明本地 `main` 上有一条别人的克隆里
   没有的提交 —— 那是这套流程不允许的状态（`main` 只快进）。先 `git log --oneline origin/main..main`
   看清它是什么，搬到 `pub` 上重新走一遍，别用 `--force`。
+
+### 一·补：主检出里改了还没提交？一条命令
+
+在 `local` 的工作区里改完（这是最常见的样子 —— 你在编辑器里打开的就是它），
+把「哪些算公共的」交给 `--path`，剩下的原样留在工作区：
+
+```bash
+scripts/publish.sh -m "model_pool: weights" --dry-run          # 只说要做什么
+scripts/publish.sh -m "model_pool: weights"                    # 所有改动都发出去
+scripts/publish.sh -m "providers: glm" --path providers.toml   # 只发这一个
+```
+
+它做的正是上面那一节，一次做完，**主检出全程停在 `local`**：把工作区的改动写成一份 patch
+（新文件也算）→ 在 `pub` 上落到 `origin/main`、提交、推送 → 快进 `main`、把 `local` rebase
+上去 → 没被 `--path` 选中的改动用 stash 收起来、rebase 完再放回。
+
+几条约定是脚本替你守的，也是它存在的理由：
+
+- 主检出不在 `local`、`pub` 工作区脏、有 rebase/merge 停在半路 —— 都直接拒绝，不动任何东西。
+- 提交里只会有你 `--path` 指名的那几个文件；路径集合对不上就**不推**。
+- 消息不许以 `local:` 开头（那是本机提交的前缀），改动落在 `providers.toml` 时还要过一遍密钥自查。
+- 推之前的失败不会碰主检出；推之后的失败（`local` rebase 冲突）会把主检出恢复成干净的
+  `local`，然后告诉你提交已经在 `origin/main` 上、要哪两条命令把它落到本地。
+
+**这套流程里唯一没被脚本接管的是第三节**：改动已经成了一条压在 `local` 上的公共提交。
+那种情况要重写 `local` 的历史，脚本不替你猜哪几条该搬走 —— 照第三节手工做。
 
 ### 二、本机改动：在 `local` 上提交，不推
 
