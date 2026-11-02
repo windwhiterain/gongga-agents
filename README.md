@@ -27,7 +27,9 @@ gongga-agents/
   那条路删掉了 —— 两份文件无法回答"现在这个价是哪个价"，而且本机的东西没有自己的历史。
 - **本机的东西走分支**：这台机器自己的条目（内网 `base_url`、自建 provider）在
   clone 里的 `local` 分支上，`main` 是上游。上游更新是 `rebase`，不是合并。
-  密钥不在这条分支上，见下面的「密钥政策」；提交该往哪条分支走，见「提交往哪去」。见 [`LOCAL.md`](LOCAL.md)。
+  密钥不在这条分支上，见下面的「密钥政策」。
+  这个 clone 的**检出永远是 `local`**：服务端读的是它的工作区，所以分支工作在
+  `.worktrees/` 里做。提交该往哪条分支走、worktree 怎么用，见「提交往哪去」和 [`LOCAL.md`](LOCAL.md)。
 - **脚本查找**：`quota_query.script` 是相对该文件的路径，所以只在自己的 clone 里找。
 - 显式指定单文件（`GONGGA_PROVIDERS_CATALOG=/path/to/providers.toml`）时只用那一个。
 
