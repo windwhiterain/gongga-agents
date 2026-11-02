@@ -138,8 +138,16 @@ leave_as_found() {
 }
 
 gitq rev-parse --git-dir >/dev/null 2>&1 || die "$repo is not a git checkout"
-[ -d "$wt" ] || die "no worktree at $wt_rel -- create it once:
+if [ ! -d "$wt" ]; then
+  # A fresh clone has no worktree yet. Making one does not move this checkout,
+  # so it is safe to do here -- and a contributor should not have to read the
+  # README twice to publish one change.
+  gitq fetch -q "$remote"
+  gitq worktree add -q "$wt_rel" -B "$pub" "$remote/$branch" ||
+    die "no worktree at $wt_rel, and creating one failed:
   git -C $repo worktree add $wt_rel -B $pub $remote/$branch"
+  say "made a worktree at $wt_rel (branch $pub) -- this checkout stayed on local"
+fi
 
 head=$(gitq rev-parse --abbrev-ref HEAD)
 [ "$head" = local ] || die "the main checkout is on '$head', not 'local'.
@@ -160,8 +168,16 @@ $pub_dirty
   it is a workspace: commit or discard them, then run this again"
 fi
 
-mapfile -t modified < <(gitq diff --name-only HEAD)
-mapfile -t newer < <(gitq ls-files --others --exclude-standard)
+# Read line by line, not with `mapfile`: macOS still ships bash 3.2, and this
+# is meant to be run by whoever cloned the repository.
+modified=()
+while IFS= read -r line; do
+  [ -n "$line" ] && modified+=("$line")
+done < <(gitq diff --name-only HEAD)
+newer=()
+while IFS= read -r line; do
+  [ -n "$line" ] && newer+=("$line")
+done < <(gitq ls-files --others --exclude-standard)
 all=("${modified[@]}" "${newer[@]}")
 if [ ${#all[@]} -eq 0 ]; then die "nothing to publish: the working tree is clean"; fi
 
@@ -226,6 +242,10 @@ step "the patch"
 mkdir -p "$gitdir/publish"
 stamp=$(date +%Y%m%d-%H%M%S)
 patch=$gitdir/publish/$stamp.diff
+# Kept so a failure can be retried by hand, and pruned so a repository that
+# publishes for a year does not grow a directory of diffs. It lives under .git,
+# which no commit can reach; `docs` says the same thing where a reader looks.
+KEEP_PATCHES=${KEEP_PATCHES:-10}
 # A file git does not know yet has to be made visible to `diff`, and put back
 # afterwards so the tree is left exactly as the operator left it.
 phase=patch
@@ -245,6 +265,12 @@ else
 fi
 if [ ! -s "$patch" ]; then die "the patch came out empty"; fi
 say "  $patch ($(grep -c '^diff --git' "$patch") file(s))"
+# Prune old patches: newest $KEEP_PATCHES stay, the rest go. `ls -t` is the only
+# ordering available without anything outside core git installed.
+if [ "${KEEP_PATCHES:-0}" -gt 0 ] 2>/dev/null; then
+  ls -t "$gitdir/publish"/*.diff 2>/dev/null | tail -n +"$((KEEP_PATCHES + 1))" |
+    while IFS= read -r old; do rm -f -- "$old"; done
+fi
 
 step "$branch and $remote/$branch"
 phase=publish

@@ -174,8 +174,13 @@ bash scripts/publish.sh -m "model_pool: weights"                    # 所有改�
 bash scripts/publish.sh -m "providers: glm" --path providers.toml   # 只发这一个
 ```
 
-（一律用 `bash` 起头：这台机器的 git 不记录执行位（`core.fileMode=false`），所以文件在
-仓库里永远存成 `100644`，`./scripts/publish.sh` 在有的 clone 上会被拒绝执行。）
+（一律用 `bash` 起头：有的 clone 不记录执行位（`core.fileMode=false`，Windows 上的 git
+默认如此），文件在仓库里存成 `100644`，`./scripts/publish.sh` 在那种 clone 上会被拒绝执行。）
+
+**第一次在别人的 clone 上跑不会缺东西**：没有 `.worktrees/work` 就自己建一个（不切换主检出），
+只依赖 bash 3.2 和 git —— macOS 自带的 bash 也能跑，不需要装别的东西。
+它留在身后的只有 `.git/publish/` 里的几份 diff（最近 10 份，`KEEP_PATCHES` 可改），
+那个目录在 `.git` 里，任何提交都碰不到它，工作区里不会多出文件。
 
 它做的正是上面那一节，一次做完，**主检出全程停在 `local`**：把工作区的改动写成一份 patch
 （新文件也算）→ 在 `pub` 上落到 `origin/main`、提交、推送 → 快进 `main`、把 `local` rebase

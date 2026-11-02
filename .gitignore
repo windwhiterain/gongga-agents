@@ -1,4 +1,23 @@
-**/*.pyc
+# Everything here is a cache: something this repository's own scripts wrote while
+# running. None of it is content, and none of it may reach a commit.
+
+# Python bytecode, from providers/*.py and skills/*/*.py.
+__pycache__/
+*.py[cod]
+
+# ruff's own cache, and the tag it drops inside to say so.
+.ruff_cache/
+.pytest_cache/
+
+# A patch a failed apply or merge leaves beside the file it could not settle.
+*.orig
+*.rej
+
 # Branch work happens in a worktree beside this checkout; the checkout itself
 # stays on `local`, because the server reads this working tree and not a branch.
 .worktrees/
+
+# scripts/publish.sh keeps the diff it publishes under .git/publish, which no
+# commit can reach. Named here anyway: if a future version ever writes it into
+# the working tree instead, this is the line that keeps it out of a commit.
+.publish/
