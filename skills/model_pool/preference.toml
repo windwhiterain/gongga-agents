@@ -11,8 +11,10 @@
 #   pro    hard implement / review
 #   sota   plan / core review
 #   test   只用来测 harness，默认不抽
-# 先抽档，再在档里按"剩余额度 × 倍率"抽模型。派活时按活选档（`--tier`），
-# 不点档才落到下面的权重。`test` 默认 0：要看它得显式 --tier test。
+# 派活时按活选档（`--tier`），再在那一档里按"剩余额度 × 倍率"抽模型。
+# 下面的权重是引擎的兜底：只有不点档的 pick 才读它，而那不是用法。`test` 默认 0：
+# 要看它得显式 --tier test。
+[tier]
 flash = 0.60
 pro = 0.35
 sota = 0.05

@@ -1,6 +1,6 @@
 ---
 name: model_pool
-description: Pick the model a spawned agent should run on — one `<provider>/<model id>` string that `gongga-cli set_session --model` takes verbatim, drawn across three tiers (flash / pro / sota) by the weights you set, and only from models this machine can actually run right now: still in the roster, credentialed, with allowance above its floor, entitled on this account, and not marked out. Use it when a subagent has no model to name, when a spawn hit a quota wall and needs another, or when you are placing the work itself: flash for search / explore / investigate / implement, pro for hard implement and review, sota for plan and core review. Triggers - 挑模型 / 派子 agent 用哪个模型 / 有额度的模型 / model pool / flash pro sota 概率.
+description: Pick the model a spawned agent should run on — one `<provider>/<model id>` string that `gongga-cli set_session --model` takes verbatim, drawn inside the tier the work calls for (flash / pro / sota, named on every call), and only from models this machine can actually run right now: still in the roster, credentialed, with allowance above its floor, entitled on this account, and not marked out. Use it when a subagent has no model to name, when a spawn hit a quota wall and needs another, or when you are placing the work itself: flash for search / explore / investigate / implement, pro for hard implement and review, sota for plan and core review. Triggers - 挑模型 / 派子 agent 用哪个模型 / 有额度的模型 / model pool / flash pro sota 概率.
 metadata:
   entry: model_pool
 ---
@@ -15,7 +15,7 @@ One command, one line, and that line is already the argument:
 # In gongga, `gongga-cli skill <name> ...` runs the entry the frontmatter declares.
 SKILL_DIR=<the directory this SKILL.md is in>
 S="$SKILL_DIR/model_pool"
-$S pick --provider deepseek-official      # -> deepseek-official/deepseek-flash
+$S pick --tier flash --provider deepseek-official   # -> deepseek-official/deepseek-flash
 ```
 
 ```bash
@@ -29,19 +29,22 @@ goes to stderr: warnings, `--explain`, nothing to strip on the way in.
 
 ## What a draw decides
 
-Two decisions, in this order.
+Three decisions, and only the last two are the engine's.
 
 1. **Only enabled models are candidates.** The multiplier table in
    `preference.toml` is a whitelist: a model it does not name has a multiplier of
-   zero and is not drawn. Naming a tier narrows the draw to that tier; it does
-   not lift the whitelist. The one exception is a tier the file itself gives no
+   zero and is not drawn. The tier you name narrows the candidates to that tier; it
+   does not lift the whitelist. The one exception is a tier the file itself gives no
    weight — `test`, whose models are deliberately unencouraged.
-2. **The tier** — `flash` / `pro` / `sota` / `test` — by the weights in
-   `[tier]` (default `0.60 / 0.35 / 0.05 / 0.00`). A tier with nothing runnable
-   drops out, and its weight is spread over the tiers that are left: the draw is
-   always *conditional on what exists*, so a machine that only serves flash and
-   pro still splits `0.63 / 0.37`.
-3. **The model inside that tier**, by `allowance × multiplier`: the worst
+2. **The tier is yours: `--tier flash|pro|sota|test`, on every call.** Which tier a
+   piece of work belongs to is a judgement about the work, and the caller is the only
+   one holding it — the roster says what a model *is*, never what you are *doing*.
+   So no call of this skill leaves it out. A `pick` without `--tier` is not a way to
+   choose work: it is a lottery over `[tier]` in `preference.toml`
+   (`0.60 / 0.35 / 0.05 / 0.00` on a stock checkout), which is exactly how a
+   read-three-files errand ends up buying `pro`. Those weights survive for a hand-run
+   `pick` used to feel a machine out; nothing that spawns work may lean on them.
+3. **The model inside the tier you named**, by `allowance × multiplier`: the worst
    `remaining / capacity` window a provider reports, times how much the
    preference file encourages that model. A provider that reports a bare amount
    and no ceiling (a wallet) carries a nominal share, so it competes instead of
@@ -93,7 +96,7 @@ token out:
 ```bash
 $S probe                 # every route, verdict cached for probe_refresh (a day)
 $S probe --provider kimi-coding --force
-$S pick --probe          # refresh the verdicts on the way to a draw
+$S pick --tier flash --probe   # refresh the verdicts on the way to a draw
 ```
 
 Three verdicts, and only one of them excludes:
@@ -112,8 +115,7 @@ after adding keys, and again with `--force` after buying something.
 
 | Command | What it answers |
 |---|---|
-| `model_pool` | `pick`, the default: print one model |
-| `model_pool pick [--provider ID] [--tier TIER] [--json] [--explain] [--seed N]` | one draw; `--json` for the decision, `--explain` for every candidate on stderr |
+| `model_pool pick --tier TIER [--provider ID] [--json] [--explain] [--seed N]` | one draw inside that tier; `--json` for the decision, `--explain` for every candidate on stderr |
 | `model_pool status [--provider ID]` | every route: tier, usable or not, share, and the provider's own detail line |
 | `model_pool tiers` | the three tiers, their weights, and the models inside each |
 | `model_pool probe [--force] [--provider ID]` | ask each provider whether this account may run the model |
@@ -121,8 +123,7 @@ after adding keys, and again with `--force` after buying something.
 
 Flags on `pick` and `status`: `--refresh S` (how long a cached reading answers,
 `0` asks again), `--cached` (never run a quota script), `--timeout S`,
-`--probe` (also refresh the entitlement verdicts), `--weights
-flash=0.5,pro=0.45,sota=0.05`.
+`--probe` (also refresh the entitlement verdicts).
 
 ## When a spawn hits the wall
 
@@ -133,7 +134,7 @@ line in the child's transcript names the route.
 
 ```bash
 $S mark kimi-coding/k3.1-pro --minutes 30 --reason "quota exhausted mid-run"
-$S pick --provider kimi-coding          # now draws another kimi route
+$S pick --tier sota --provider kimi-coding   # same tier, another route of it
 ```
 
 A mark is per machine, not per session, and lapses on its own after
@@ -204,8 +205,8 @@ roster, below.
 `preference.toml` 就在这个 skill 目录里，两个表：
 
 ```toml
-[tier]
-flash = 0.60     # 先抽档
+[tier]           # 引擎兜底：只有不点 --tier 的 pick 才读它，本 skill 的调用一律点档
+flash = 0.60
 pro   = 0.35
 sota  = 0.05
 test  = 0.00     # 默认 0：只在你点名 --tier test 时才抽得到
@@ -224,12 +225,13 @@ test  = 0.00     # 默认 0：只在你点名 --tier test 时才抽得到
 ```
 
 **倍率里没有的模型默认为 0，也就是不抽**——这张表就是白名单。`2.0` 是"能用就用它"，
-`0.5` 是"没得选才用"。抽取时：先按 `[tier]` 的权重抽档，再在档内按
+`0.5` 是"没得选才用"。抽取时：先把候选收窄到点的那一档，再在档内按
 **剩余额度 × 倍率** 抽模型。
 
-点 `--tier` 只是把候选收窄到那一档，不会绕过白名单。唯一的例外是文件本身权重为 0 的
-那一档——`test`，它的模型本来就不被鼓励。`tiers` 会把被关掉的模型标成 `off`，
-"为什么它从来不出现"一眼可答。
+**档是呼叫方给的，`pool.py` 不替你猜。** 不点档时它按 `[tier]` 的权重自己抽一档
+（`0.60 / 0.35 / 0.05 / 0.00`），抽到哪一档与活无关——"读三个文件的侦察买到 pro"就是
+这条路径。`--tier` 也不会绕过白名单；例外只有权重为 0 的 `test`：点名 `--tier test` 才抽得到它。
+`tiers` 会把被关掉的模型标成 `off`，"为什么它从来不出现"一眼可答。
 
 键可以写 `<provider>/<model>`，也可以只写 model id（对所有提供它的 provider 生效）。
 改这个文件不用重启任何东西：下一次 `pick` 就读到；`--preference` 或
