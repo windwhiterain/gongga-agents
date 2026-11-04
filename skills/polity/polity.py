@@ -7,7 +7,7 @@ only an explicit user approval can amend a spec.
 """
 
 import argparse
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import datetime, timezone
 import json
 import os
@@ -18,8 +18,7 @@ import subprocess
 import sys
 
 
-ROLES = {"justice": "pro", "advisor": "sota", "premier": "flash", "hr": "flash"}
-ROLE_TITLES = {"hr": "HR"}
+ROLES = {"justice": "pro", "advisor": "sota", "premier": "flash"}
 RECORDS = ("proposal", "plan", "judgement", "report", "spec_amendment")
 VERDICTS = ("approve", "revise", "reject")
 VIOLATIONS = ("none", "premise", "direct")
@@ -267,32 +266,44 @@ def draw_model(tier):
 
 
 def session_name(task, role):
-    return f"polity-{task}-{ROLE_TITLES.get(role, role)}"
+    return f"polity-{task}-{role}"
+
+
+def watch_pattern(task):
+    """One composed pattern over every managed role's turn end.
+
+    # Invariant
+
+    The task id is escaped before it is a pattern: it may spell a regex
+    metacharacter, and a watch that matches a stranger's session is worse than
+    no watch. `turn_end` fires for failures too -- its payload's `outcome`
+    says which -- and the server's monitor repairs a failed role session, so
+    one kind is the whole vocabulary the workflow waits on.
+    """
+    return f"^turn_end:{re.escape(f'polity-{task}-')}(advisor|premier)$"
 
 
 def role_brief(task, role, spec):
     common = (
-        f"You are {ROLE_TITLES.get(role, role)} for polity task {task}. "
+        f"You are {role} for polity task {task}. "
         f"The authoritative spec is {spec}. Read it and the polity skill. "
         f"Records live in $GONGGA_HOME/polity/{task}.jsonl. "
         "Use the polity script for records; never invent an approval. "
-        "Do not edit the spec, another role's records, or implementation files."
+        "Do not edit the spec, another role's records, or implementation files. "
+        "End every turn with the record id and a one-line summary: justice is "
+        "subscribed to your turn end, and that answer is how the id reaches them."
     )
     duties = {
         "advisor": (
-            "Investigate and write one plan for the user's goal. Present its id to "
-            "justice for review. If the spec itself is the obstacle, write a proposal "
-            "instead. Do not implement or approve your own work."
+            "Investigate and write one plan for the user's goal, then stop and let "
+            "the subscription carry its id to justice. If the spec itself is the "
+            "obstacle, write a proposal instead. Do not implement or approve your "
+            "own work."
         ),
         "premier": (
             "Wait for an approved plan id. Only then dispatch implementation to "
             "subagents (flash, pro for hard work), in separate worktrees, review the "
             "result, and write a report for justice. Never change the plan or spec."
-        ),
-        "hr": (
-            "Create missing role sessions, inspect session health, repair quota or "
-            "harness failures, and preserve records. You make no technical or spec "
-            "decisions. The current session is justice; never create a replacement."
         ),
     }
     return common + " " + duties[role]
@@ -316,12 +327,28 @@ def cmd_start(args):
     path = task_file(task, args.home)
     if path.exists():
         fail(f"task already exists: {path}; use status to resume it")
-    justice = args.justice or os.environ.get("GONGGA_SESSION")
+    # `subscribe` notices the session that ran it, never one it names: justice
+    # is whoever runs start, and no flag can arm another session's ears.
+    justice = os.environ.get("GONGGA_SESSION")
     if not justice:
-        fail("pass --justice or run start from the justice session")
+        fail("run start from the justice session; GONGGA_SESSION is not set")
     roles = {}
-    for role in ("hr", "advisor", "premier"):
+    for role in ("advisor", "premier"):
         roles[role] = create_role(task, role, cwd)
+    watch = {"name": f"polity-{task}", "pattern": watch_pattern(task)}
+    try:
+        cli(
+            "subscribe",
+            watch["name"],
+            watch["pattern"],
+            "--persistant",
+            "true",
+        )
+    except Exception:
+        for role in roles:
+            with suppress(Exception):
+                cli("del_session", roles[role]["session"])
+        raise
     record = {
         "version": 1,
         "kind": "task",
@@ -332,6 +359,7 @@ def cmd_start(args):
         "spec": spec,
         "cwd": cwd,
         "roles": {"justice": {"session": justice}, **roles},
+        "watch": watch,
         "state": "planning",
         "note": "state is descriptive; the records and their references are authoritative",
     }
@@ -349,7 +377,13 @@ def cmd_start(args):
         raise
     print(
         json.dumps(
-            {"task": task, "state": "planning", "roles": record["roles"]}, indent=2
+            {
+                "task": task,
+                "state": "planning",
+                "roles": record["roles"],
+                "watch": watch,
+            },
+            indent=2,
         )
     )
 
@@ -505,26 +539,6 @@ def cmd_status(args):
     )
 
 
-def cmd_remodel(args):
-    task = checked_name(args.task, "task")
-    if args.role not in ROLES or args.role == "justice":
-        fail("remodel one managed role: advisor, premier, or hr")
-    initial, _ = read_task(task, args.home)
-    session = initial["roles"][args.role]["session"]
-    if args.old_model:
-        done = subprocess.run(
-            [*pool(), "mark", args.old_model, "--reason", args.reason],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if done.returncode != 0:
-            fail((done.stderr or done.stdout).strip() or "could not mark the old model")
-    model = draw_model(ROLES[args.role])
-    cli("set_session", "--session", session, "--model", model)
-    print(json.dumps({"role": args.role, "session": session, "model": model}, indent=2))
-
-
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--home", help="Gongga home; defaults to GONGGA_HOME")
@@ -537,7 +551,6 @@ def build_parser():
     start.add_argument("--spec", required=True)
     start.add_argument("--goal", required=True)
     start.add_argument("--cwd", default=".")
-    start.add_argument("--justice", help="current session; defaults to GONGGA_SESSION")
     start.set_defaults(handler=cmd_start)
 
     record = commands.add_parser("record", help="validate and append a record")
@@ -565,15 +578,6 @@ def build_parser():
     status = commands.add_parser("status", help="show task ownership and record ids")
     status.add_argument("--task", required=True)
     status.set_defaults(handler=cmd_status)
-
-    remodel = commands.add_parser("remodel", help="HR: replace a role's failing model")
-    remodel.add_argument("--task", required=True)
-    remodel.add_argument("--role", required=True)
-    remodel.add_argument(
-        "--old-model", help="mark this quota-failing route before drawing"
-    )
-    remodel.add_argument("--reason", default="polity: quota failure")
-    remodel.set_defaults(handler=cmd_remodel)
     return parser
 
 

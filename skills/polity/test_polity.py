@@ -2,8 +2,8 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
-import subprocess
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -34,6 +34,7 @@ class PolityTest(unittest.TestCase):
                 polity, "cli", side_effect=lambda *a, **k: self.calls.append(a)
             ),
             mock.patch.object(polity, "draw_model", side_effect=draw),
+            mock.patch.dict(os.environ, {"GONGGA_SESSION": "main"}),
         ]
         for patcher in self.patchers:
             patcher.start()
@@ -44,7 +45,6 @@ class PolityTest(unittest.TestCase):
                     spec=str(self.spec),
                     goal="implement the feature",
                     cwd=str(self.home),
-                    justice="main",
                     home=str(self.home),
                 )
             )
@@ -72,10 +72,26 @@ class PolityTest(unittest.TestCase):
         )
 
     def test_approved_plan_is_the_only_route_to_implementation(self):
-        self.assertEqual(self.tiers, ["flash", "sota", "flash"])
+        self.assertEqual(self.tiers, ["sota", "flash"])
         initial = polity.read_task("demo", self.home)[0]
         self.assertEqual(initial["roles"]["justice"]["session"], "main")
         self.assertNotIn("justice", self.tiers)
+        self.assertEqual(
+            [call for call in self.calls if call[0] == "subscribe"],
+            [
+                (
+                    "subscribe",
+                    "polity-demo",
+                    polity.watch_pattern("demo"),
+                    "--persistant",
+                    "true",
+                )
+            ],
+        )
+        self.assertEqual(
+            sorted(initial["roles"]),
+            ["advisor", "justice", "premier"],
+        )
         with self.assertRaisesRegex(ValueError, "no approved judgement"):
             self.dispatch()
 
@@ -228,39 +244,6 @@ class PolityTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "spec changed"):
             self.dispatch()
-
-    def test_hr_remodel_marks_route_without_losing_the_session(self):
-        before = len(self.calls)
-        with mock.patch.object(polity.subprocess, "run") as run:
-            run.return_value = subprocess.CompletedProcess([], 0, "", "")
-            with contextlib.redirect_stdout(io.StringIO()):
-                polity.cmd_remodel(
-                    SimpleNamespace(
-                        task="demo",
-                        role="premier",
-                        old_model="provider/old",
-                        reason="quota exhausted",
-                        home=str(self.home),
-                    )
-                )
-        # The helper's argv starts with whatever runs the shell script: the script
-        # itself on POSIX, bash plus the script on Windows. Find the subcommand
-        # rather than counting from a fixed offset.
-        argv = run.call_args.args[0]
-        self.assertEqual(
-            argv[argv.index("mark"):][:3], ["mark", "provider/old", "--reason"]
-        )
-        self.assertEqual(
-            self.calls[before],
-            (
-                "set_session",
-                "--session",
-                "polity-demo-premier",
-                "--model",
-                "provider/flash",
-            ),
-        )
-        self.assertEqual(len(self.calls), before + 1)
 
 
 if __name__ == "__main__":
