@@ -2,7 +2,7 @@
 # 探测和官方文档都没拿到，值来自网关在售目录，不要当合同价用。
 
 schema = 1
-updated = "2026-11-01"
+updated = "2026-11-04"
 timezone = "Asia/Shanghai"
 
 # ---------------------------------------------------------------------------
@@ -902,7 +902,7 @@ key_env = "LONGCAT_API_KEY"
 key_prefix = "ak_"
 homepage = "https://longcat.chat"
 catalog = "https://api.longcat.chat/openai/v1/models"
-catalog_verified = "2026-11-01 本机 key 探到 2 个：LongCat-2.5-Preview、LongCat-2.0"
+catalog_verified = "2026-11-04 本机 key 探到 3 个：LongCat-2.5-Preview、LongCat-2.5、LongCat-2.0；/models 对 2.5 与 2.5-Preview 都返回 context_window=1048576 / max_output_tokens=262144，对 2.0 返回 131072"
 retrieved = "2026-10-22"
 
 # 缓存保留时间：官方定价页只给缓存命中价，估计值按同档厂商填。
@@ -962,7 +962,7 @@ cache_ttl_tier = "隐式（唯一一档）"
   max_output = 262144
   modalities = ["text", "image"]
   reasoning_levels = ["on", "off"]
-  doc_conflict = "官方自相矛盾：Quick Start 与 FAQ 写两个模型 max output 都是 128K，Model Parameters 页写 2.5-Preview 是 256K。检索模型接口返回的是 262144，所以按 256K 记。"
+  doc_conflict = "已消解：旧 Quick Start / FAQ 曾写两个模型 max output 都是 128K，2026-11-04 的 Quick Start 改为只列 LongCat-2.5，并写 1M 上下文 / 256K 输出；/models 对 2.5 与 2.5-Preview 都返回 262144，故按 256K 记。"
   [provider.model.params]
   unit = "billion"
   total = 1600
@@ -980,6 +980,27 @@ cache_ttl_tier = "隐式（唯一一档）"
   price_usd = { input = 0.30, output = 1.20 }
   source = "https://longcat.chat/platform/docs/pricing/longcat-2.5"
   retrieved = "2026-10-22"
+
+  [[provider.model]]
+  id = "LongCat-2.5"
+  name = "LongCat 2.5"
+  tier = "pro"
+  context = 1048576
+  max_output = 262144
+  modalities = ["text", "image"]
+  reasoning_levels = ["on", "off"]
+  reasoning_note = "unverified：官方 2.5 更新日志未单列推理档位，沿用 2.0 / 2.5-Preview 的 thinking{type} 开关"
+  note = "2026-11-02 上线，2.5-Preview（2026-09-25）的正式版。官方 Quick Start 现在只列这一个模型；上下文与输出上限来自本机 /models（1048576 / 262144）与 Quick Start 的 1M / 256K。官方未公布 2.5 的参数规模，故不写 params —— 流传的 1.6T / 48B 是 2.0 的公开口径。"
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 2.00
+  output = 8.00
+  cache_read = 0.04
+  price_usd = { input = 0.30, output = 1.20, cache_read = 0.006 }
+  source = "https://longcat.chat/platform/docs/pricing/longcat-2.5"
+  retrieved = "2026-11-04"
+  note = "限时折扣价，与 2.0 / 2.5-Preview 同价；平台显示价与账单为准。没有峰谷分段。"
 
   [[provider.quota_query]]
   id = "none"
@@ -1221,7 +1242,7 @@ kind = "vendor"
 key_env = "TENCENT_API_KEY"
 key_prefix = "sk-tp-"
 homepage = "https://cloud.tencent.com/product/hub"
-catalog_verified = "本机 profile 在用 hy4-preview；tokenhub 的 /models 不对外（404）"
+catalog_verified = "本机 profile 在用 hy4-preview；2026-11-04 官方文档已给出 GET /v1/models（Bearer 鉴权，未带 key 返回 401，status=online 为可用），但本机没有 TENCENT_API_KEY，未实测"
 tokenhub_plan = "计划制，按额度包计费（DescribeTokenPlan 查余量）。官方模型清单里除混元自家外，挂着一整排三方托管：DeepSeek 全系、GLM-5.3/-5.3-Flash/-5.3-FlashX/GLM-5.2/GLM-5V-Turbo、Kimi K3.1 Pro(-Highspeed)/K3/K2.8 Preview/K2.7 Code(-Highspeed)/K2.6、MiniMax M3.1-Flash/M3/M2.7、Qwen3.5 Flash/Plus、MiMo V2.6 Pro/Flash、Vidu 图像视频 —— 都不是腾讯的模型，一条都不收"
   plan_note = "Token Plan 个人版 Lite $7 / Standard $17 / Pro $51 / Max $103（每月，intl 文档在案；CN 价未查）；Coding Plan Lite ¥40 / Pro ¥200 每月，5 小时 / 周 / 月三档窗口。两个套餐都是「同一套餐内全模型任意切换」，也就是说三方模型也能用 —— 能用不等于该收进 roster"
 retrieved = "2026-10-22"
@@ -1273,6 +1294,36 @@ https://tokenhub-intl.tencentmaas.com（另有 .cn 镜像），示例路径是 /
   base_url = "https://api.lkeap.cloud.tencent.com/coding/anthropic"
   auth = "bearer"
   note = "同一套 Coding Plan key 的 Anthropic 面；unverified-official（只在社区文档见到）"
+
+  [[provider.model]]
+  id = "hy4"
+  name = "Hy4（腾讯混元正式版，770B MoE，首次支持视觉理解与 Computer Use）"
+  tier = "pro"
+  context = 1024000
+  max_input = 960000
+  max_output = 64000
+  modalities = ["text", "image"]
+  reasoning_levels = ["high", "no_think"]
+  reasoning_default = "high"
+  reasoning_field = "thinking{type} + reasoning_effort"
+  note = "2026-11-04 发布，hy4-preview 的正式版；hy4-preview 与 hy3 仍在线。规格取自官方《混元调用指南》（1024k / 960k / 64k），推理档位按 11-04《深度思考》记为 high / no_think（与下一行 preview 的 none / high 是两版文档口径，未回改旧行）。"
+  [provider.model.params]
+  unit = "billion"
+  total = 770
+  note = "MoE；官方发布口径只给 Hy4 系列总参 770B，未公布每 token 激活参数，故不写 active（hy4-preview 的 49B 不是正式版的数）"
+  source = "https://www.163.com/dy/article/LATAGD800511KIFE.html"
+  retrieved = "2026-11-04"
+
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 6.00
+  output = 18.00
+  cache_read = 0.30
+  price_usd = { input = 0.834, output = 2.501, cache_read = 0.042 }
+  source = "https://cloud.tencent.com/document/product/1823/130055"
+  retrieved = "2026-11-04"
+  note = "刊例价与 hy4-preview 持平，无峰谷分段。官方另给限时折扣：至 2026-12-31 23:59:59（北京时间）Hy4 按目录价 50% 结算，期满恢复；标价仍是刊例价。"
 
   [[provider.model]]
   id = "hy4-preview"
