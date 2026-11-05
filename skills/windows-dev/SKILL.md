@@ -87,13 +87,37 @@ Windows 上 agent 写脚本时遇到的"莫名其妙的错误"，绝大多数来
 ### eol（行尾符）
 
 扫描所有文本文件，按行尾形态分成 `lf` / `crlf` / `mixed` / `cr` / `none` 并统计。
-目标行尾的判定优先级：
 
-1. 目录里有 `.gitattributes` → 解析其中的 `eol=` 规则，**后出现者优先**（与 Git 语义一致）；
-2. 没有 → 兜底：`.bat` / `.cmd` 保持 CRLF，其余一律 LF。
+**策略是 LF，不是"本机 git 会检出成什么"**：文本文件一律 LF，没有例外。
+判据不看 `core.autocrlf`，也不看 `.gitattributes` 里的 `eol=` —— 一台
+`core.autocrlf=true` 的机器把整棵树检出成 CRLF，那是要报出来的问题，不是把判据改宽
+的理由（本机就是这种情况：系统级 gitconfig 写着 `autocrlf=true`，工作区 731 个文件
+是 CRLF）。
 
-`.bat` / `.cmd` 必须 CRLF：cmd.exe 对多行括号块和 `goto` 的解析绑死在 CRLF 上，
-LF 版本在部分机器上会静默执行错行。
+`.gitattributes` 只被读两处：`-text` / `binary` 说明"这不是文本"（跳过），以及
+**要求 CRLF 的规则**（任何 `eol=crlf`）—— 那是与策略冲突，scan
+会单独报一行：git 会照着它把文件检出成 CRLF，于是同一批文件被反复报出来。
+
+`.bat` / `.cmd` **不是**例外：这套规则最早把它们钉成 CRLF，理由是"cmd.exe 对括号块和
+`goto` 的解析绑死在 CRLF 上"。实测不成立——Windows 11 的 cmd.exe（10.0.26100）跑一个
+只含 LF 的批处理，与 CRLF 版本的输出逐字节相同：label/goto、括号块、`^` 续行、延迟
+展开、`for /f`、`call :label`、`goto :eof` 都试过。"批处理必须 CRLF"是更早的 cmd 的
+说法。`$script:CrlfExtensions` 因此是空数组，留着它只为"哪台目标机器真的解析错行时
+加回来"这一种情况。
+
+**嵌套仓库不扫**：目录里出现 `.git`（linked worktree 的指针文件、submodule、
+vendored 的克隆）就剪掉整棵子树。它们是同一批内容的第二份，扫它们只会让同一处问题
+被报很多遍——实测一个仓库的 5 个 worktree 把 867 条真问题报成了 7087 条。
+
+**被 git 忽略的文件也不扫**：`.model/`、`tree-sitter-lichen/src/` 这类是生成物，
+报告它们等于把会重新生成的字节当成待修的问题。扫描根在工作区里时，用
+`git ls-files --others --ignored --exclude-standard --directory` 一次取回忽略清单
+（`--directory` 把整棵被忽略的目录塌成一条），tracked 文件永远不会出现在里面，
+所以这一层不会放过任何真正的源码。
+
+**文本后缀表就是覆盖面的边界**：表里没有的后缀，文件永远不会进这条通道。`.lichen`、
+`.lock`、`.typ`、`.scm` 这类"没有语法高亮"的文本漏掉一次，就有一整批文件被静默跳过
+（本项目 74 个）。加后缀比事后发现便宜。
 
 ### encoding（字符编码）
 
@@ -119,6 +143,15 @@ PowerShell 版本与执行策略、控制台输出编码、长路径开关（`Lo
 Git 的 `core.autocrlf` / `safecrlf` / `longpaths` / `quotepath` / `ignorecase`，
 并对没设好的项给出具体命令。
 
+Git 配置**读所有作用域**并打印生效值来自哪一层（`file:...`）：共享机器与 CI 常把
+设置写在系统级 gitconfig 里，只读 `--global` 会把 `core.autocrlf=true` 报成
+「未设置」，而它正是"文件为什么又变回 CRLF"的答案（`autocrlf=true` 会作为与 LF 策略的冲突报出来）。git 配置的作用域取决于 `git` 在哪个目录里跑，
+所以 `env <目录>` 读的是那个目录的配置，不传才退回当前目录。
+
+`Get-ExecutionPolicy` 可能根本读不到（它住在 `Microsoft.PowerShell.Security` 里，
+5.1 进程若继承了 PS7 的 `PSModulePath` 就会加载失败），此时按「读不到」报告并给出
+原因与绕过命令，不要让体检在这一步抛异常。
+
 ## 边界（设计决策，不要擅自改）
 
 | 碰 | 永不碰 |
@@ -126,11 +159,19 @@ Git 的 `core.autocrlf` / `safecrlf` / `longpaths` / `quotepath` / `ignorecase`�
 | 已知文本后缀与已知无后缀名（Makefile/Dockerfile/LICENSE…）的文件 | 二进制文件（嗅探到 NUL 即跳过） |
 | 四个配置文件里 guard 负责的那几条规则（改错、补缺） | 这些文件里你自己写的其他规则与注释（原样保留，不覆盖不删除） |
 | 单文件 ≤ 20MB | 更大的文件（跳过并在报告里计数） |
+| 工作区里的 tracked 文件与未被忽略的未跟踪文件 | 被 git 忽略的生成物（`.model/`、`tree-sitter-lichen/src/`） |
 | 报告里相对路径 | 注册表、`git config`、任何系统级设置（只打印命令） |
 
 默认跳过的目录：`.git`、`.svn`、`.hg`、`node_modules`、`vendor`、`target`、`dist`、
 `build`、`bin`、`obj`、`out`、`.next`、`.venv`、`__pycache__`、`.gradle`、`.terraform`、
 `.idea`、`.vs`、`coverage` 等。改第三方和生成物的行尾没有意义，量还极大。
+
+这份名单只是第一道：**嵌套仓库**（目录里有 `.git`）与**git 忽略的文件**在工作区里
+再各剪一次——名字说明不了谁是内容，git 说得清。
+
+`bin` 是名单里唯一要看位置的：.NET 与 Java 里它是构建产物，Rust 里 `src/bin/` 放的
+是可执行文件的源码。所以 `bin` 只在父目录不是 `src` 时才排除（否则
+`crates/*/src/bin/*.rs` 永远不会被扫到）。
 
 ## 实现上几个不显然的地方
 
@@ -167,8 +208,56 @@ PowerShell 函数返回数组时会把元素枚举到管道，只有一个元素
 
 后果很隐蔽：`Get-GitAttributesEolRules` 返回「只有一条 eol 规则」这种最常见的
 输入时，调用方的 `$rules.Count -gt 0` 为假，整套规则被静默忽略、退回兜底逻辑
-（看着还能跑，但 `*.bat eol=crlf` 这类规则就失效了）。凡是返回 PSCustomObject
+（看着还能跑，但 `*.sh eol=lf` 这类规则就失效了）。凡是返回 PSCustomObject
 数组的函数，调用处一律用 `@()` 包起来。
+
+### 「什么是仓库内容」由 git 回答，不由目录名回答
+
+两道剪枝都不是审美问题。一道是 `.git` 文件所在目录（另一份检出），另一道是被忽略
+的路径（生成物）。两个真实读数：一个 867 个 tracked 文件的仓库，重复检出把 867 条报成
+7087 条；补上忽略过滤后，剩下的 10 条正好是 `.model/` 与 tree-sitter 生成的 `src/`。
+
+`Get-ChildItem` 只看得见名字，所以这两件事都得问 git。判据都便宜：`rev-parse
+--is-inside-work-tree` 一次，`ls-files --ignored --directory` 一次，与文件数量无关。
+
+### `core.autocrlf` 是冲突的来源，不是判据
+
+判据是 LF 策略，与 git 配置无关；但**报告**必须知道 `core.autocrlf` 的真实生效值，
+否则同一批文件会被反复报，而没人知道为什么每次检出后它们又变回 CRLF。
+
+"有没有设为 true"这件事只能读**所有作用域**：`git config --global --get` 看到
+「未设置」，可同一台机器的 `C:/software/Git/Git/etc/gitconfig`（系统级）里写着
+`core.autocrlf=true`。用 `git config --show-origin --get-all`，生效值是**最后一条**，
+`--show-origin` 还给出一句"是哪一层设的"，报告里直接贴它能省掉一次追问。
+
+两处建议指向同一条出口：在仓库里写 `.gitattributes`（`* text=auto eol=lf` ——
+`eol=lf` 才是强制的部分），并把机器上的 `core.autocrlf` 改成 `input`。
+**只写 `* text=auto` 不够**：它把检出形态交给 `core.eol`（默认 native，Windows 上
+就是 CRLF），于是策略永远追着机器跑。
+
+### 嵌套仓库按 `.git` 的存在剪，不按目录名
+
+`Get-ChildItem -Recurse -File` 会把 `.worktrees/` 下每一个 linked worktree 的几万个
+文件都枚举出来：边界是目录里的一个**文件**（`.git` 指针文件），而 `-File` 枚举看不见
+它。所以枚举改成自己走目录（显式栈），在进入任何含 `.git` 的子目录之前剪掉它，
+顺带跳过 `ReparsePoint` 目录（junction/symlink 可能是环）。
+
+这比在 `$script:ExcludedDirectories` 里写死 `.worktrees` 更准：名字是任意的，
+submodule 与 vendored 克隆同一个道理。
+
+### `Get-ExecutionPolicy` 会失败，而原因不在执行策略
+
+5.1 进程从 pwsh 7 那里继承 `PSModulePath` 时，里面带着 PS7 的模块目录；5.1 去加载
+`Microsoft.PowerShell.Security` 就会拿到 PS7 的版本，扩展类型数据重名：
+
+```
+The following error occurred while loading the extended type data file:
+Error in TypeData "System.Security.AccessControl.ObjectSecurity": The member AuditToString is already present.
+```
+
+于是 `Get-ExecutionPolicy` 报 `CommandNotFoundException`。把它包进 try/catch，报
+「读不到」并打印诊断（`PSModulePath` 里的 PS7 目录清单 + 去掉 windowsapps 那一行），
+比让它抛异常有用得多。同一台机器上把那个目录去掉后，执行策略立刻答得出来。
 
 ### 编辑器配置不能用 JSON 解析器往返
 

@@ -94,9 +94,11 @@ try {
 # 常量
 # ---------------------------------------------------------------------------
 
-# 必须保持 CRLF 的类型。cmd.exe 对多行括号块与 goto 的解析在多年前就绑死在
-# CRLF 上，LF 版本的 .bat 在某些机器上会静默执行错行。
-$script:CrlfExtensions = @('.bat', '.cmd')
+# 必须保持 CRLF 的类型。**实测为空**：Windows 11 的 cmd.exe (10.0.26100) 对只含 LF
+# 的 .bat 与 CRLF 版本输出逐字节相同——label/goto、括号块、^ 续行、延迟展开、for /f、
+# call :label、goto :eof 都试过。"批处理必须 CRLF"是老 cmd 的说法，在这里复现不出来。
+# 留着这个常量是为了：哪台目标机器的 cmd 真的解析错行时，把 '.bat','.cmd' 加回来。
+$script:CrlfExtensions = @()
 
 # 需要保留 UTF-8 BOM 的类型。Windows PowerShell 5.1 读无 BOM 的 .ps1 时按系统
 # ANSI(936) 解码，中文注释/字符串直接乱码；pwsh 7 无此问题但留着 BOM 也没害处。
@@ -113,7 +115,10 @@ $script:TextExtensions = @(
     '.properties', '.xml', '.csv', '.tsv', '.sql', '.env',
     '.md', '.markdown', '.rst', '.txt', '.adoc',
     '.html', '.htm', '.css', '.scss', '.sass', '.less',
-    '.gradle', '.cmake', '.dockerfile', '.gitignore', '.gitattributes', '.editorconfig'
+    '.gradle', '.cmake', '.dockerfile', '.gitignore', '.gitattributes', '.editorconfig',
+    # 数据/配置里常见的、没有语法高亮的文本后缀。漏掉它们，仓库里就有一批文件永远
+    # 不会被这条通道看见（本项目 74 个 .lichen/.lock/.typ/.scm 就是这样）。
+    '.lock', '.typ', '.scm', '.lichen', '.nix', '.proto', '.graphql', '.diff', '.patch'
 )
 
 # 无后缀但确实是文本的文件名。
@@ -194,15 +199,14 @@ function Get-DisplayPath {
 # 文件枚举
 # ---------------------------------------------------------------------------
 
-function Test-PathHasExcludedSegment {
-    param([string]$FullName, [string]$RootFullName)
+# <dir>\.git 存在就说明这是**另一个检出**：linked worktree（.git 是指针文件）、
+# submodule、或者 vendored 的克隆。它是同一批内容的第二份，扫它只会让同一处行尾
+# 问题被报很多遍（实测：一个仓库的 5 个 worktree 把 867 条真问题报成 7087 条）。
+# Get-ChildItem -Recurse -File 看不见这个边界，因为边界是目录里的一个文件。
+function Test-NestedRepository {
+    param([string]$Directory)
 
-    $relative = $FullName.Substring([Math]::Min($RootFullName.Length, $FullName.Length))
-    $segments = $relative -split '[\\/]'
-    foreach ($segment in $segments) {
-        if ($script:ExcludedDirectories -contains $segment) { return $true }
-    }
-    return $false
+    return (Test-Path -LiteralPath (Join-Path $Directory '.git'))
 }
 
 function Test-IsTextCandidate {
@@ -214,6 +218,51 @@ function Test-IsTextCandidate {
     return ($script:TextExtensions -contains $extension.ToLowerInvariant())
 }
 
+# 仓库里被 git 忽略的文件是**生成物**（.model/ 的 tokenizer、tree-sitter 生成的
+# src/），不是仓库内容：报告它们等于把会重新生成的字节当成待修的问题，而 tracked
+# 文件永远不会出现在 --ignored 的输出里，所以这一层不会放过任何真正的源码。
+# --directory 把整体被忽略的目录塌成一条，这次调用因此只返回几十条，而不是列全树。
+function Remove-GitIgnoredFiles {
+    param([string]$Root, [object[]]$Files)
+
+    if ($Files.Count -eq 0) { return $Files }
+
+    $insideWorkTree = (& git -C $Root rev-parse --is-inside-work-tree 2>$null)
+    if ($LASTEXITCODE -ne 0 -or "$insideWorkTree" -ne 'true') { return $Files }
+    $topLevel = (& git -C $Root rev-parse --show-toplevel 2>$null)
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace("$topLevel")) { return $Files }
+    $topLevel = ("$topLevel".Trim() -replace '\\', '/').TrimEnd('/')
+
+    $raw = ((& git -C $Root ls-files -z --others --ignored --exclude-standard --directory 2>$null) -join "`n")
+    if ([string]::IsNullOrWhiteSpace($raw)) { return $Files }
+
+    $ignored = @($raw -split "`0" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() })
+    if ($ignored.Count -eq 0) { return $Files }
+
+    $kept = New-Object System.Collections.Generic.List[IO.FileInfo]
+    foreach ($file in $Files) {
+        $full = ($file.FullName -replace '\\', '/')
+        if (-not $full.StartsWith($topLevel, [StringComparison]::OrdinalIgnoreCase)) {
+            $kept.Add($file)
+            continue
+        }
+        $relative = $full.Substring($topLevel.Length).TrimStart('/')
+        $isIgnored = $false
+        foreach ($entry in $ignored) {
+            if ($relative -eq $entry -or ($entry.EndsWith('/') -and $relative.StartsWith($entry, [StringComparison]::OrdinalIgnoreCase))) {
+                $isIgnored = $true
+                break
+            }
+        }
+        if (-not $isIgnored) { $kept.Add($file) }
+    }
+
+    if ($kept.Count -ne $Files.Count) {
+        Write-Info "跳过 git 忽略的生成物 $($Files.Count - $kept.Count) 个"
+    }
+    return $kept.ToArray()
+}
+
 function Get-TargetFiles {
     param([string]$Root)
 
@@ -222,28 +271,54 @@ function Get-TargetFiles {
         Write-Bad "路径不存在：$Root"
         return @()
     }
-    $rootFullName = $item.FullName.TrimEnd('\', '/')
-
-    if ($item.PSIsContainer) {
-        $children = @(Get-ChildItem -LiteralPath $item.FullName -Recurse -File `
-                        -ErrorAction SilentlyContinue -ErrorVariable enumerationErrors)
-    } else {
-        $children = @($item)
-    }
 
     $result = New-Object System.Collections.Generic.List[IO.FileInfo]
-    foreach ($file in $children) {
-        if (-not (Test-IsTextCandidate $file)) { continue }
-        if (Test-PathHasExcludedSegment $file.FullName $rootFullName) { continue }
-        # 备份文件不该被当成源码扫，也不该被修。
-        if ($file.Extension -ieq '.bak') { continue }
-        $result.Add($file)
+    $enumerationErrors = 0
+
+    if (-not $item.PSIsContainer) {
+        if (Test-IsTextCandidate $item) { $result.Add($item) }
+        return $result.ToArray()
     }
 
-    if ($enumerationErrors.Count -gt 0) {
-        Write-Warn ("枚举时有 $($enumerationErrors.Count) 个目录读取失败（多半是长路径或权限），已跳过")
+    # 手动走目录而不是 Get-ChildItem -Recurse：能在进入一个嵌套仓库之前就剪掉它，
+    # 不必先把几万个文件枚举出来再逐个判断路径。
+    $pending = New-Object System.Collections.Generic.Stack[string]
+    $pending.Push($item.FullName)
+    while ($pending.Count -gt 0) {
+        $directory = $pending.Pop()
+        try {
+            $entries = @(Get-ChildItem -LiteralPath $directory -ErrorAction Stop)
+        } catch {
+            $enumerationErrors++
+            continue
+        }
+        foreach ($entry in $entries) {
+            if ($entry.PSIsContainer) {
+                $excludedByName = $script:ExcludedDirectories -contains $entry.Name
+                # bin 在 .NET/Java 里是构建产物，在 Rust 里 src/bin/ 放的是可执行文件
+                # 的源码。按名字排除会把 cargo 的 cargo/src/bin 漏掉（本项目 2 个
+                # src/bin/*.rs 就是这样没被扫到）。所以只在它不在 src 之下时才排除。
+                if ($excludedByName -and $entry.Name -eq 'bin' -and (Split-Path -Leaf $directory) -eq 'src') {
+                    $excludedByName = $false
+                }
+                if ($excludedByName) { continue }
+                if (Test-NestedRepository $entry.FullName) { continue }
+                # junction / symlink 目录可能是环，也可能是别人盘上的东西。
+                if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+                $pending.Push($entry.FullName)
+                continue
+            }
+            if (-not (Test-IsTextCandidate $entry)) { continue }
+            # 备份文件不该被当成源码扫，也不该被修。
+            if ($entry.Extension -ieq '.bak') { continue }
+            $result.Add($entry)
+        }
     }
-    return $result.ToArray()
+
+    if ($enumerationErrors -gt 0) {
+        Write-Warn "枚举时有 $enumerationErrors 个目录读取失败（多半是长路径或权限），已跳过"
+    }
+    return @(Remove-GitIgnoredFiles -Root $item.FullName -Files $result.ToArray())
 }
 
 function Read-FileBytes {
@@ -320,19 +395,68 @@ function Get-GitAttributesEolRules {
     return $rules.ToArray()
 }
 
+# 读一个配置项在**所有作用域**里的值。--show-origin 顺带给出"是哪一层设的"。
+# 只读 --global 会漏掉系统级 gitconfig（共享机器与 CI 上最常见的位置），而 eol 的
+# 判定恰好要依赖 core.autocrlf —— 它被报成"(未设置)"时，CRLF 工作区就成了"错误"。
+function Get-GitConfigSources {
+    param([string]$Root, [string]$Name)
+
+    $lines = @(& git -C $Root config --show-origin --get-all $Name 2>$null)
+    if ($LASTEXITCODE -ne 0) { return @() }
+
+    $sources = New-Object System.Collections.Generic.List[object]
+    foreach ($line in $lines) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        $tab = $line.IndexOf("`t")
+        if ($tab -lt 0) {
+            $sources.Add([pscustomobject]@{ Origin = ''; Value = $line })
+        } else {
+            $sources.Add([pscustomobject]@{
+                Origin = $line.Substring(0, $tab)
+                Value  = $line.Substring($tab + 1)
+            })
+        }
+    }
+    return $sources.ToArray()
+}
+
+# 生效值 = 最后一条：git 按 system -> global -> local -> worktree 列出，后者覆盖前者。
+function Get-EffectiveGitConfig {
+    param([string]$Root, [string]$Name)
+
+    $sources = @(Get-GitConfigSources -Root $Root -Name $Name)
+    if ($sources.Count -eq 0) { return $null }
+    return $sources[$sources.Count - 1].Value
+}
+
 function Get-DesiredEol {
     param([string]$FileName, [object[]]$Rules)
 
-    for ($i = $Rules.Count - 1; $i -ge 0; $i--) {
-        if (Test-GitAttributesPattern $Rules[$i].Pattern $FileName) {
-            return $Rules[$i].Eol
-        }
-    }
-    # 没有 .gitattributes 时的兜底：Windows 批处理保持 CRLF，其余一律 LF。
+    # 行尾策略：文本文件一律 LF。
+    # 没有例外：.bat / .cmd 也是 LF。$script:CrlfExtensions 现在是空的——它的存在
+    # 是给"真的遇到解析错行的 cmd"留一个开关，不是给这条策略留缺口。
     if ($script:CrlfExtensions -contains ([IO.Path]::GetExtension($FileName).ToLowerInvariant())) {
         return 'crlf'
     }
+    # .gitattributes 里的 -text / binary 只说明"这不是文本"，与行尾策略无关。
+    for ($i = $Rules.Count - 1; $i -ge 0; $i--) {
+        if ($Rules[$i].Eol -ne 'binary') { continue }
+        if (Test-GitAttributesPattern $Rules[$i].Pattern $FileName) { return 'binary' }
+    }
     return 'lf'
+}
+
+# 仓库规则要求 CRLF、而策略要求 LF 时，这是冲突而不是合规：
+# git 会照着 .gitattributes 把文件检出成 CRLF，doctor 只会反复报同一批文件。
+function Get-EolPolicyConflicts {
+    param([object[]]$Rules)
+
+    $conflicts = New-Object System.Collections.Generic.List[object]
+    foreach ($rule in $Rules) {
+        if ($rule.Eol -ne 'crlf') { continue }
+        $conflicts.Add($rule)
+    }
+    return $conflicts.ToArray()
 }
 
 # ---------------------------------------------------------------------------
@@ -425,10 +549,9 @@ function Invoke-LineEndingScan {
     # @() 不能省。见 Invoke-LineEndingScan 上方的注释：单条规则时函数返回的是
     # 单个 PSCustomObject，而 PSCustomObject 的 .Count 是 $null 不是 1。
     $rules = @(Get-GitAttributesEolRules $Root)
-    if ($rules.Count -gt 0) {
-        Write-Info "按 $Root\.gitattributes 的 eol 规则判定目标行尾（规则数：$($rules.Count)）"
-    } else {
-        Write-Info '没有 .gitattributes，用兜底规则：除 .bat/.cmd 外一律 LF'
+    Write-Info '按行尾策略判定目标行尾：文本文件一律 LF'
+    foreach ($conflict in @(Get-EolPolicyConflicts $rules)) {
+        Write-Warn "仓库规则与 LF 策略冲突：$($conflict.Pattern) eol=crlf（改法：改成 eol=lf，或删掉该行）"
     }
 
     $kindCounts = @{}
@@ -510,8 +633,6 @@ function Invoke-LineEndingScan {
 # Note 用来在新建或追加时分组，只在与上一条不同时才写一行注释。
 $script:GuardAttributeRules = @(
     @{ Pattern = '*';     Attributes = 'text=auto eol=lf'; Note = '仓库内统一存 LF；检出时也保持 LF' }
-    @{ Pattern = '*.bat'; Attributes = 'text eol=crlf';     Note = 'Windows 批处理必须 CRLF，cmd.exe 对 LF 版本会解析错行' }
-    @{ Pattern = '*.cmd'; Attributes = 'text eol=crlf';     Note = $null }
     @{ Pattern = '*.sh';  Attributes = 'text eol=lf';       Note = 'Shell 脚本永远 LF' }
     @{ Pattern = '*.png';  Attributes = 'binary'; Note = '二进制不要碰' }
     @{ Pattern = '*.jpg';  Attributes = 'binary'; Note = $null }
@@ -543,11 +664,6 @@ $script:GuardEditorConfigSections = @(
             @{ Key = 'insert_final_newline';     Value = 'true' }
             @{ Key = 'trim_trailing_whitespace'; Value = 'true' }
         )
-    }
-    @{
-        Section = '[*.{bat,cmd}]'
-        Note    = 'Windows 批处理例外'
-        Keys    = @( @{ Key = 'end_of_line'; Value = 'crlf' } )
     }
 )
 
@@ -1314,6 +1430,8 @@ function Get-RegistryValueSafely {
 }
 
 function Invoke-EnvironmentReport {
+    param([string]$Root)
+
     Write-SubTitle '环境体检 — 只读，只给修复命令，不自动改'
 
     Write-Host ''
@@ -1323,10 +1441,43 @@ function Invoke-EnvironmentReport {
         Write-Info '  给 .ps1 保留 UTF-8 BOM，或者装 pwsh 7+。'
     }
 
-    $policy = (Get-ExecutionPolicy -Scope CurrentUser -ErrorAction SilentlyContinue)
-    Write-Host "  执行策略(用户)  $policy"
-    if ($policy -eq 'Restricted' -or $policy -eq 'Undefined') {
-        Write-Info '跑脚本时用：powershell -NoProfile -ExecutionPolicy Bypass -File <脚本>'
+    # Get-ExecutionPolicy 住在 Microsoft.PowerShell.Security 里。5.1 进程如果继承了
+    # PS7 的 PSModulePath，就会去加载 PS7 的同名模块，扩展类型数据重名
+    # （"The member AuditToString is already present"），整个模块加载不起来，
+    # 于是执行策略读不到。这不是执行策略的问题，也不该让体检在这里抛异常。
+    $policy = $null
+    try {
+        $policy = (Get-ExecutionPolicy -Scope CurrentUser -ErrorAction Stop)
+    } catch {
+        $policy = $null
+    }
+
+    if ($null -ne $policy) {
+        Write-Host "  执行策略(用户)  $policy"
+        if ($policy -eq 'Restricted' -or $policy -eq 'Undefined') {
+            Write-Info '跑脚本时用：powershell -NoProfile -ExecutionPolicy Bypass -File <脚本>'
+        }
+    } else {
+        Write-Host '  执行策略(用户)  (读不到)'
+        Write-Info 'Get-ExecutionPolicy 不可用：Microsoft.PowerShell.Security 加载失败。'
+        Write-Info '  多半是 PS7 的 PSModulePath 被 5.1 进程继承，同名模块的扩展类型数据重名。'
+        Write-Host '    绕过：启动 5.1 前把 PS7 的模块目录从 PSModulePath 里去掉' -ForegroundColor DarkGray
+        Write-Host '    $env:PSModulePath = ($env:PSModulePath -split '';'' | ? { $_ -notlike ''*windowsapps*'' }) -join '';''' -ForegroundColor DarkGray
+        Write-Host '    或者直接用 pwsh 7 跑本脚本。' -ForegroundColor DarkGray
+    }
+
+    # PS7 的模块目录混进 5.1 的 PSModulePath 是上面那条失败的根因，单独报一次：
+    # 它会让 5.1 里的其它模块也加载成 PS7 的版本。
+    $modulePaths = @($env:PSModulePath -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $ps7ModulePaths = @($modulePaths | Where-Object {
+        $_ -like '*Microsoft.PowerShell_*' -or
+        ($_ -like '*\PowerShell\Modules' -and $_ -notlike '*WindowsPowerShell\Modules')
+    })
+    if ($PSVersionTable.PSVersion.Major -lt 7 -and $ps7ModulePaths.Count -gt 0) {
+        Write-Info "PSModulePath 里有 $($ps7ModulePaths.Count) 个 PS7 的模块目录（5.1 会去加载它们的同名模块）："
+        foreach ($modulePath in $ps7ModulePaths) {
+            Write-Host "    $modulePath" -ForegroundColor DarkGray
+        }
     }
 
     $consoleEncoding = 'unknown'
@@ -1372,26 +1523,45 @@ function Invoke-EnvironmentReport {
     }
 
     Write-Host "  git             $((& git --version) -join '')"
+    # 每一项都读**所有作用域**：只读 --global 会漏掉系统级与仓库级的设置，
+    # eol 通道不再看 core.autocrlf（目标是 LF 策略），但修复建议要靠它的真实生效值。
+    # git 配置有作用域：读哪个仓库的 local 配置，取决于 git 在哪个目录里跑。
+    # 传了扫描根就用它，没传才退回当前目录。
+    $configRoot = $Root
+    if ([string]::IsNullOrEmpty($configRoot)) { $configRoot = (Get-Location).Path }
+    if (Test-Path -LiteralPath $configRoot -PathType Leaf) { $configRoot = Split-Path -Parent $configRoot }
+    $configValues = @{}
     foreach ($name in @('core.autocrlf', 'core.safecrlf', 'core.longpaths', 'core.quotepath', 'core.ignorecase')) {
-        $value = (& git config --global --get $name 2>$null)
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($value)) { $value = '(未设置)' }
-        Write-Host ("  {0,-16} {1}" -f $name, $value)
+        $sources = @(Get-GitConfigSources -Root $configRoot -Name $name)
+        if ($sources.Count -eq 0) {
+            $configValues[$name] = $null
+            Write-Host ("  {0,-16} {1}" -f $name, '(未设置)')
+            continue
+        }
+        $effective = $sources[$sources.Count - 1]
+        $configValues[$name] = $effective.Value
+        $originText = if ([string]::IsNullOrEmpty($effective.Origin)) { '' } else { "  ($($effective.Origin))" }
+        Write-Host ("  {0,-16} {1,-8}{2}" -f $name, $effective.Value, $originText)
     }
 
-    $autocrlf = (& git config --global --get core.autocrlf 2>$null)
-    if ($autocrlf -ne 'input') {
-        Write-Host ''
+    $autocrlf = $configValues['core.autocrlf']
+    Write-Host ''
+    if ($autocrlf -eq 'true') {
+        Write-Warn 'core.autocrlf=true 与 LF 策略冲突：git 会把工作区检出成 CRLF，doctor 会反复报同一批文件。'
+        Write-Info '  改法：git config --global core.autocrlf input（检出保持 LF）'
+    } elseif ($autocrlf -ne 'input') {
         Write-Info '推荐（跨平台项目）：git config --global core.autocrlf input'
         Write-Info '  提交时 CRLF->LF，检出时保持 LF。.gitattributes 的规则会覆盖它。'
     }
+    # eol=lf 才是强制的部分：只写 text=auto 会把检出形态交回 core.eol（默认 native）。
+    Write-Info '比改机器更可靠的是在仓库里写 .gitattributes（* text=auto eol=lf，只写 text=auto 会让检出跟着机器走）'
+    Write-Info '  行尾约定跟着仓库走，就不依赖任何一台机器的 git config。'
 
-    $quotepath = (& git config --global --get core.quotepath 2>$null)
-    if ($quotepath -ne 'false') {
+    if ($configValues['core.quotepath'] -ne 'false') {
         Write-Info '推荐：git config --global core.quotepath false （中文路径不再显示成 \344\275\240）'
     }
 
-    $longPathsGit = (& git config --global --get core.longpaths 2>$null)
-    if ($longPathsGit -ne 'true') {
+    if ($configValues['core.longpaths'] -ne 'true') {
         Write-Info '推荐：git config --global core.longpaths true （配合系统长路径开关）'
     }
 }
@@ -1455,7 +1625,7 @@ foreach ($command in $commands) {
             foreach ($root in $resolvedPaths) { Invoke-PathScan $root }
         }
         'env' {
-            Invoke-EnvironmentReport
+            Invoke-EnvironmentReport -Root $resolvedPaths[0]
         }
     }
 }
