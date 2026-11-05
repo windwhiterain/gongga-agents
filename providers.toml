@@ -242,6 +242,11 @@ cache_ttl_tier = "隐式（唯一一档，尽力而为）"
 id = "minimax-cn"
 name = "MiniMax 中国区"
 kind = "vendor"
+# 这个 provider 值得用 anthropic 面说：它的 OpenAI 面（chat/completions 与 responses）实测
+# **整条 prompt 存过才给**，首发一律 128–192——共享的头再大也不命中；只有 /anthropic 面带
+# cache_control 时是真前缀缓存（同段 8.2k 文本，改掉首条 user 消息仍读到 8192）。
+# 2026-11-05 本机实测，见 gongga 的 docs/reference/prefix-cache.md 与 docs/notes/server-anthropic.md。
+api = "anthropic-messages"
 plan_kind = "token_plan"
 key_env = "MINIMAX_CN_API_KEY"
 homepage = "https://platform.minimaxi.com"
@@ -285,6 +290,7 @@ cache_ttl_tier = "隐式（唯一一档，5 分钟，命中即续期）"
   name = "MiniMax M3.1 Flash"
   tier = "flash"
   context = 1000000            # 输入+输出合计，官方没有单独公布 max_output / max_input
+  max_output_tokens = 524288  # anthropic 面必填；官方没公布，2026-11-05 实测上限（>524288 返回 2013）
   modalities = ["text", "image", "video"]
   image_limits = "JPEG/PNG/GIF/WEBP ≤10MB；视频 MP4/AVI/MOV/MKV ≤50MB（Files API 可到 512MB）"
   reasoning_levels = ["low", "medium", "high", "xhigh", "max"]
@@ -318,6 +324,7 @@ cache_ttl_tier = "隐式（唯一一档，5 分钟，命中即续期）"
   name = "MiniMax M3"
   tier = "flash"
   context = 1000000
+  max_output_tokens = 524288  # anthropic 面必填；官方没公布，2026-11-05 实测上限（>524288 返回 2013）
   modalities = ["text", "image", "video"]
   reasoning_default = "off"
   reasoning_note = "思考默认关闭，要用 thinking{type:adaptive} 打开；本模型没有 effort 等级"
