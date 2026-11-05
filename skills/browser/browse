@@ -1,0 +1,261 @@
+#!/usr/bin/env bash
+# A browser this skill owns: one Edge instance, a debugging port, one profile.
+#
+#   browse start                  # start it, and remember how to reach it
+#   browse stop                   # stop it
+#   browse status                 # is it up, and on which port
+#   browse doctor                 # can this machine drive a browser at all
+#
+# The point is one long-lived Edge that agent and human share. A second
+# --remote-debugging-port against a profile that is already open does not listen:
+# the running browser swallows the request and the new port stays dead. So the
+# instance this skill starts is the only one with that profile, and it is started
+# with the port from the beginning.
+set -uo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+HOME_DIR="${BROWSER_HOME:-$HOME/.agents/browser}"
+PROFILE="${BROWSER_PROFILE:-$HOME_DIR/profile}"
+PORT_FILE="$HOME_DIR/port"
+PID_FILE="$HOME_DIR/edge.pid"
+LOG_FILE="$HOME_DIR/edge.log"
+
+die() { printf '%s\n' "$*" >&2; exit 1; }
+say() { printf '%s\n' "$*"; }
+
+# Where Edge is. The Playwright-managed chromium is the fallback: it speaks the
+# same protocol, and a machine without Edge still gets a browser.
+find_edge() {
+  local candidates=(
+    "/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
+    "/c/Program Files/Microsoft/Edge/Application/msedge.exe"
+  )
+  local exe
+  for exe in "${candidates[@]}"; do
+    [[ -f "$exe" ]] && { printf '%s' "$exe"; return 0; }
+  done
+  # The Playwright chromium, if it is on this machine.
+  local chromium
+  chromium=$(ls -d "$HOME"/AppData/Local/ms-playwright/chromium-*/chrome-win64/chrome.exe 2>/dev/null | sort -V | tail -n1)
+  [[ -n "$chromium" ]] && { printf '%s' "$chromium"; return 0; }
+  return 1
+}
+
+port_open() {
+  local port=$1
+  python - "$port" <<'PY' 2>/dev/null
+import socket, sys
+try:
+    socket.create_connection(("127.0.0.1", int(sys.argv[1])), 1).close()
+except Exception:
+    sys.exit(1)
+PY
+}
+
+# The browser that answers on this port, or nothing.
+browser_version() {
+  local port=$1
+  python - "$port" <<'PY' 2>/dev/null
+import json, sys, urllib.request
+try:
+    data = json.load(urllib.request.urlopen("http://127.0.0.1:%s/json/version" % sys.argv[1], timeout=2))
+except Exception:
+    sys.exit(1)
+print(data.get("Browser", "?"))
+PY
+}
+
+free_port() {
+  python - <<'PY'
+import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+}
+
+do_start() {
+  local exe
+  exe=$(find_edge) || die "no browser found: install Edge, or run 'playwright install chromium'"
+  mkdir -p "$HOME_DIR" "$PROFILE"
+
+  # Headless unless asked otherwise: a window on the user's desktop is an
+  # interruption, and everything this skill does -- text, links, cookies,
+  # screenshots -- works the same without one. `--headed` opens the window for
+  # the times a human wants to watch or log in.
+  local headless="--headless=new"
+  [[ "${BROWSER_HEADED:-0}" == "1" ]] && headless=""
+
+  # An instance that is already up on our port is the one we want.
+  if [[ -f "$PORT_FILE" ]] && port_open "$(cat "$PORT_FILE")"; then
+    say "already up: $(browser_version "$(cat "$PORT_FILE")") on port $(cat "$PORT_FILE")"
+    return 0
+  fi
+
+  # A browser of ours may already be running on another port: a second one with
+  # the same profile does not start at all, the running one swallows the
+  # request. So the existing one is found and used.
+  local existing
+  existing=$(our_pid)
+  if [[ -n "$existing" ]]; then
+    local port
+    port=$(port_of_pid "$existing")
+    if [[ -n "$port" ]]; then
+      printf '%s\n' "$port" >"$PORT_FILE"
+      say "already up: $(browser_version "$port") on port $port"
+      return 0
+    fi
+  fi
+
+  local port
+  port=$(free_port)
+  local native_profile
+  native_profile=$(cygpath -w "$PROFILE" 2>/dev/null || printf '%s' "$PROFILE")
+
+  # A windows process needs a windows path; a shell needs a posix one.
+  "$exe" --remote-debugging-port="$port" \
+          --user-data-dir="$native_profile" \
+          $headless \
+          --no-first-run --no-default-browser-check \
+          about:blank >"$LOG_FILE" 2>&1 &
+  local pid=$!
+  printf '%s\n' "$pid" >"$PID_FILE"
+
+  # Ready means the browser answered, not that the port was opened: the process
+  # takes seconds to get there, and a refused connection in between is normal.
+  local waited=0
+  while (( waited < 60 )); do
+    if port_open "$port"; then
+      printf '%s\n' "$port" >"$PORT_FILE"
+      say "started: $(browser_version "$port") on port $port"
+      say "profile: $PROFILE"
+      return 0
+    fi
+    sleep 1
+    waited=$(( waited + 1 ))
+  done
+  say "the browser did not answer on port $port after ${waited}s; log: $LOG_FILE"
+  return 1
+}
+
+do_stop() {
+  local stopped=0
+  if [[ -f "$PORT_FILE" ]]; then
+    local port pid
+    port=$(cat "$PORT_FILE")
+    pid=$(port_owner_pid "$port")
+    if [[ -n "$pid" ]] && owns_profile "$pid"; then
+      # Only the process that is this skill's browser: its command line names
+      # this skill's profile directory. A browser the user started has neither.
+      taskkill //PID "$pid" //T //F >/dev/null 2>&1 && stopped=1
+      say "stopped the browser on port $port"
+    elif [[ -n "$pid" ]]; then
+      say "port $port belongs to a browser that is not ours; it stays"
+    else
+      say "no browser on port $port"
+    fi
+    rm -f "$PORT_FILE" "$PID_FILE"
+  else
+    rm -f "$PID_FILE"
+  fi
+  (( stopped )) || say "nothing of ours was running"
+  return 0
+}
+
+# The debugging port a pid was started with.
+port_of_pid() {
+  local pid=$1
+  local command
+  command=$(powershell -NoProfile -Command \
+    "(Get-CimInstance Win32_Process -Filter 'ProcessId=$pid').CommandLine" 2>/dev/null | tr -d '\r')
+  [[ "$command" =~ --remote-debugging-port=([0-9]+) ]] && printf '%s' "${BASH_REMATCH[1]}"
+}
+
+# The windows pid that listens on a port.
+port_owner_pid() {
+  local port=$1
+  netstat -ano 2>/dev/null | awk -v p=":$port" '$2 ~ p"$" && $4 == "LISTENING" { print $5; exit }'
+}
+
+# Whether that pid's command line names this skill's profile: the only way to
+# tell our browser from the one the user started. The command line carries the
+# native spelling, so both spellings are checked.
+owns_profile() {
+  local pid=$1
+  local command native
+  command=$(powershell -NoProfile -Command \
+    "(Get-CimInstance Win32_Process -Filter 'ProcessId=$pid').CommandLine" 2>/dev/null | tr -d '\r')
+  [[ -n "$command" ]] || return 1
+  native=$(cygpath -w "$PROFILE" 2>/dev/null || printf '%s' "$PROFILE")
+  [[ "$command" == *"$native"* || "$command" == *"$PROFILE"* ]]
+}
+
+# The pid of our own browser, if it is running: matched by the profile, never by
+# the image name -- several browsers on this machine share that name.
+our_pid() {
+  local native
+  native=$(cygpath -w "$PROFILE" 2>/dev/null || printf '%s' "$PROFILE")
+  powershell -NoProfile -Command \
+    "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" | Where-Object { \$_.CommandLine -like '*$native*' -and \$_.CommandLine -like '*--remote-debugging-port=*' } | Select-Object -First 1 -ExpandProperty ProcessId" \
+    2>/dev/null | tr -d '\r' | head -n1
+}
+
+do_status() {
+  if [[ -f "$PORT_FILE" ]]; then
+    local port
+    port=$(cat "$PORT_FILE")
+    if port_open "$port"; then
+      say "up: $(browser_version "$port") on port $port"
+      say "profile: $PROFILE"
+      return 0
+    fi
+    say "the recorded port $port is dead; the browser is gone"
+    return 1
+  fi
+  say "not started"
+  return 1
+}
+
+do_doctor() {
+  local exe
+  if exe=$(find_edge); then
+    say "ok   browser: $exe"
+  else
+    say "FAIL no browser: install Edge, or run 'playwright install chromium'"
+    return 1
+  fi
+  if command -v uv >/dev/null 2>&1; then
+    say "ok   uv: $(command -v uv)"
+  else
+    say "FAIL no uv; the driver needs 'uv run --with playwright'"
+    return 1
+  fi
+  if [[ -f "$PORT_FILE" ]] && port_open "$(cat "$PORT_FILE")"; then
+    say "ok   running: $(browser_version "$(cat "$PORT_FILE")")"
+  else
+    say "note not running; 'browse start' brings it up"
+  fi
+  return 0
+}
+
+case "${1:-}" in
+  start) do_start ;;
+  stop) do_stop ;;
+  status) do_status ;;
+  doctor) do_doctor ;;
+  "")
+    say "usage: browse {start|stop|status|doctor}"
+    say "       browse <action> ...   # open text html click type press shot cookies tabs find"
+    exit 2
+    ;;
+  *)
+    # Anything else is an action on the browser: the driver connects to the port
+    # `browse start` recorded. It runs the same python the machine has, with the
+    # dependency uv resolves.
+    if ! command -v uv >/dev/null 2>&1; then
+      die "no uv; install it from https://docs.astral.sh/uv/"
+    fi
+    exec uv run --quiet "$here/browse.py" "$@"
+    ;;
+esac
