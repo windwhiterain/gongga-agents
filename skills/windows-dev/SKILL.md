@@ -1,6 +1,6 @@
 ---
 name: windows-dev
-description: Windows 上 agentic 开发的四类环境坑的诊断与治理——行尾符（CRLF/LF）、字符编码（GBK/UTF-8/BOM）、文件路径（260 长路径/保留设备名/大小写冲突）、系统环境（执行策略/长路径开关/Git autocrlf/fscache）。当 agent 在 Windows 上批量写文件或跑脚本后出错、shell 脚本报 `\r: command not found`、git diff 出现满屏假变更、git status 报了一堆 M 但 git diff 是空的、中文变成乱码、或读写某个路径失败时使用。默认 doctor 只做只读体检；eol 与 encoding 可按要求改写文件；文件清单由 git 给出，不漏文件也不扫生成物。
+description: Windows 上 agentic 开发的四类环境坑的诊断与治理——行尾符（CRLF/LF）、字符编码（GBK/UTF-8/BOM）、文件路径（260 长路径/保留设备名/大小写冲突）、系统环境（执行策略/长路径开关/Git autocrlf/fscache）。当 agent 在 Windows 上批量写文件或跑脚本后出错、shell 脚本报 `\r: command not found`、git diff 出现满屏假变更、git status 报了一堆 M 但 git diff 是空的、中文变成乱码、或读写某个路径失败时使用。默认 doctor 只做只读体检；eol 与 encoding 可按要求改写文件；文件清单由 git 给出，不漏文件也不扫生成物。也讲 python 为什么默认写 CRLF，以及怎么用 sitecustomize 把这个默认改掉。
 metadata:
   entry: windows-dev.ps1
 ---
@@ -103,6 +103,105 @@ env 段会把它单列出来并给出 `git config --global core.autocrlf input`�
 白名单既会漏文件（`Cargo.lock`、`.gitmodules`、`pre-commit` 这类没有常见后缀的），
 又会把几千个 gitignored 的生成物（`target/`、`.dev/`）拖进来——扫描时间差一个数量级。
 不在 git 仓库里时，才退回文件系统遍历 + 后缀白名单。
+
+#### python 默认写 CRLF：源头是解释器，不是 agent
+
+`open(p, "w")` 与 `Path.write_text` 在 Windows 上把 `\n` 翻成 `\r\n`——`io.TextIOWrapper`
+按 `os.linesep` 翻译，这是默认行为，不是谁手滑。所以 eol 通道扫出来的 CRLF 有一大半是
+「agent 用 python 编辑」写进去的，fix 一遍只是等它下一次再写进来。改默认比反复 fix 便宜。
+
+**这件事没有「配置项」。** Python 自带的是启动钩子：`site` 模块在解释器启动时自动
+`import sitecustomize`。3.12.8 的 `<python>/Lib/site.py` 里是这几处：
+
+```python
+def main():                    # 解释器启动即调用，除非 -S
+    ...
+    execsitecustomize()        # 629：import sitecustomize —— 就这一句
+    if ENABLE_USER_SITE:
+        execusercustomize()    # 631：import usercustomize
+
+if not sys.flags.no_site:      # 638：-S 关掉的就是这个开关
+    main()
+```
+
+所以「全局初始化代码」= **在 `sys.path` 上放一个 `sitecustomize.py`**，不是某个配置键。
+谁提供什么是分开的：
+
+| 角色 | 谁提供 |
+| --- | --- |
+| 机制（何时 import、失败了怎么办） | CPython 的 `site.py`，stdlib，随解释器走 |
+| 被 import 的那段代码 | 我们写的 `sitecustomize.py` |
+| 它为什么能被 import 到 | 那个目录在 `PYTHONPATH`（或 site 目录）上 |
+
+失败也不致命：`execsitecustomize` 捕获所有异常，只往 stderr 打一行
+`Error in sitecustomize; set PYTHONVERBOSE for traceback` 就继续——所以坏掉的 init
+是「每个进程一行噪音」，不是启动失败。写完要自己验一次。
+
+两个常被当成这条路、其实不是的机制：`PYTHONSTARTUP` 只对**交互式**会话生效，
+`python -c` 与 `python foo.py` 都不跑它；`.pth` 里写 `import ...` 只在 **site 目录**
+里被处理，`PYTHONPATH` 上的 `.pth` 根本不读。
+
+gongga 里这段代码应当由 home 的 `config.toml` 提供：服务端读 `[tools.python] init`，
+把它落成 `<home>/lib/sitecustomize.py`，再把 `<home>/lib` 放进**它自己起的子进程**的
+`PYTHONPATH`（不写 site-packages，不动机器上别的 python）。
+
+这是设计，不是现状：本机这份服务端还没有这个键（`FilePython` 里只有
+`program`/`args`/`timeout_ms`/`max_output_chars`），键不存在时它什么都不做。所以形状
+先记在这里，落地前真正生效的是下面那条兜底。
+
+```toml
+[tools.python]
+# 每个由 harness 启动的 Python 进程，在跑你的代码之前先执行这段。
+# 只改默认：显式 newline="\r\n" 的调用照旧。
+init = '''
+import builtins, io, pathlib
+
+_open = builtins.open
+_write_text = pathlib.Path.write_text
+
+def _open_lf(file, mode="r", buffering=-1, encoding=None, errors=None,
+             newline=None, closefd=True, opener=None):
+    if "b" not in mode and not set(mode) <= set("r") and newline is None:
+        newline = "\n"
+    return _open(file, mode, buffering, encoding, errors, newline, closefd, opener)
+
+def _write_text_lf(self, data, encoding=None, errors=None, newline=None):
+    return _write_text(self, data, encoding, errors,
+                       "\n" if newline is None else newline)
+
+builtins.open = _open_lf
+io.open = _open_lf
+pathlib.Path.write_text = _write_text_lf
+'''
+```
+
+在它落地之前等价做法是两步，与 gongga 无关，任何 Windows 上的 python 都适用
+（而且它不依赖服务端版本，所以现在就该这么用）：
+
+```bash
+# 1. sitecustomize.py 放在一个稳定目录（别放 site-packages：那是改全机器的 python）
+# 2. 让启动 python 的地方看见它
+export PYTHONPATH=/c/Users/me/.agents/python
+```
+
+它只改**默认**：显式 `open(p, "w", newline="\r\n")` 仍然拿到 CRLF。想生成 CRLF 文件的
+人不会被拦，只是必须说出来——这条边界一旦破了，下一次就有人为了「生成一个 CRLF 文件」
+把整段关掉，而它换来的正是这里最想要的那件事。
+
+三个别指望它的地方：
+
+- `python -S` / `python -I` 不走 `site`，这段代码不执行（`-I` 连 `PYTHONPATH` 都忽略）；
+- 编辑器、`powershell Set-Content`、`Out-File` 不经过 python，各有各的默认；
+- `csv.writer` 的 `lineterminator` 默认就是 `\r\n`，那是显式参数，要 LF 得自己传。
+
+验证看字节，不看编辑器：
+
+```bash
+python -c "b=open('x.txt','rb').read(); print('crlf', b.count(b'\r\n'), 'lf', b.count(b'\n'))"
+```
+
+默认值让「不知道的人」写对，doctor 的 eol 通道负责抓「知道但绕过」的人。两者是分工，
+不是备份。
 
 ### encoding（字符编码）
 
