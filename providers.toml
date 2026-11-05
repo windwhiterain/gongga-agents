@@ -898,6 +898,11 @@ cache_ttl_tier = "隐式（唯一一档，1–6 小时）"
 id = "longcat"
 name = "美团 LongCat"
 kind = "vendor"
+# 这一家实测需要 `prompt_cache_key`：同一会话无 key 0/5 命中，带 key 5/5（19968 of 20013
+# tokens）。字段是文档化的路由提示，不是缓存键——值由服务端给（会话目录）。别的 provider
+# 不写这个字段就不发，因为没文档化它的端点既买不到收益，还可能因未知字段整请求失败。
+# 2026-11-04 本机实测，见 gongga 的 docs/notes/server-prefix-cache.md。
+cache_affinity = true
 key_env = "LONGCAT_API_KEY"
 key_prefix = "ak_"
 homepage = "https://longcat.chat"
