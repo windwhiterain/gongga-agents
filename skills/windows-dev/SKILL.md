@@ -1,6 +1,6 @@
 ---
 name: windows-dev
-description: Windows 上 agentic 开发的四类环境坑的诊断与治理——行尾符（CRLF/LF）、字符编码（GBK/UTF-8/BOM）、文件路径（260 长路径/保留设备名/大小写冲突）、系统环境（执行策略/长路径开关/Git autocrlf）。当 agent 在 Windows 上批量写文件或跑脚本后出错、shell 脚本报 `\r: command not found`、git diff 出现满屏假变更、中文变成乱码、或读写某个路径失败时使用。默认 doctor 只做只读体检；eol 与 encoding 可按要求改写文件。
+description: Windows 上 agentic 开发的四类环境坑的诊断与治理——行尾符（CRLF/LF）、字符编码（GBK/UTF-8/BOM）、文件路径（260 长路径/保留设备名/大小写冲突）、系统环境（执行策略/长路径开关/Git autocrlf/fscache）。当 agent 在 Windows 上批量写文件或跑脚本后出错、shell 脚本报 `\r: command not found`、git diff 出现满屏假变更、git status 报了一堆 M 但 git diff 是空的、中文变成乱码、或读写某个路径失败时使用。默认 doctor 只做只读体检；eol 与 encoding 可按要求改写文件；文件清单由 git 给出，不漏文件也不扫生成物。
 metadata:
   entry: windows-dev.ps1
 ---
@@ -87,13 +87,22 @@ Windows 上 agent 写脚本时遇到的"莫名其妙的错误"，绝大多数来
 ### eol（行尾符）
 
 扫描所有文本文件，按行尾形态分成 `lf` / `crlf` / `mixed` / `cr` / `none` 并统计。
-目标行尾的判定优先级：
-
-1. 目录里有 `.gitattributes` → 解析其中的 `eol=` 规则，**后出现者优先**（与 Git 语义一致）；
-2. 没有 → 兜底：`.bat` / `.cmd` 保持 CRLF，其余一律 LF。
+目标行尾**一律 LF**，没有优先级、没有兜底：只有 `.bat` / `.cmd` 例外。
 
 `.bat` / `.cmd` 必须 CRLF：cmd.exe 对多行括号块和 `goto` 的解析绑死在 CRLF 上，
 LF 版本在部分机器上会静默执行错行。
+
+`.gitattributes` 不再决定目标行尾。它决定的是**git 检出成什么**，跟"文件应该是 LF"
+是两件事：规则里写着 `eol=crlf`（非 `.bat`/`.cmd`）时，doctor 报**冲突**并给出改法，
+而不是把 CRLF 判成合规 —— 否则 git 会一次次把文件检出回 CRLF，doctor 只会重复报同一批文件。
+同样的道理适用于 `core.autocrlf=true`：它让检出形态变成 CRLF，与 LF 策略冲突，
+env 段会把它单列出来并给出 `git config --global core.autocrlf input`。
+
+**文件清单由 git 给**，不是靠后缀白名单。在 git 仓库里，扫描的是
+`git ls-files --cached --others --exclude-standard` 的结果：跟踪的 + 未跟踪但未忽略的。
+白名单既会漏文件（`Cargo.lock`、`.gitmodules`、`pre-commit` 这类没有常见后缀的），
+又会把几千个 gitignored 的生成物（`target/`、`.dev/`）拖进来——扫描时间差一个数量级。
+不在 git 仓库里时，才退回文件系统遍历 + 后缀白名单。
 
 ### encoding（字符编码）
 
@@ -116,8 +125,12 @@ LF 版本在部分机器上会静默执行错行。
 
 PowerShell 版本与执行策略、控制台输出编码、长路径开关（`LongPathsEnabled`）、
 系统 ANSI 代码页（是否开了全局 UTF-8）、开发者模式（符号链接权限）、
-Git 的 `core.autocrlf` / `safecrlf` / `longpaths` / `quotepath` / `ignorecase`，
-并对没设好的项给出具体命令。
+Git 的 `core.autocrlf` / `safecrlf` / `longpaths` / `quotepath` / `ignorecase` /
+`fscache`，并对没设好的项给出具体命令。
+
+**幽灵变更检测**是 env 段的一部分：git status 报 `M`、但 `git diff` 是空的那些文件，
+单独列出来。判据只有一条——`git diff --name-only` 为空就是幽灵，不是"内容真变了"。
+`core.fscache` 打印两行：全局值与**生效值**（仓库级覆盖全局级，只看全局会漏）。
 
 ## 边界（设计决策，不要擅自改）
 
@@ -129,8 +142,12 @@ Git 的 `core.autocrlf` / `safecrlf` / `longpaths` / `quotepath` / `ignorecase`�
 | 报告里相对路径 | 注册表、`git config`、任何系统级设置（只打印命令） |
 
 默认跳过的目录：`.git`、`.svn`、`.hg`、`node_modules`、`vendor`、`target`、`dist`、
-`build`、`bin`、`obj`、`out`、`.next`、`.venv`、`__pycache__`、`.gradle`、`.terraform`、
+`build`、`obj`、`out`、`.next`、`.venv`、`__pycache__`、`.gradle`、`.terraform`、
 `.idea`、`.vs`、`coverage` 等。改第三方和生成物的行尾没有意义，量还极大。
+
+**`bin` 不在跳过表里**。按路径段名排除 `bin` 会把 Rust 的 `crates/*/src/bin/`
+整个漏掉——那是正规源码目录，不是构建产物。有 git 时由 git 的清单兜住，
+没有 git 时只能靠后缀白名单，所以这一条尤其要留意。
 
 ## 实现上几个不显然的地方
 
@@ -143,6 +160,13 @@ UTF-8 字符（U+0000），所以严格 UTF-8 解码器会把整段读过去、�
 `"u\0n\0i\0"` 这种东西却没人报警。PowerShell 5.1 的 `>` 与 `Out-File` 产出的正是这类
 文件。必须在 UTF-8 校验**之前**用「偶/奇位 NUL 分布」的启发式拦下来
 （`Test-BareUtf16Signature`）。
+
+### 目标行尾是策略，不是从 `.gitattributes` 推出来的
+
+LF 是硬要求：脚本不再按 `eol=` 规则判定目标行尾，也不再因为 `core.autocrlf=true`
+就把 CRLF 判成合规。后者曾经让一个 CRLF 工作区"零问题"——而那个工作区下一次
+`git checkout` 就会重新变回 CRLF，问题只是被推迟。仓库规则与策略冲突时，
+报冲突、给改法，别把不合规说成合规。
 
 ### guard 是幂等的，所以「剔除待替换属性」必须写全
 
@@ -193,12 +217,47 @@ Zed 的键名别写错：`line_ending` 取值是 `detect` / `prefer_lf` / `prefe
 引入 CRLF。用 `WriteAllBytes` + 自己构造的 `UTF8Encoding($true|$false)` 才能精确控制
 「要不要 BOM」和「行尾是啥」。
 
+### 幽灵变更：git status 说改了，git diff 却是空的
+
+内容与 index blob 逐字节相同，git 却把文件报成 `M`。原因是 git 先比 stat
+（大小/时间戳），stat 变了才去算哈希。被外部工具覆盖写过一遍的文件（正是
+`eol fix` 干的事），stat 常常与 index 里记的不一样，于是先报一个 `M`。
+
+这不是 bug，是 git 的惰性校验。但它极容易骗人：agent 会以为自己的修改被弄丢了，
+或者以为仓库里出了什么岔子。**判据只有一条**：`git diff --name-only` 为空就是幽灵。
+
+消掉的办法是刷新 stat 而不是改内容：`git add <文件>`（内容进 index，diff 为空）
+或 `git update-index --really-refresh`。注意 `git update-index --refresh` 在
+有真实差异时不会清掉幽灵——它只更新那些"内容确实一致"的条目。
+
+`core.fscache=true`（Git for Windows 的 filesystem cache 扩展）会让 git 拿到过期的
+stat，于是这个现象成片出现。它来自系统级 `gitconfig`，仓库级可以覆盖。
+env 段因此打印**生效值**（`git config --get`）而不只是全局值。
+
+fix 之后脚本会主动报一句：改了几个文件、其中几个是 stat 过期、几个是真差异。
+这是 agent 判断"要不要 `git add`"的依据。
+
 ### 大小写冲突只能查 Git 索引
 
 Windows 文件系统大小写不敏感，同一目录下压根存不下 `Foo.ts` 和 `foo.ts` 两个文件——
 它们要么检出时就互相覆盖了，要么没检出来。所以工作区扫描永远扫不到这个冲突，
 扫了也是白扫（曾经写过，是死代码，已删）。真正的证据在 `git ls-files` 里：索引是纯
 文本，可以老老实实记着两个名字。
+
+### 文件清单用 `git ls-files -z`，不靠后缀白名单
+
+后缀白名单有两个方向的错：一是**漏**（`Cargo.lock`、`.gitmodules`、`pre-commit`、
+`crates/*/src/bin/*.rs` 这些没有常见后缀或后缀特殊的文件会被跳过），
+二是**多**（gitignored 的 `target/`、`.dev/` 里有几千个文件，改它们的行尾毫无意义）。
+
+`git ls-files -z --cached --others --exclude-standard` 一次给出全集：
+跟踪的 + 未跟踪但未忽略的。实测一个 Rust 仓库从 5183 个文件、74 秒降到 323 个、8 秒。
+
+`-z` 不是可有可无的：默认输出里非 ASCII 路径会被加引号转义，拿那个字符串去比对
+别的命令的输出会对不上。
+
+这个清单也回答了"哪些文件是这个仓库的一部分"——扫描范围因此等于仓库范围，
+而不是"磁盘上碰巧存在的文件"。不在 git 仓库里时才退回文件系统遍历。
 
 ### UTF-16 文件在 eol 通道被当成二进制跳过，这是故意的
 
@@ -221,5 +280,6 @@ PowerShell 5.1 靠 BOM 判断 `.ps1` 的编码。本文件里全是中文注释�
 ## 环境要求
 
 Windows 10/11 + 自带 Windows PowerShell 5.1（无需安装任何东西），pwsh 7+ 同样可跑。
-非 Windows 直接退出。Git 只在「读 `.gitattributes` 规则」和「查索引大小写冲突」时用到，
-没有 Git 会自动降级到兜底规则，不影响其他功能。
+非 Windows 直接退出。Git 参与三件事：给出文件清单（`git ls-files`）、
+读 `.gitattributes` 规则、查索引大小写冲突与幽灵变更。
+没有 Git 时自动降级到文件系统遍历 + 后缀白名单，不影响其他功能。

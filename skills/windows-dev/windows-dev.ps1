@@ -124,10 +124,14 @@ $script:TextFileNames = @(
 )
 
 # 第三方/生成物目录：改它们的行尾没有意义，量还极大。
+# 第三方/生成物目录：改它们的行尾没有意义，量还极大。
+#
+# 注意：这里不能按"路径段名"排除 'bin'。Rust 的 crates/*/src/bin/ 是正规源码目录，
+# 按段名排除会把它们整个漏掉（有 git 时由 git 的清单兜住，没有 git 时就只能靠白名单）。
 $script:ExcludedDirectories = @(
     '.git', '.svn', '.hg', '.bzr',
     'node_modules', 'vendor', 'bower_components', 'jspm_packages',
-    'target', 'dist', 'build', 'bin', 'obj', 'out', '.next', '.nuxt', '.output',
+    'target', 'dist', 'build', 'obj', 'out', '.next', '.nuxt', '.output',
     '.venv', 'venv', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache',
     '.gradle', '.terraform', '.idea', '.vs', '.vscode-test', 'coverage'
 )
@@ -224,6 +228,15 @@ function Get-TargetFiles {
     }
     $rootFullName = $item.FullName.TrimEnd('\', '/')
 
+    # 有 git 时，git 的清单就是权威的"哪些文件是这个仓库的一部分"。
+    # 它比任何后缀白名单都准：Cargo.lock、.gitmodules、pre-commit 这类
+    # 无后缀或特殊后缀的文件都在里面，而 gitignored 的生成物（.dev/、target/）
+    # 一个都不会出现——白名单既会漏文件，又会把几千个生成物拖进来。
+    $gitFiles = Get-GitManagedFiles -Root $rootFullName
+    if ($null -ne $gitFiles) {
+        return $gitFiles
+    }
+
     if ($item.PSIsContainer) {
         $children = @(Get-ChildItem -LiteralPath $item.FullName -Recurse -File `
                         -ErrorAction SilentlyContinue -ErrorVariable enumerationErrors)
@@ -242,6 +255,43 @@ function Get-TargetFiles {
 
     if ($enumerationErrors.Count -gt 0) {
         Write-Warn ("枚举时有 $($enumerationErrors.Count) 个目录读取失败（多半是长路径或权限），已跳过")
+    }
+    return $result.ToArray()
+}
+
+# 返回 $Root 之下由 git 管理的文件（已跟踪 + 未跟踪但未忽略）。
+# $Root 不在 git 仓库里时返回 $null，调用方退回文件系统遍历。
+#
+# 用 -z 让路径用 NUL 分隔：文件名里可能有空格、引号、非 ASCII，NUL 是唯一
+# 不会与路径字符冲突的分隔符。
+function Get-GitManagedFiles {
+    param([string]$Root)
+
+    $git = Get-Command git -ErrorAction SilentlyContinue
+    if ($null -eq $git) { return $null }
+
+    $toplevel = (& git -C $Root rev-parse --show-toplevel 2>$null)
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($toplevel)) { return $null }
+    $toplevel = $toplevel.Trim()
+
+    $raw = & git -C $toplevel ls-files -z --cached --others --exclude-standard 2>$null
+    if ($LASTEXITCODE -ne 0) { return $null }
+
+    $joined = ($raw -join "`0")
+    $entries = $joined -split "`0"
+
+    $prefix = $Root.TrimEnd('\', '/')
+    $result = New-Object System.Collections.Generic.List[IO.FileInfo]
+    foreach ($entry in $entries) {
+        if ([string]::IsNullOrEmpty($entry)) { continue }
+        $full = Join-Path $toplevel $entry
+        # 只取 $Root 之下的：$Root 可能是仓库的子目录。
+        if (-not $full.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { continue }
+        $full = $full.TrimEnd('\', '/')
+        if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { continue }
+        $info = Get-Item -LiteralPath $full -ErrorAction SilentlyContinue
+        if ($null -eq $info) { continue }
+        $result.Add($info)
     }
     return $result.ToArray()
 }
@@ -270,6 +320,42 @@ function Test-LooksBinary {
         if ($Bytes[$i] -eq 0) { return $true }
     }
     return $false
+}
+
+# fix 覆盖了文件之后，git index 里记的 stat（大小/时间戳）就过期了。
+# git 会因此把这些文件报成 M —— 即使内容一个字节都没变。
+#
+# 这不是 bug，是 git 的惰性校验：它先看 stat，变了才去算哈希。
+# 所以"改完之后 git 说一堆文件变了"要分两种看：
+#   真变更  —— git diff 里有内容差异
+#   幽灵变更 —— git diff 是空的，只是 stat 过期
+function Write-GitStatusAfterFix {
+    param([string]$Root, [int]$Changed)
+
+    if ($Changed -le 0) { return }
+
+    $git = Get-Command git -ErrorAction SilentlyContinue
+    if ($null -eq $git) { return }
+
+    $toplevel = (& git -C $Root rev-parse --show-toplevel 2>$null)
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($toplevel)) { return }
+    $toplevel = $toplevel.Trim()
+
+    $status = @(& git -C $toplevel status --porcelain 2>$null)
+    $modified = @($status | Where-Object { $_ -match '^ ?M' })
+    if ($modified.Count -eq 0) { return }
+
+    $phantoms = @(Get-GitPhantomFiles -Root $toplevel)
+    $real = @(& git -C $toplevel diff --name-only 2>$null)
+
+    Write-Host ''
+    if ($real.Count -eq 0) {
+        Write-Info "$($modified.Count) 个文件被 git 报成修改，但内容没有任何差异（只是 stat 过期）"
+        Write-Info '  刷新：git add <这些文件>（内容进 index，不产生 diff）或 git update-index --really-refresh'
+    } else {
+        $phantomCount = $phantoms.Count
+        Write-Info "$($modified.Count) 个文件被 git 报成修改，其中 $phantomCount 个只是 stat 过期、$($real.Count) 个有真实内容差异"
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -323,16 +409,32 @@ function Get-GitAttributesEolRules {
 function Get-DesiredEol {
     param([string]$FileName, [object[]]$Rules)
 
-    for ($i = $Rules.Count - 1; $i -ge 0; $i--) {
-        if (Test-GitAttributesPattern $Rules[$i].Pattern $FileName) {
-            return $Rules[$i].Eol
-        }
-    }
-    # 没有 .gitattributes 时的兜底：Windows 批处理保持 CRLF，其余一律 LF。
+    # 行尾策略：文本文件一律 LF。
+    # .bat / .cmd 是唯一的例外——cmd.exe 对多行括号块和 goto 的解析绑死在 CRLF 上，
+    # LF 版本在部分机器上会静默执行错行。这是平台要求，与仓库约定无关。
     if ($script:CrlfExtensions -contains ([IO.Path]::GetExtension($FileName).ToLowerInvariant())) {
         return 'crlf'
     }
+    # .gitattributes 里的 -text / binary 只说明"这不是文本"，与行尾策略无关。
+    for ($i = $Rules.Count - 1; $i -ge 0; $i--) {
+        if ($Rules[$i].Eol -ne 'binary') { continue }
+        if (Test-GitAttributesPattern $Rules[$i].Pattern $FileName) { return 'binary' }
+    }
     return 'lf'
+}
+
+# 仓库规则要求 CRLF、而策略要求 LF 时，这是冲突而不是合规：
+# git 会照着 .gitattributes 把文件检出成 CRLF，doctor 只会反复报同一批文件。
+function Get-EolPolicyConflicts {
+    param([object[]]$Rules)
+
+    $conflicts = New-Object System.Collections.Generic.List[object]
+    foreach ($rule in $Rules) {
+        if ($rule.Eol -ne 'crlf') { continue }
+        if ($rule.Pattern -eq '*.bat' -or $rule.Pattern -eq '*.cmd') { continue }
+        $conflicts.Add($rule)
+    }
+    return $conflicts.ToArray()
 }
 
 # ---------------------------------------------------------------------------
@@ -425,10 +527,9 @@ function Invoke-LineEndingScan {
     # @() 不能省。见 Invoke-LineEndingScan 上方的注释：单条规则时函数返回的是
     # 单个 PSCustomObject，而 PSCustomObject 的 .Count 是 $null 不是 1。
     $rules = @(Get-GitAttributesEolRules $Root)
-    if ($rules.Count -gt 0) {
-        Write-Info "按 $Root\.gitattributes 的 eol 规则判定目标行尾（规则数：$($rules.Count)）"
-    } else {
-        Write-Info '没有 .gitattributes，用兜底规则：除 .bat/.cmd 外一律 LF'
+    Write-Info '按行尾策略判定目标行尾：文本文件一律 LF（.bat/.cmd 除外）'
+    foreach ($conflict in @(Get-EolPolicyConflicts $rules)) {
+        Write-Warn "仓库规则与 LF 策略冲突：$($conflict.Pattern) eol=crlf（改法：改成 eol=lf，或删掉该行）"
     }
 
     $kindCounts = @{}
@@ -503,6 +604,8 @@ function Invoke-LineEndingScan {
         Write-Host ''
         Write-Info '修一遍：windows-dev.ps1 eol <目录> -Action fix'
     }
+
+    if ($Fix) { Write-GitStatusAfterFix -Root $Root -Changed $fixedCount }
 }
 
 # guard 要保证的 .gitattributes 规则。语义是"钉死这几条"，不是"重写整个文件"：
@@ -1135,6 +1238,8 @@ function Invoke-EncodingScan {
         Write-Info '修一遍：windows-dev.ps1 encoding <目录> -Action fix'
         Write-Info '注意：.ps1/.psm1/.psd1 会保留 BOM —— Windows PowerShell 5.1 靠它判断编码。'
     }
+
+    if ($Fix) { Write-GitStatusAfterFix -Root $Root -Changed $fixedCount }
 }
 
 # ---------------------------------------------------------------------------
@@ -1314,6 +1419,8 @@ function Get-RegistryValueSafely {
 }
 
 function Invoke-EnvironmentReport {
+    param([string]$Root)
+
     Write-SubTitle '环境体检 — 只读，只给修复命令，不自动改'
 
     Write-Host ''
@@ -1372,7 +1479,7 @@ function Invoke-EnvironmentReport {
     }
 
     Write-Host "  git             $((& git --version) -join '')"
-    foreach ($name in @('core.autocrlf', 'core.safecrlf', 'core.longpaths', 'core.quotepath', 'core.ignorecase')) {
+    foreach ($name in @('core.autocrlf', 'core.safecrlf', 'core.longpaths', 'core.quotepath', 'core.ignorecase', 'core.fscache')) {
         $value = (& git config --global --get $name 2>$null)
         if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($value)) { $value = '(未设置)' }
         Write-Host ("  {0,-16} {1}" -f $name, $value)
@@ -1384,6 +1491,27 @@ function Invoke-EnvironmentReport {
         Write-Info '推荐（跨平台项目）：git config --global core.autocrlf input'
         Write-Info '  提交时 CRLF->LF，检出时保持 LF。.gitattributes 的规则会覆盖它。'
     }
+    if ($autocrlf -eq 'true') {
+        Write-Host ''
+        Write-Bad 'core.autocrlf=true 与 LF 策略冲突：git 会把工作区检出成 CRLF'
+        Write-Info '  改法：git config --global core.autocrlf input（检出保持 LF）'
+        Write-Info '  这一条是"仓库里全是 CRLF"的根因：它发生在检出时，不是提交时。'
+    }
+
+    # core.fscache 是 Git for Windows 的 filesystem cache 扩展。它会让 git 拿到
+    # 过期的 stat，于是把"内容与 index 完全一致"的文件报成 M —— 幽灵变更。
+    # 判别方法：git diff 是空的，但 git status 说它改了。
+    #
+    # 仓库级配置会覆盖全局的，所以要看生效值（git config --get）而不是 --global。
+    $fscache = (& git config --get core.fscache 2>$null)
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($fscache)) { $fscache = '(未设置)' }
+    Write-Host ("  {0,-16} {1}" -f 'core.fscache(生效)', $fscache)
+    if ($fscache -eq 'true') {
+        Write-Host ''
+        Write-Warn 'core.fscache=true：可能出现幽灵变更（git status 说改了，git diff 却是空的）'
+        Write-Info '  判别：git diff --name-only（空）对比 git status --porcelain（有 M）'
+        Write-Info '  改法：在仓库里 git config core.fscache false，或删掉 .git/index 重建'
+    }
 
     $quotepath = (& git config --global --get core.quotepath 2>$null)
     if ($quotepath -ne 'false') {
@@ -1394,6 +1522,66 @@ function Invoke-EnvironmentReport {
     if ($longPathsGit -ne 'true') {
         Write-Info '推荐：git config --global core.longpaths true （配合系统长路径开关）'
     }
+
+    Invoke-GitPhantomCheck -Root $Root
+}
+
+# 幽灵变更检测：git status 报 M，但 git diff 是空的。
+#
+# 内容与 index blob 逐字节相同，git 却说它改了。原因是 git 先比 stat
+# （大小/时间戳），stat 变了才去算哈希；被外部工具覆盖写过一遍的文件，
+# stat 常常与 index 里记的不一样，于是先报一个 M。
+#
+# 这不是 git 的错，但它极容易骗人：agent 会以为自己的修改被弄丢了，
+# 或者以为仓库里有什么东西不对。判据只有一条——git diff 为空就是幽灵。
+function Get-GitPhantomFiles {
+    param([string]$Root)
+
+    $git = Get-Command git -ErrorAction SilentlyContinue
+    if ($null -eq $git) { return @() }
+
+    $toplevel = (& git -C $Root rev-parse --show-toplevel 2>$null)
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($toplevel)) { return @() }
+    $toplevel = $toplevel.Trim()
+
+    # -z：路径用 NUL 分隔。非 ASCII 路径在默认输出里会被加引号转义，
+    # 拿那个字符串去比对 diff 的输出会对不上。
+    $statusRaw = & git -C $toplevel status --porcelain -z 2>$null
+    if ($LASTEXITCODE -ne 0 -or $statusRaw.Count -eq 0) { return @() }
+    $statusEntries = (($statusRaw -join "`0") -split "`0")
+
+    $diffRaw = & git -C $toplevel diff --name-only -z 2>$null
+    if ($LASTEXITCODE -ne 0) { return @() }
+    $real = @(($diffRaw -join "`0") -split "`0" | Where-Object { $_ -ne '' })
+
+    $phantoms = New-Object System.Collections.Generic.List[string]
+    foreach ($entry in $statusEntries) {
+        if ($entry.Length -lt 4) { continue }
+        # porcelain v1：前两列是状态码，第三列是空格，第四列起是路径。
+        if ($entry.Substring(0, 2) -notmatch 'M') { continue }
+        $name = $entry.Substring(3)
+        if ($name -eq '') { continue }
+        if ($real -notcontains $name) { $phantoms.Add($name) }
+    }
+    return $phantoms.ToArray()
+}
+
+function Invoke-GitPhantomCheck {
+    param([string]$Root)
+
+    $phantoms = @(Get-GitPhantomFiles -Root $Root)
+    if ($phantoms.Count -eq 0) { return }
+
+    Write-Host ''
+    Write-Warn "$($phantoms.Count) 个幽灵变更：git 说它们改了，但内容与 index 完全一致"
+    foreach ($name in ($phantoms | Select-Object -First 5)) {
+        Write-Host ("    {0}" -f $name) -ForegroundColor DarkGray
+    }
+    if ($phantoms.Count -gt 5) {
+        Write-Host ("    ... 另有 {0} 个" -f ($phantoms.Count - 5)) -ForegroundColor DarkGray
+    }
+    Write-Info '  原因：git index 里的 stat 过期（常见于 core.fscache=true，或文件被外部工具重写过）'
+    Write-Info '  消掉：git add <这些文件>（内容不变，只是刷新 stat）或 git update-index --really-refresh'
 }
 
 # ---------------------------------------------------------------------------
@@ -1455,7 +1643,7 @@ foreach ($command in $commands) {
             foreach ($root in $resolvedPaths) { Invoke-PathScan $root }
         }
         'env' {
-            Invoke-EnvironmentReport
+            Invoke-EnvironmentReport -Root $resolvedPaths[0]
         }
     }
 }
