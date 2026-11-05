@@ -21,9 +21,9 @@ Three decisions worth stating:
     saved controller address.
   * `stop` signals a pid only after that pid is proved to be the core: a recycled pid
     belongs to someone else, and killing it would take an unrelated process with it.
-  * The vendor's rules are passed through untouched in `rule` routing. A whitelist
-    *replaces* them -- rules are first-match wins, so a whitelist added alongside a
-    vendor catch-all would never be reached.
+  * Routing is the configuration's own: the rule list that came with the subscription is
+    passed through untouched. This tool does not add a second way to say where a host
+    should go -- the standard Clash rule list is the one opinion, and `mihomo` executes it.
 """
 
 import gzip
@@ -32,6 +32,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -73,8 +74,6 @@ RELEASE_ASSETS = {
 }
 
 TOP_LEVEL = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*):")
-MATCH_RULE = re.compile(r"^[ \t]*-[ \t]*MATCH,[ \t]*(.+?)[ \t]*$")
-IPV4 = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
 
 
 class CoreError(mihomo.CoreError):
@@ -133,10 +132,15 @@ def validate_subscription(text):
 def fetch_subscription(url):
     """Download a subscription. The environment's proxy is honoured by urllib, which
     matters because a subscription host is often reachable only through one."""
+    # A path is accepted as readily as a link: a Windows drive letter parses as a URL
+    # scheme, so an existing file is recognised before the string is read as a link.
+    if os.path.exists(url):
+        return validate_subscription(read_text(url))
     parsed = urllib.parse.urlsplit(url)
-    if parsed.scheme in ("", "file"):
-        path = urllib.request.url2pathname(parsed.path) if parsed.scheme == "file" else url
-        return validate_subscription(read_text(path))
+    if parsed.scheme == "file":
+        return validate_subscription(read_text(urllib.request.url2pathname(parsed.path)))
+    if parsed.scheme == "":
+        raise CoreError("no such file: %s" % url)
     if parsed.scheme not in ("http", "https"):
         raise CoreError("unsupported subscription scheme %r" % parsed.scheme)
     request = urllib.request.Request(url, headers={"User-Agent": SUBSCRIPTION_USER_AGENT})
@@ -150,89 +154,25 @@ def fetch_subscription(url):
     return validate_subscription(body.decode("utf-8", "replace").replace("\r\n", "\n"))
 
 
-def catch_all_group(subscription_text):
-    """The group the vendor's own catch-all rule targets, so a whitelist lands where the
-    vendor meant traffic to go."""
-    target = None
-    for line in subscription_text.split("\n"):
-        matched = MATCH_RULE.match(line)
-        if matched:
-            value = matched.group(1).strip()
-            if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-                value = value[1:-1]
-            target = value
-    return target
-
-
-def normalize_host(raw):
-    """Reduce what a person writes to what a rule needs: no scheme, no path, no wildcard.
-
-    A CIDR mask is not a path: `10.0.0.0/8` keeps its `/8`, or the entry would silently
-    become a single address.
-    """
-    value = raw.strip().lower().split("#", 1)[0]
-    for prefix in ("http://", "https://", "socks5://"):
-        if value.startswith(prefix):
-            value = value[len(prefix):]
-            break
-    value = value.lstrip("*.")
-    head, separator, mask = value.partition("/")
-    if separator and IPV4.fullmatch(head) and mask.isdigit():
-        return value
-    return head
-
-
-def read_whitelist(path):
-    if not os.path.exists(path):
-        raise CoreError("no whitelist at %s" % path)
-    entries = []
-    for line in read_text(path).splitlines():
-        value = normalize_host(line)
-        if value and value not in entries:
-            entries.append(value)
-    return entries
-
-
-def whitelist_rules(entries, target_group):
-    """One rule per host, then everything else direct. Rules are first match wins."""
-    rules = []
-    for entry in entries:
-        if entry.replace(".", "").isdigit():
-            rules.append("  - IP-CIDR,%s/32,%s,no-resolve" % (entry, target_group))
-        elif "/" in entry:
-            rules.append("  - IP-CIDR,%s,%s,no-resolve" % (entry, target_group))
-        else:
-            rules.append("  - DOMAIN-SUFFIX,%s,%s" % (entry, target_group))
-    rules.append("  - MATCH,DIRECT")
-    return rules
-
-
 # --- configuration --------------------------------------------------------------
 
 
-def assemble(subscription_text, controller_port, secret, mixed_port, whitelist=None):
-    """Rewrite the settings this tool owns, and pass the vendor's node catalog through.
+def assemble(subscription_text, controller_port, secret, mixed_port):
+    """Rewrite the settings this tool owns, and pass everything else through untouched.
 
-    `whitelist` is a list of rule lines, or None to keep the vendor's own rules.
+    What is rewritten is exactly what a running core cannot work without: a controller
+    endpoint, a secret for it, one mixed port, and no LAN exposure. The node catalog, the
+    policy groups and -- above all -- the rule list are the subscription's.
     """
     text = subscription_text.replace("\r\n", "\n")
     lines = text.split("\n")
     output = []
     written = set()
-    skip = False
 
     for line in lines:
         top = TOP_LEVEL.match(line)
-        if skip:
-            if top:
-                skip = False
-            else:
-                continue
         if top:
             key = top.group(1)
-            if whitelist is not None and key == "rules":
-                skip = True
-                continue
             if key == "external-controller":
                 output.append("external-controller: 127.0.0.1:%d" % controller_port)
                 written.add(key)
@@ -269,9 +209,6 @@ def assemble(subscription_text, controller_port, secret, mixed_port, whitelist=N
         output.append("allow-lan: false")
     if "mixed-port" not in written:
         output.append("mixed-port: %d" % mixed_port)
-    if whitelist is not None:
-        output.append("rules:")
-        output.extend(whitelist)
     output.append("")
     return "\n".join(output)
 
@@ -289,24 +226,17 @@ def subscription_is_newer():
     return os.path.getmtime(SUBSCRIPTION_PATH) > os.path.getmtime(CONFIG_PATH)
 
 
-def render(subscription_text, controller_port, mixed_port, whitelist_path=None):
+def render(subscription_text, controller_port, mixed_port):
     """Write the configuration the core will be started from, and say what went in."""
     secret = secret_for_core()
-    whitelist = None
-    if whitelist_path:
-        entries = read_whitelist(whitelist_path)
-        target = catch_all_group(subscription_text)
-        if not target:
-            raise CoreError("the subscription has no MATCH rule, so a whitelist has no group to route through")
-        whitelist = whitelist_rules(entries, target)
-    configuration = assemble(subscription_text, controller_port, secret, mixed_port, whitelist)
+    configuration = assemble(subscription_text, controller_port, secret, mixed_port)
     write_private(CONFIG_PATH, configuration)
     return {
         "path": CONFIG_PATH,
         "controller": "127.0.0.1:%d" % controller_port,
         "secret": secret,
         "mixed_port": mixed_port,
-        "rules": "vendor" if whitelist is None else "%d whitelist rules" % (len(whitelist) - 1),
+        "rules": "the configuration's own",
     }
 
 
@@ -365,6 +295,8 @@ def place_binary(payload, binary_path):
         with open(binary_path, "wb") as handle:
             handle.write(gzip.decompress(payload))
     else:
+        if os.name == "nt" and payload[:2] != b"MZ":
+            raise CoreError("%s is not a Windows executable; give the release archive or the binary" % binary_path)
         with open(binary_path, "wb") as handle:
             handle.write(payload)
     try:
@@ -440,13 +372,34 @@ def ensure_geo_database():
     return GEO_DATABASE_PATH
 
 
+def looks_like_binary(path):
+    """Whether this file is a core, rather than a script or a module that happens to
+    share its name.
+
+    A name is not enough: on Windows `which("mihomo")` also matches `mihomo.py` through
+    PATHEXT, and the skill's own module sits right there -- starting it fails with
+    "not a valid Win32 application".
+    """
+    try:
+        with open(path, "rb") as handle:
+            head = handle.read(4)
+    except OSError:
+        return False
+    if os.name == "nt":
+        return head[:2] == b"MZ"
+    return head[:4] in (b"\x7fELF", b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe") or not head.startswith(b"#!")
+
+
 def find_binary(explicit=None):
     if explicit:
         if not os.path.exists(explicit):
             raise CoreError("no core binary at %s" % explicit)
         return explicit
-    for candidate in (os.path.join(CORE_DIR, BINARY_NAME), shutil.which("mihomo") or ""):
-        if candidate and os.path.exists(candidate):
+    # `mihomo.exe` on Windows, not `mihomo`: the shorter name also matches this skill's
+    # own `mihomo.py` through PATHEXT, and that file is not a program.
+    found = shutil.which(BINARY_NAME)
+    for candidate in (os.path.join(CORE_DIR, BINARY_NAME), found or ""):
+        if candidate and os.path.exists(candidate) and looks_like_binary(candidate):
             return candidate
     raise CoreError("no core binary; run `proxy core install`, or pass --core PATH")
 
@@ -461,6 +414,24 @@ def verify(binary, configuration_path):
         detail = result.stdout.decode("utf-8", "replace").strip().splitlines()[-3:]
         raise CoreError("the core rejected the configuration: %s" % (" / ".join(detail) or "unknown error"))
     return True
+
+
+def free_port(preferred, span=20):
+    """The port to use: `preferred` when it is free, else the next free one.
+
+    A port is this machine's fact, not the provider's, so it is never a question: the
+    default is tried, and a taken one is stepped over with a line saying so.
+    """
+    for candidate in range(preferred, preferred + span):
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            probe.bind(("127.0.0.1", candidate))
+            return candidate
+        except OSError:
+            continue
+        finally:
+            probe.close()
+    raise CoreError("no free port in %d..%d" % (preferred, preferred + span))
 
 
 # --- the process ----------------------------------------------------------------
@@ -624,7 +595,7 @@ def cmd_render(args):
             out("configuration     %s (no subscription to render from; kept)" % CONFIG_PATH)
             return 0
         raise CoreError("no subscription at %s; run `proxy core subscribe URL`" % SUBSCRIPTION_PATH)
-    result = render(read_text(SUBSCRIPTION_PATH), args.controller_port, args.mixed_port, args.whitelist)
+    result = render(read_text(SUBSCRIPTION_PATH), args.controller_port, args.mixed_port)
     out("configuration     %s" % result["path"])
     out("controller        %s" % result["controller"])
     out("secret            set (kept in %s)" % SECRET_PATH)
@@ -649,7 +620,7 @@ def cmd_start(args):
 
     binary = find_binary(args.core)
     if os.path.exists(SUBSCRIPTION_PATH) and subscription_is_newer():
-        result = render(read_text(SUBSCRIPTION_PATH), args.controller_port, args.mixed_port, args.whitelist)
+        result = render(read_text(SUBSCRIPTION_PATH), args.controller_port, args.mixed_port)
     elif os.path.exists(CONFIG_PATH):
         secret = secret_for_core()
         result = {"path": CONFIG_PATH, "controller": "127.0.0.1:%d" % args.controller_port,
@@ -697,6 +668,97 @@ def cmd_status(args):
     return 0
 
 
+def ensure_core():
+    """A core binary on this machine: the one already here, or a freshly fetched one."""
+    try:
+        return find_binary(None)
+    except CoreError:
+        out("core binary       absent, fetching one")
+        return install()
+
+
+def core_answering_elsewhere():
+    """A core that answers but was not started by this tool.
+
+    Starting a second one would take another pair of ports and leave two catalogs of
+    nodes on one machine, so that is said out loud instead of done quietly.
+    """
+    if running_pid():
+        return None
+    discovered = mihomo.discover()
+    if not discovered:
+        return None
+    try:
+        mihomo.Core(discovered["origin"], discovered.get("secret", ""), timeout=2.0).version()
+    except mihomo.CoreError:
+        return None
+    return discovered
+
+
+def cmd_up(args):
+    """`cli + key`: everything else is derived -- the core, its ports, its secret."""
+    elsewhere = core_answering_elsewhere()
+    if elsewhere and not args.replace:
+        out("core              already answering at %s (%s)" % (elsewhere["origin"], elsewhere["source"]))
+        out("")
+        out("nothing to start: that core is already usable -- `proxy core doctor`, `proxy core groups`.")
+        out("to make this tool own the core instead, run again with --replace.")
+        return 1
+
+    binary = ensure_core()
+    if args.key:
+        text = fetch_subscription(args.key)
+        write_private(SUBSCRIPTION_PATH, text)
+        source = "subscription link"
+    elif os.path.exists(SUBSCRIPTION_PATH):
+        text = read_text(SUBSCRIPTION_PATH)
+        source = SUBSCRIPTION_PATH
+    elif os.path.exists(CONFIG_PATH):
+        text = None
+        source = CONFIG_PATH
+    else:
+        raise CoreError("give the subscription link: proxy up <link>")
+
+    was_running = running_pid()
+    if was_running:
+        stop()
+
+    mixed_port = free_port(args.mixed_port)
+    controller_port = free_port(args.controller_port)
+    if text is None:
+        result = {"path": CONFIG_PATH, "controller": "127.0.0.1:%d" % controller_port,
+                  "secret": secret_for_core(), "mixed_port": None, "rules": "as configured"}
+    else:
+        result = render(text, controller_port, mixed_port)
+    ensure_geo_database()
+    verify(binary, result["path"])
+
+    process = spawn(binary, result["path"])
+    origin = mihomo.origin_from_controller(result["controller"]) or "http://127.0.0.1:%d" % controller_port
+    try:
+        wait_for_controller(origin, result["secret"], process)
+    except CoreError:
+        stop()
+        raise
+    mihomo.save_cache({"origin": origin, "secret": result["secret"],
+                       "source": "started from %s" % result["path"], "config": result["path"]})
+
+    out("core              pid %d (%s)" % (process.pid, binary))
+    out("config            %s, from %s" % (result["path"], source))
+    out("mixed port        %s" % (result["mixed_port"] or "see the configuration"))
+    out("controller        %s" % origin)
+    groups = 0
+    try:
+        groups = len(mihomo.groups_of(mihomo.Core(origin, result["secret"], timeout=3.0).proxies()))
+    except mihomo.CoreError:
+        pass
+    if groups:
+        out("policy groups     %d" % groups)
+    out("")
+    out("next              proxy core groups | proxy core use GROUP NODE | proxy core bench | proxy down")
+    return 0
+
+
 def main(argv):
     import argparse
 
@@ -708,6 +770,15 @@ def main(argv):
     )
     sub = parser.add_subparsers(dest="cmd")
 
+    p = sub.add_parser("up", help="install the core if needed, take a subscription link, and start it")
+    p.add_argument("key", nargs="?", help="the subscription link; omit to reuse the one already saved")
+    p.add_argument("--replace", action="store_true",
+                   help="start this tool's own core even when another one already answers")
+    p.add_argument("--mixed-port", type=int, default=DEFAULT_MIXED_PORT)
+    p.add_argument("--controller-port", type=int, default=DEFAULT_CONTROLLER_PORT)
+
+    sub.add_parser("down", help="stop the core this tool started")
+
     p = sub.add_parser("subscribe", help="fetch a subscription into this skill's own directory")
     p.add_argument("url", nargs="?")
     p.add_argument("--from", dest="from_path", default=None, help="read the subscription from a file instead")
@@ -715,7 +786,6 @@ def main(argv):
     p = sub.add_parser("render", help="write the configuration the core starts from")
     p.add_argument("--mixed-port", type=int, default=DEFAULT_MIXED_PORT)
     p.add_argument("--controller-port", type=int, default=DEFAULT_CONTROLLER_PORT)
-    p.add_argument("--whitelist", default=None, help="route only these hosts; everything else direct")
 
     p = sub.add_parser("install", help="place the core binary under this skill")
     p.add_argument("--version", default=None)
@@ -724,7 +794,6 @@ def main(argv):
     p = sub.add_parser("start", help="render if needed, verify, and start the core detached")
     p.add_argument("--mixed-port", type=int, default=DEFAULT_MIXED_PORT)
     p.add_argument("--controller-port", type=int, default=DEFAULT_CONTROLLER_PORT)
-    p.add_argument("--whitelist", default=None)
     p.add_argument("--core", default=None, help="path to the core binary")
 
     sub.add_parser("stop", help="stop the core this tool started")
@@ -735,6 +804,8 @@ def main(argv):
         parser.print_help()
         return 0
     handler = {
+        "up": cmd_up,
+        "down": lambda _args: stop(),
         "subscribe": cmd_subscribe,
         "render": cmd_render,
         "install": cmd_install,

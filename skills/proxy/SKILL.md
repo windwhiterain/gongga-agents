@@ -195,35 +195,55 @@ proxy core reload [path]     # 改完 config.yaml 立刻生效，不重启 core�
 
 `reload` 走 `PUT /configs?force=true`，是唯一"改规则不用重启"的路径。白名单就是这样生效的。
 
-## 一份订阅就是一颗核
+## 一条命令：cli + key
 
-`proxy core` 的上半截是「自己把核跑起来」，所以这条链上不需要任何第三方客户端：
+本 skill 要的输入只有一个：**订阅链接**。其余全是它自己算出来的——核、端口、secret、geo 库。
 
 ```bash
-"$SKILL_DIR/proxy" core install                  # 把 mihomo 放进 $PROXY_HOME/core/（--from 可给本地包）
-"$SKILL_DIR/proxy" core subscribe "<订阅 URL>"    # 订阅就是全部：节点 + 策略组 + 规则
-"$SKILL_DIR/proxy" core start                    # 渲染 config.yaml → mihomo -t 验 → 后台起核
-"$SKILL_DIR/proxy" core status                   # 谁在跑、从哪份文件起来的
-"$SKILL_DIR/proxy" core stop                     # 只停自己起的那个 pid
+"$SKILL_DIR/proxy" up "<订阅链接>"
 ```
 
-- **订阅 URL 就是 provider key**：它换出节点目录、策略组和几千条规则，不需要账号 API。换一个
-  供应商就是换一个 URL——代码里没有一个供应商的名字。
-- **渲染只改写四样东西**，其余原样透传：`external-controller` 与生成的 `secret`、
-  `allow-lan: false`、一个 `mixed-port`，并把订阅自带的 `port`/`socks-port` 关成 `0`。
-  一个 mixed port 是这套东西的接口；两个多余的监听只会和机器上已有的东西抢端口。
-- **secret 生成一次就留着**（`$PROXY_HOME/core/secret`）：重新渲染不会让已经记住的地址失效。
-- **`start` 先 `mihomo -t`**：配置错在启动前报出来，而不是留一颗起来就崩的核。
-- **`start` 只在订阅比配置新（或没有配置）时重新渲染**，手改过的 `config.yaml` 不会被
-  悄悄覆盖；要强制重渲染，用 `core render`。
-- **就绪是控制器答话**，不是端口开着。
-- **`stop` 先证明那个 pid 是核**（pid 与 image 名对得上）才发信号：pid 会被系统回收，回收
-  之后属于别人。
-- **geo 数据库**：带 `GEOIP` 规则的配置要 `geoip.metadb`；没有它，核会自己去下载——而那台
-  必须靠代理才能下载的机器正好下不到。`install` / `start` 都会把它放进 `$PROXY_HOME/core/`。
+一条命令做完这些，每一步都不问你：
 
-`$PROXY_HOME`（默认 `~/.proxy`）整棵可以删掉重来：本 skill 的分流规则在
-`$PROXY_HOME/config.json`，核在 `$PROXY_HOME/core/`（`config.yaml`、`subscription.yaml`、
+1. **核**：`$PROXY_HOME/core/` 里没有就从 release 取（zip 解出可执行文件），并取 `geoip.metadb`
+   ——带 `GEOIP` 规则的配置缺了它，核会自己下载，而必须靠代理去下载的那台机器正好下不到；
+2. **订阅**：HTTP GET（UA `clash-verge/v1`，走环境里的代理），校验顶层有 `proxies:` 与 `rules:`；
+3. **端口**：`mixed-port` 7897、controller 9090 被占就顺着往下找（实测在一台 7897/9090 都被
+   另一颗核占着的机器上，它自己落到 7898/9091 并说出来）；
+4. **配置**：只改写四样东西——`external-controller`、生成的 `secret`（存档复用，重新渲染不失效）、
+   `allow-lan: false`、一个 `mixed-port`，并把订阅自带的 `port`/`socks-port` 关成 `0`；
+   节点、策略组、**规则列表原样透传**：路由是订阅自己的，本 skill 不另加一种说法；
+5. **起核**：先 `mihomo -t` 验（配置错在启动前报出来），再 detached 起，pid 落 `core.pid`；
+   就绪的判据是**控制器答话**，不是端口开着；
+6. **记住**：controller + secret 写进 `$PROXY_HOME/mihomo.json`，之后 `proxy core doctor` 不用问人。
+
+```bash
+"$SKILL_DIR/proxy" up            # 不给链接：复用已经存下的订阅（换链接就是再给一个）
+"$SKILL_DIR/proxy" down          # 只停自己起的那个 pid（先证明那是核，不是回收来的别人的 pid）
+```
+
+之后全是标准那套，本 skill 只是它的壳：
+
+```bash
+"$SKILL_DIR/proxy" core doctor                     # 控制器在哪、能不能答、模式与端口
+"$SKILL_DIR/proxy" core groups | core nodes 组      # 策略组与候选
+"$SKILL_DIR/proxy" core use 组 节点 | core mode …   # 换节点、切模式（读回确认）
+"$SKILL_DIR/proxy" core bench 组 [--throughput]     # 延迟或吞吐
+"$SKILL_DIR/proxy" core reload [PATH]              # 热重载，不重启不断连接
+```
+
+**证明一条连接的去向**，是核自己说的，不是猜的：
+
+```
+level=warning msg="[TCP] dial 🐟 漏网之鱼 (match Match/) 127.0.0.1:62732(curl.exe) --> cp.cloudflare.com:80 error: … i/o timeout"
+```
+
+规则名、策略组、目标、失败原因同一行——所以「502」是**那颗节点坏了**，而不是「代理坏了」。
+实时视图是 controller 的 `/connections`。
+
+手动分步（`up` 就是它们四个的组合，排障时才需要）：`core install`、`core subscribe URL`、
+`core render`、`core start`、`core stop`、`core status`。`$PROXY_HOME`（默认 `~/.proxy`）
+整棵可以删掉重来：分流规则在 `config.json`，核在 `core/`（`config.yaml`、`subscription.yaml`、
 `secret`、`core.pid`、`core.log`）。
 
 还有三件事**不在它手里**，也说清楚，免得以为起完核就完事：
@@ -232,20 +252,7 @@ proxy core reload [path]     # 改完 config.yaml 立刻生效，不重启 core�
 |---|---|
 | 系统代理开关（Windows 注册表 / 环境变量） | 你的 shell 或系统设置；`proxy env` 打印的是本 skill 自己的分流代理 |
 | 开机自启 | 系统的任务计划 / 服务 |
-| 账号 → 订阅 URL（供应商登录） | 供应商的客户端或网页；本 skill 从 URL 开始 |
-
-## 白名单路由
-
-订阅带的规则是供应商的（`rule` 模式：大部分境外流量走代理）。只让列出的 host 走代理是另一种
-路由，它**不能**「在规则里加一条」——规则先命中先定，供应商的 catch-all 会先吃掉所有未列出的 host：
-
-```bash
-"$SKILL_DIR/proxy" core render --whitelist ~/.proxy/hosts.txt    # 或 start --whitelist …
-```
-
-每行一个 host（域名含子域、IPv4、CIDR），整体**替换**订阅的 `rules:`：每条指向订阅自己的
-catch-all 命中的那个策略组，最后 `MATCH,DIRECT`；`#` 之后是注释。实测：清单里没有的 host
-经 mixed port 出去得到直连的结果（`http://cp.cloudflare.com/generate_204` → `204`）。
+| 账号 → 订阅链接（供应商登录） | 供应商的客户端或网页；本 skill 从链接开始 |
 
 ## 出口 IP 只在规则相同时才说明问题
 
@@ -297,9 +304,11 @@ exit note         icanhazip.com follows a different rule, so that address says n
 | `proxy rm VALUE` | 删规则 |
 | `proxy upstream list` / `add` | 管理上游 |
 | `proxy env` | 打印客户端需要的 export |
+| `proxy up [LINK]` | cli + key：没有核就装、有链接就抓订阅、挑空闲端口、渲染、验、起、记住 |
+| `proxy down` | 停掉 `up` 起的那个 pid |
 | `proxy core install [--from FILE]` | 把 mihomo（和 geo 数据库）放进 `$PROXY_HOME/core/` |
 | `proxy core subscribe URL\|--from FILE` | 抓订阅，落到 `$PROXY_HOME/core/subscription.yaml` |
-| `proxy core render [--whitelist FILE]` | 渲染 `config.yaml`，显示 controller / secret / mixed port |
+| `proxy core render` | 渲染 `config.yaml`，显示 controller / secret / mixed port |
 | `proxy core start` / `stop` / `status` | 起核（detached，pid 落在 `core.pid`）/ 只停它 / 报告现状 |
 | `proxy core doctor` | 控制器在哪、能不能答、模式与端口 |
 | `proxy core groups` / `nodes` | 策略组与候选节点 |
@@ -331,7 +340,8 @@ exit note         icanhazip.com follows a different rule, so that address says n
   （见上表）。想让核跟着机器起来，那是系统计划任务的事。
 - `core subscribe` 只吃 Clash 格式的订阅（顶层有 `proxies:` 与 `rules:`）；其他格式的订阅是
   另一件事。
-- 白名单替换的是 `rules:`，`proxy-groups`/`proxies` 不动，所以策略组里仍然可以再 pin 节点。
+- 规则列表是订阅的，本 skill 不生成、不改写：要改路由就改配置里的 `rules:`（标准 Clash 语法），
+  再 `core reload`。
 
 ## 自己验证它
 
@@ -344,14 +354,13 @@ python3 test_mihomo.py     # 48 项：配置抓取/名称解析/排序/bench 还
 
 ```bash
 export PROXY_HOME=<一个空目录>            # ~/.proxy 的替身，删掉就干净
-"$SKILL_DIR/proxy" core subscribe --from <一份 subscription.yaml>
-"$SKILL_DIR/proxy" core render --mixed-port 17897 --controller-port 19090
-"$SKILL_DIR/proxy" core start --core <mihomo 可执行文件>    # 或先 core install
-"$SKILL_DIR/proxy" core doctor                             # 控制器答话 + mixed port 能出去
-"$SKILL_DIR/proxy" core stop                               # pid 从 core.pid 读，不是 $!
+"$SKILL_DIR/proxy" up <一份 subscription.yaml>   # 路径也认，与链接等价
+"$SKILL_DIR/proxy" core doctor                  # 控制器答话 + mixed port 能出去
+"$SKILL_DIR/proxy" core groups | head -3
+"$SKILL_DIR/proxy" down                         # pid 从 core.pid 读，不是 $!
 ```
 
-一轮应当看到：`start` 秒级返回并打印 pid；`doctor` 的 `found via` 是
+一轮应当看到：`up` 从空目录到控制器答话（含下载）二十几秒，之后秒级；`doctor` 的 `found via` 是
 `$PROXY_HOME/core/config.yaml`（删掉 `mihomo.json` 之后也是它，说明发现不依赖缓存）；
 `stop` 之后同一颗核不再应答，而机器上别的核一个都没动。
 ```

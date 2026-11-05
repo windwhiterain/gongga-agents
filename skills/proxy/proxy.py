@@ -751,7 +751,7 @@ def do_doctor(config):
 
 
 # The verbs that own the core process, as opposed to driving one that already runs.
-CORE_LIFECYCLE = ("subscribe", "render", "install", "start", "stop", "status")
+CORE_LIFECYCLE = ("up", "down", "subscribe", "render", "install", "start", "stop", "status")
 
 
 def load_sibling(name):
@@ -789,6 +789,9 @@ def main(argv):
                "connect HOST:PORT --save",
     )
     sub = parser.add_subparsers(dest="cmd")
+    p = sub.add_parser("up", help="install the core if needed, take a subscription link, and start it")
+    p.add_argument("key", nargs="?")
+    sub.add_parser("down", help="stop the core this tool started")
     sub.add_parser("serve", help="run the proxy in the foreground")
     sub.add_parser("rules", help="show the rule table")
     sub.add_parser("status", help="config, listener and last decisions")
@@ -813,6 +816,10 @@ def main(argv):
     if not args.cmd:
         parser.print_help()
         return 0
+
+    if args.cmd in ("up", "down"):
+        forwarded = [args.cmd] + ([args.key] if getattr(args, "key", None) else [])
+        return run_core(forwarded)
 
     config = load_config()
 
