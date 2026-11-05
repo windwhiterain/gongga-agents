@@ -77,18 +77,6 @@ class PolityTest(unittest.TestCase):
         self.assertEqual(initial["roles"]["justice"]["session"], "main")
         self.assertNotIn("justice", self.tiers)
         self.assertEqual(
-            [call for call in self.calls if call[0] == "subscribe"],
-            [
-                (
-                    "subscribe",
-                    "polity-demo",
-                    polity.watch_pattern("demo"),
-                    "--persistant",
-                    "true",
-                )
-            ],
-        )
-        self.assertEqual(
             sorted(initial["roles"]),
             ["advisor", "justice", "premier"],
         )

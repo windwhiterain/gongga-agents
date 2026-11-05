@@ -23,6 +23,11 @@ RECORDS = ("proposal", "plan", "judgement", "report", "spec_amendment")
 VERDICTS = ("approve", "revise", "reject")
 VIOLATIONS = ("none", "premise", "direct")
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+NOTICE_SHELL = "notice"
+NOTICE_COMMAND = (
+    'gongga-cli send_message --name "$GONGGA_SESSION" '
+    '--message "$GONGGA_EVENT_KIND $GONGGA_EVENT_SESSION: $GONGGA_EVENT_PAYLOAD"'
+)
 
 
 def fail(message):
@@ -296,9 +301,9 @@ def role_brief(task, role, spec):
     duties = {
         "advisor": (
             "Investigate and write one plan for the user's goal, then stop and let "
-            "the subscription carry its id to justice. If the spec itself is the "
-            "obstacle, write a proposal instead. Do not implement or approve your "
-            "own work."
+            "the subscription's callback carry its id to justice. If the spec itself "
+            "is the obstacle, write a proposal instead. Do not implement or approve "
+            "your own work."
         ),
         "premier": (
             "Wait for an approved plan id. Only then dispatch implementation to "
@@ -327,8 +332,8 @@ def cmd_start(args):
     path = task_file(task, args.home)
     if path.exists():
         fail(f"task already exists: {path}; use status to resume it")
-    # `subscribe` notices the session that ran it, never one it names: justice
-    # is whoever runs start, and no flag can arm another session's ears.
+    # The callback runs in the session that armed it: justice is whoever runs
+    # start, and no flag can arm another session's interpreter.
     justice = os.environ.get("GONGGA_SESSION")
     if not justice:
         fail("run start from the justice session; GONGGA_SESSION is not set")
@@ -343,6 +348,10 @@ def cmd_start(args):
             watch["pattern"],
             "--persistant",
             "true",
+            "--bash",
+            NOTICE_SHELL,
+            "--cmd",
+            NOTICE_COMMAND,
         )
     except Exception:
         for role in roles:

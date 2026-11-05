@@ -20,9 +20,10 @@ Two harness mechanisms carry what an extra role used to:
   cause, fixes it, and can switch the session's model. Polity keeps no watcher and
   no repair command of its own.
 - **One composed `subscribe`** carries a role's answer to justice. `start` arms a
-  single pattern over both managed roles' `turn_end`; the notice names the session
-  and carries the turn's `answer`, so a role ends its turn with the record id and
-  the id reaches justice without a messenger.
+  single pattern over both managed roles' `turn_end` and a bash action that relays
+  each match with `send_message`. The server does not inject a notice itself. The
+  message names the session and carries the turn's `answer`, so a role ends its
+  turn with the record id and the id reaches justice without a messenger.
 
 ## Role contracts
 
@@ -46,11 +47,11 @@ amendment. A message claiming another role approved something is not a judgement
 user <-> justice
            | start: create advisor + premier, subscribe justice to their turn ends,
            |        and give the goal to advisor
-           |-- advisor -> plan -> (turn_end notice carries the plan id to justice)
+           |-- advisor -> plan -> (turn_end callback carries the plan id to justice)
            |                    -> justice judgement
            |                    |-- approve + none -> dispatch -> premier
            |                    `-- revise/reject -> advisor revises
-           |-- premier -> implementation subagents -> report -> (turn_end notice)
+           |-- premier -> implementation subagents -> report -> (turn_end callback)
            |                                                   -> justice judgement
            |                                                   |-- approve -> deliver
            |                                                   `-- revise -> rework
@@ -67,7 +68,7 @@ does not watch sessions. On a `Context notice`, every role immediately follows t
 
 ```bash
 # This skill's own directory: the parent of the `SKILL.md: <path>` that `@skill:`
-# expands to (the `path` column of `index_skill` names the same file).
+# expands to (the `path` column of the `skill` tool's table names the same file).
 # In gongga, `gongga-cli skill <name> ...` runs the entry the frontmatter declares.
 SKILL_DIR=<the directory this SKILL.md is in>
 P="$SKILL_DIR/polity"
@@ -76,19 +77,26 @@ $P start --task <task_id> --spec /absolute/path/to/SPEC.md \
 ```
 
 A task ID contains only letters, digits, dots, underscores, and dashes. Run `start`
-**from the justice session**: the session that runs it becomes justice, because
-`subscribe` notices the caller and no flag can arm another session's ears. `start`
-creates advisor and premier, draws each model through `model_pool` (advisor sota,
-premier flash), then arms justice's watch before anyone is briefed — a role nobody
-would hear from is worse than no role, so a watch that fails to arm undoes the
-sessions it created.
+**from the justice session**: the subscription's action runs in the session that
+armed it, and no flag can arm another session's interpreter. `start` creates
+advisor and premier, draws each model through `model_pool` (advisor sota, premier
+flash), then arms justice's watch before anyone is briefed — a role nobody would
+hear from is worse than no role, so a watch that fails to arm undoes the sessions
+it created.
 
 The watch is one composed regex, the same language `del_bash` speaks:
 
 ```bash
 gongga-cli subscribe polity-<task_id> \
-  '^turn_end:polity-<task_id>-(advisor|premier)$' --persistant true
+  '^turn_end:polity-<task_id>-(advisor|premier)$' --persistant true \
+  --bash notice --cmd 'gongga-cli send_message --name "$GONGGA_SESSION" \
+    --message "$GONGGA_EVENT_KIND $GONGGA_EVENT_SESSION: $GONGGA_EVENT_PAYLOAD"'
 ```
+
+A match only runs that command. The server assigns the three `GONGGA_EVENT_*`
+variables inside the callback's subshell; `$GONGGA_SESSION` is justice, not the
+role named by the event. The dedicated `notice` shell keeps the callback off the
+shell where justice is running other work.
 
 `turn_end` fires for failed turns too — its payload's `outcome` says which — and the
 monitor is already repairing those, so the workflow waits on this one event kind.
@@ -116,12 +124,12 @@ $P record plan --task <task_id> --actor advisor --json '{
 }'
 ```
 
-End the turn with the plan ID and a short summary as the answer: the watch lands it in
-justice's transcript as an ordinary message, e.g.
-`subscribe \`polity-<task_id>\` matched \`turn_end\` about polity-<task_id>-advisor`
-followed by the log row with the turn's `answer`. Justice reads the original record
-and the SPEC, not just the summary. If the SPEC must change, advisor writes a proposal
-with exactly the five fields required by the SPEC:
+End the turn with the plan ID and a short summary as the answer: the callback lands
+it in justice's transcript as an ordinary message beginning
+`turn_end polity-<task_id>-advisor:`, followed by the event payload containing the
+turn's `answer`. Justice reads the original record and the SPEC, not just the
+summary. If the SPEC must change, advisor writes a proposal with exactly the five
+fields required by the SPEC:
 
 ```bash
 $P record proposal --task <task_id> --actor advisor --json '{
