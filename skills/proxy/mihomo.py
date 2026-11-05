@@ -44,7 +44,9 @@ import urllib.request
 DEFAULT_PORT = 9090
 DEFAULT_TEST_URL = "http://cp.cloudflare.com/generate_204"
 DEFAULT_SPEED_URL = "https://speed.cloudflare.com/__down?bytes=20000000"
-CACHE_PATH = os.path.join(os.path.expanduser("~"), ".proxy", "mihomo.json")
+PROXY_DIR = os.environ.get("PROXY_HOME") or os.path.join(os.path.expanduser("~"), ".proxy")
+CACHE_PATH = os.path.join(PROXY_DIR, "mihomo.json")
+CORE_CONFIG_PATH = os.path.join(PROXY_DIR, "core", "config.yaml")
 PROBE_PORTS = (9090, 9091, 9097, 6170)
 GROUP_TYPES = ("Selector", "URLTest", "Fallback", "LoadBalance")
 NOTICE_PATTERN = re.compile(r"未读|公告|notice", re.I)
@@ -97,11 +99,19 @@ def origin_from_controller(value, default_port=DEFAULT_PORT):
 
 
 def core_config_paths():
+    """Where a core keeps its own configuration, best source first.
+
+    The first entry is the one `proxy core start` renders, so a core this skill started is
+    found again with no saved address. The rest are the conventional locations, so a core
+    started by hand or by anything else is found too. A client's private bookkeeping is
+    deliberately absent: a client is one way of producing a configuration, not a place to
+    read one from.
+    """
     home = os.path.expanduser("~")
     return [
+        CORE_CONFIG_PATH,
         os.path.join(home, ".config", "mihomo", "config.yaml"),
         os.path.join(home, ".config", "mihomo", "config.yml"),
-        os.path.join(home, ".kualemon", "mihomo", "config.yaml"),
         os.path.join(home, "mihomo", "config.yaml"),
         "/etc/mihomo/config.yaml",
     ]
@@ -170,23 +180,6 @@ def discover(explicit_controller=None, explicit_secret=None):
                 "source": path,
                 "config": path,
             }
-
-    # A vendor client stores the secret it generated; reading it is a convenience, and
-    # everything above already works when that client is not installed.
-    state_path = os.path.join(os.path.expanduser("~"), ".kualemon", "state.json")
-    try:
-        with open(state_path, "r", encoding="utf-8") as handle:
-            state = json.load(handle)
-    except (OSError, ValueError):
-        state = {}
-    core = state.get("core") or {}
-    if core.get("controllerPort"):
-        return {
-            "origin": origin_from_controller("127.0.0.1:%s" % core["controllerPort"]),
-            "secret": state.get("controllerSecret") or "",
-            "source": "client state %s" % state_path,
-            "config": core.get("configPath"),
-        }
 
     for port in PROBE_PORTS:
         origin = "http://127.0.0.1:%d" % port
@@ -623,7 +616,11 @@ def cmd_reload(core, discovered, path):
 
 
 def main(argv):
-    parser = argparse.ArgumentParser(prog="proxy core", description="drive a mihomo core through its API")
+    parser = argparse.ArgumentParser(
+        prog="proxy core",
+        description="drive a mihomo core through its API",
+        epilog="owning the process instead: subscribe URL|--from FILE, render, install, start, stop, status",
+    )
     parser.add_argument("--controller", help="host:port of the running core (default: discover)")
     parser.add_argument("--secret", help="API secret, when one is set")
     sub = parser.add_subparsers(dest="cmd")
@@ -725,13 +722,19 @@ def reader_went_away(error):
 
 
 def run(argv):
+    """The one place that turns a failure into an exit code for the API half."""
+    return funnel(main, argv)
+
+
+def funnel(handler, argv):
     """The one place that turns a failure into an exit code.
 
-    Both `python mihomo.py` and `proxy core …` come through here: an error handler that
-    only exists in one of the two entry points is an error handler that does not run.
+    Every `proxy core …` verb comes through here, the lifecycle verbs included: an error
+    handler that only exists in one of the entry points is an error handler that does not
+    run.
     """
     try:
-        return main(argv)
+        return handler(argv)
     except CoreError as error:
         print("proxy core: %s" % error, file=sys.stderr)
         return 1

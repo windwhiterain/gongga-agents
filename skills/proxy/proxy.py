@@ -750,18 +750,30 @@ def do_doctor(config):
     return 0 if problems == 0 else 1
 
 
-def run_core(argv):
-    """Hand `proxy core ...` to the core-API client.
+# The verbs that own the core process, as opposed to driving one that already runs.
+CORE_LIFECYCLE = ("subscribe", "render", "install", "start", "stop", "status")
 
-    The client lives in its own module because it talks to a different thing -- a
-    running routing core -- but it is reached through the same entry point, so there is
-    one name to remember rather than one per layer.
+
+def load_sibling(name):
+    """Load a module that sits next to this file, by name.
+
+    `proxy` is a single file that may be run from anywhere, so the skill's own directory
+    is put on the path once instead of every entry point repeating the dance.
     """
-    import importlib.util
+    import importlib
     here = os.path.dirname(os.path.abspath(__file__))
-    spec = importlib.util.spec_from_file_location("mihomo", os.path.join(here, "mihomo.py"))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    return importlib.import_module(name)
+
+
+def run_core(argv):
+    """Hand `proxy core ...` to the module that owns that half.
+
+    Two modules, one entry point: `corectl` produces and runs the core, `mihomo` drives
+    one that is running. The user has one name to remember rather than one per layer.
+    """
+    module = load_sibling("corectl" if argv and argv[0] in CORE_LIFECYCLE else "mihomo")
     return module.run(argv)
 
 
@@ -770,8 +782,9 @@ def main(argv):
         return run_core(argv[1:])
     parser = argparse.ArgumentParser(
         prog="proxy",
-        description="per-host routing proxy; `proxy core ...` drives a running mihomo core",
-        epilog="core subcommands: doctor, groups, nodes GROUP, use GROUP NODE, "
+        description="per-host routing proxy; `proxy core ...` owns or drives a mihomo core",
+        epilog="core lifecycle: subscribe URL|--from FILE, render, install, start, stop, status\n"
+               "core API: doctor, groups, nodes GROUP, use GROUP NODE, "
                "bench [GROUP] [--throughput], mode [rule|global|direct], reload [PATH], "
                "connect HOST:PORT --save",
     )
