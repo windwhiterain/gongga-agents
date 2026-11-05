@@ -1244,6 +1244,11 @@ cache_ttl_tier = "隐式（不指定 cache_control 就落这里；显式另算�
 id = "tencent-tokenhub"
 name = "腾讯云 TokenHub"
 kind = "vendor"
+# 官方《提升 Cache 命中率指南》给了两条调高命中的手段：请求体里 `prompt_cache_key`
+# （填 conversation_id）与 HTTP 头 `X-Session-ID`（把人固定到同一推理实例）。两条都是免费的路由
+# 提示、都不创建缓存；服务端给两者的值都是会话目录。本机没有这把 key，两条都未实测。
+cache_affinity = true
+cache_session_header = true
 key_env = "TENCENT_API_KEY"
 key_prefix = "sk-tp-"
 homepage = "https://cloud.tencent.com/product/hub"
@@ -1656,6 +1661,9 @@ cache_ttl_tier = "隐式（唯一一档；过期时间官方 unverified，1 小�
 id = "bytedance-ark"
 name = "字节跳动 火山方舟（Doubao Seed）"
 kind = "vendor"
+# 官方把 `prompt_cache_key` 记为路由提示（每个值每分钟最多 15 次请求），配隐式缓存用；
+# 它不创建缓存、不计费，只提高请求落在已持有该前缀的节点上的概率。本机没有这把 key，未实测。
+cache_affinity = true
 plan_kind = "coding_plan"
 key_env = "ARK_API_KEY"
 homepage = "https://ark.volcengine.com"
