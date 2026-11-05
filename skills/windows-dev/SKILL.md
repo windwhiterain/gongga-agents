@@ -141,19 +141,9 @@ if not sys.flags.no_site:      # 638：-S 关掉的就是这个开关
 `python -c` 与 `python foo.py` 都不跑它；`.pth` 里写 `import ...` 只在 **site 目录**
 里被处理，`PYTHONPATH` 上的 `.pth` 根本不读。
 
-gongga 里这段代码应当由 home 的 `config.toml` 提供：服务端读 `[tools.python] init`，
-把它落成 `<home>/lib/sitecustomize.py`，再把 `<home>/lib` 放进**它自己起的子进程**的
-`PYTHONPATH`（不写 site-packages，不动机器上别的 python）。
+配置就是一个文件：**`sitecustomize.py`**，内容如下：
 
-这是设计，不是现状：本机这份服务端还没有这个键（`FilePython` 里只有
-`program`/`args`/`timeout_ms`/`max_output_chars`），键不存在时它什么都不做。所以形状
-先记在这里，落地前真正生效的是下面那条兜底。
-
-```toml
-[tools.python]
-# 每个由 harness 启动的 Python 进程，在跑你的代码之前先执行这段。
-# 只改默认：显式 newline="\r\n" 的调用照旧。
-init = '''
+```python
 import builtins, io, pathlib
 
 _open = builtins.open
@@ -172,15 +162,14 @@ def _write_text_lf(self, data, encoding=None, errors=None, newline=None):
 builtins.open = _open_lf
 io.open = _open_lf
 pathlib.Path.write_text = _write_text_lf
-'''
 ```
 
-在它落地之前等价做法是两步，与 gongga 无关，任何 Windows 上的 python 都适用
-（而且它不依赖服务端版本，所以现在就该这么用）：
+放哪儿：一个**不随仓库移动**的稳定目录，再让启动 python 的地方看见它。两步，与具体
+harness 无关：
 
 ```bash
-# 1. sitecustomize.py 放在一个稳定目录（别放 site-packages：那是改全机器的 python）
-# 2. 让启动 python 的地方看见它
+# 1. sitecustomize.py 放进这个目录（别放 site-packages：那是改全机器的 python）
+# 2. 让启动 python 的进程看见它——写进 shell profile，或每条命令前 export
 export PYTHONPATH=/c/Users/me/.agents/python
 ```
 
