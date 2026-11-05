@@ -104,6 +104,38 @@ could not focus 198124 "SPEC.md - gongga"; refusing to send input blind
 
 不带 `--window` 时先打印当前前台是谁：`target: foreground hwnd=... "..."`。
 
+## 浏览器：读一页正文
+
+浏览器没有「正文」这个控件：整页是一个 `Document`，`tree` 只给一个巨大的矩形，
+里面的链接、段落、按钮都不是可点的对象。所以读网页靠**快捷键导航 + 剪贴板落地**，
+而不是 `tree` 定位：
+
+```bash
+cu windows                                # 找到浏览器的 hwnd 和标题
+cu key --window $W ctrl+l                 # 焦点进地址栏
+cu type --window $W "https://example.com/article"
+cu key --window $W enter
+sleep 3
+cu shot --window $W --scale 0.5           # 页面真的换了吗
+cu click 1280 700 --window $W             # 点正文：不是链接、不是地址栏、不是标签栏
+cu key --window $W ctrl+a
+cu shot --window $W --scale 0.5           # 整页变蓝才算选中了正文
+cu key --window $W ctrl+c
+powershell -NoProfile -Command "Set-Clipboard -Value ''"              # 先清空
+sleep 1
+powershell -NoProfile -Command "Get-Clipboard -Raw | Out-File -Encoding utf8 C:\\path\\page.txt"
+```
+
+然后 `read_file` 读那个文件（或 `bash head -40`）。**别让正文回到 bash 的 stdout**：
+网页里有引号、反引号、`$`，经过一次 shell 就变成另一种文本；写进文件再读，字节就是字节。
+
+为什么每一步都截图：这条链上每一步都可能**静默落在别的地方**——焦点还在地址栏、
+点击落到标签栏切走了页面、`ctrl+c` 复制的是上一轮的东西。每个动作一张图，是唯一能
+在下一次动作之前发现的信号；猜坐标盲点两次之后你已经在另一个标签里打字了。
+
+非 Windows：剪贴板那一步换 `xclip -selection clipboard -o`（X11）或 `pbpaste`（macOS），
+本 skill 只在 Windows 上实测过这条链。
+
 ## 安全边界
 
 这是**用户的真实桌面**，不是沙箱：
@@ -144,6 +176,10 @@ could not focus 198124 "SPEC.md - gongga"; refusing to send input blind
 | `key enter` 报成功但没反应（Linux） | X11 的键名是 `Return`；`xdotool` 遇到未知键名时打印 `No such key name` 却仍然 exit 0 | `culinux.py` 显式映射友好名→keysym，未知键直接 ValueError，并检查 stderr |
 | Windows 上多出「Windows 输入体验」之类幽灵窗口 | UWP 隐藏窗口，`EnumWindows` 看得见但点不着 | 用 `DwmGetWindowAttribute(DWMWA_CLOAKED)` 过滤 |
 | `--window` 被 PowerShell 当自己的参数 | PS 参数解析套在脚本参数上 | PS 回落版走 `CU_ARGV` 环境变量（`\x1f` 分隔） |
+| `ctrl+a` 复制回一串 URL | 焦点还在地址栏（`ctrl+l` 之后没点进正文，或点击落空） | `ctrl+a` 之后截图：整页变蓝才是正文；落地后看第一行是不是 `http` |
+| 点击把页面切到别的标签、或别的应用 | 坐标从上一帧算的，或落在了标签栏/窗口外；`--window` 只保证把窗口拉前台，不保证坐标在它里面 | 坐标从最近一张 `shot` 算，点击前后各一张图 |
+| `Get-Clipboard -Raw` 拿回上一轮的旧文本 | `ctrl+c` 没生效，剪贴板没变 | 复制前先 `Set-Clipboard -Value ''`，落地后确认文件非空 |
+| 选中的正文缺头少尾 | 慢页面 / 单页应用还没渲染完 | 截图看到正文出现再选；必要时隔一秒连拍两张 |
 | 这版 PowerShell 缺 `[ushort]`/`[uint]` 别名 | PS 5.1 的行为 | PS 回落版用全限定 `[System.UInt16]` |
 
 ## 一个完整例子
