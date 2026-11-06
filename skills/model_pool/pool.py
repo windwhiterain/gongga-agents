@@ -41,12 +41,13 @@ DEFAULTS = {
     "pool": {
         # How long one reading answers for. `0` asks the provider every draw.
         "refresh": 300,
-        # How long one quota script may take before its provider is unscored.
+        # How long one quota script may take before its provider reports nothing.
         "timeout": 8,
-        # A provider no script could report on is still drawable, unscored.
-        "fail_open": True,
-        # How an unscored route competes inside its tier: a route no number
-        # describes is neither excluded nor privileged, it carries this share.
+        # There is no `fail_open`: an allowance nobody could read is zero, so a
+        # route reporting nothing is not drawn. A draw that guesses is how an
+        # unpurchased provider was handed out with an unknown quota beside it.
+        # How an unscored route competes inside its tier: a route whose allowance
+        # was read but stated as a wallet rather than a window carries this share.
         "unscored_share": 0.5,
         # How long a mark keeps a provider or a route out of the draw.
         "cooldown": 1800,
@@ -163,6 +164,7 @@ class Route:
         self.unit = None
         self.reading = None
         self.usable = None
+        self.otherwise_usable = None
         self.why = "not read yet"
         self.share = None
         self.multiplier = 0.0
@@ -218,7 +220,10 @@ def evaluate(route, catalog, config, state):
 
     `usable` is three-valued along the way: `True` with allowance, `False` when the
     provider itself says there is none, `None` when nothing could be reported on --
-    which `fail_open` then decides.
+    which counts as no allowance, because a quota nobody could read is zero.
+
+    `otherwise_usable` is the same verdict with this machine's own marks lifted, so
+    the draw can relax a mark without relaxing an allowance or a credential.
     """
     pool = config["pool"]
     query = catalog.quota_target(route.provider)
@@ -243,8 +248,8 @@ def evaluate(route, catalog, config, state):
     elif route.reading is None and cached.get("failure"):
         route.why = cached["failure"]
     if route.usable is None:
-        route.usable = bool(pool.get("fail_open", True))
-        route.why = ("drawable unscored: " if route.usable else "unscored and fail_open is off: ") + route.why
+        route.usable = False
+        route.why = f"no allowance to count, so none is counted: {route.why}"
     elif route.share is None and route.usable:
         route.why += ", unscored"
     if cached.get("failure") and route.reading is not None:
@@ -259,6 +264,10 @@ def evaluate(route, catalog, config, state):
         route.verdict = entitlement.REFUSED
         route.usable = False
         route.why = f"probed out: {probe.get('detail') or 'the provider denies this model'}"
+    # What the route would be if this machine's own mark were lifted: the draw's
+    # only relaxation, so a mark can be outvoted by a dry pool and an allowance
+    # cannot.
+    route.otherwise_usable = route.usable
     for key in (route.key, route.provider["id"]):
         mark = quota.marked(state, key)
         if mark is not None:
@@ -314,21 +323,20 @@ def draw(routes, order, weights, rng):
         tier = weighted_pick(live, weights, rng)
         route, how = pick_route(by_tier[tier], rng)
         return route, f"tier {tier} drawn at weight {weights[tier]:g}; {how}"
-    # Nothing is usable: a spawn still has to run somewhere. Relax the marks
-    # first, then the allowance, and say so on stderr.
-    unmarked = [route for route in routes if route.mark is None]
-    for candidate, why in ((unmarked, "no route is usable"),
-                           (routes, "every route is marked or unusable")):
-        if not candidate:
-            continue
+    # Nothing is usable: a spawn still has to run somewhere. A mark is this
+    # machine's own temporary judgement, so the draw may lift it; a credential,
+    # an allowance, an entitlement the provider refuses are facts about the route,
+    # and wanting a model does not make a fact untrue.
+    relaxed = [route for route in routes if route.otherwise_usable]
+    if relaxed:
         by_tier = {}
-        for route in candidate:
+        for route in relaxed:
             by_tier.setdefault(route.tier, []).append(route)
         live = [tier for tier in order if by_tier.get(tier)]
         tier = weighted_pick(live, {key: weights.get(key, 0) or 1 for key in live}, rng)
         route, how = pick_route(by_tier[tier], rng)
-        return route, f"{why}; falling back to {tier}: {how}"
-    return None, "the roster has no model to draw"
+        return route, f"every usable route is marked; falling back to {tier}: {how}"
+    return None, "no route has a credential, an allowance above its floor and no refusal"
 
 
 def explain_empty(catalog, config, preference, provider_id, tier_id):
@@ -432,7 +440,7 @@ def cmd_pick(args, config, preference, catalog):
     rng = random.Random(args.seed) if args.seed is not None else random.Random()
     route, how = draw(routes, order, weights, rng)
     if route is None:
-        raise SystemExit("the roster has no model to draw")
+        raise SystemExit(f"nothing to draw: {how}")
     if not route.usable:
         # A spawn has to run somewhere, so the draw answers even when nothing is
         # left; saying so on stderr keeps the model on stdout exactly one line.

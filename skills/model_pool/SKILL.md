@@ -19,8 +19,8 @@ $S pick --tier flash --provider deepseek-official   # -> deepseek-official/deeps
 ```
 
 ```bash
-gongga-cli set_session --session scout --model "$($S pick --provider deepseek-official --tier flash)"
-gongga-cli send_message --session scout --message "read the failing test and report"
+gongga-cli set_session --name scout --model "$($S pick --provider deepseek-official --tier flash)"
+gongga-cli send_message --name scout --message "read the failing test and report"
 ```
 
 The server resolves `<provider>/<model id>` exactly as this prints it, so the
@@ -63,22 +63,23 @@ provider or you already made, not a guess:
 | You marked the provider or the route | `model_pool mark` |
 | This machine holds no credential for it | no entry in `~/.agents/keys.toml`, and `key_env` in no environment variable |
 | The provider denies this model for this account | one cheap probe: 401 / 402 / 403 / 404, or a body that says access was denied |
-| `fail_open` is off and nothing could be reported | `~/.agents/model_pool.toml` |
+| Nothing could be reported on | no reading, a timeout, or a provider the roster publishes no quota for — **no allowance known counts as none** |
 | Its multiplier is zero | `preference.toml`, next to this skill |
 
 The credential row is why a draw never hands a spawn a model the server would
 refuse: the server resolves `--model` against the same roster, and a provider
 with no key there fails the very `set_session` this tool feeds.
 
-Anything else the scripts could not report on — a timeout, a provider the roster
-publishes no quota for, a script whose own variable is missing — is still
-drawable and simply unscored (`fail_open`, on by default). Nothing reported is
-not a refusal, and the "no credential" case is already caught above.
+**A quota nobody could read is zero, not unknown.** A timeout, a provider the
+roster publishes no quota for, a script whose own variable is missing: all of
+them leave a route with no allowance to draw on, so it is not drawn. Treating a
+missing number as an open door is how an unpurchased provider got handed out
+with `-` in the share column beside it.
 
-When *nothing* is usable the draw answers anyway, because a spawn has to run
-somewhere, and says `model_pool: nothing is usable, drawn anyway` on stderr. That
-line is the signal to hand the child a small task or to wait, not to trust the
-route.
+When *nothing* is usable the draw may lift **a mark** — this machine's own
+temporary judgement — and says `model_pool: nothing is usable, drawn anyway` on
+stderr. It never lifts a credential, an allowance or a refusal: with none of
+those left it prints nothing on stdout and exits non-zero saying why.
 
 ## The check the roster cannot do
 
@@ -158,8 +159,7 @@ defaults live in `pool.py`:
 [pool]
 refresh = 300            # seconds a cached reading answers for
 timeout = 8              # seconds one quota script may take
-fail_open = true         # a provider that reported nothing is still drawable
-unscored_share = 0.5     # how an unscored route competes inside its tier
+unscored_share = 0.5     # how a route with a wallet reading competes in its tier
 cooldown = 1800          # default mark length, seconds
 exclude = []             # provider ids never drawn, e.g. ["local-qwen3"]
 probe_refresh = 86400    # seconds an entitlement verdict answers for
@@ -260,8 +260,9 @@ test  = 0.00     # 默认 0：只在你点名 --tier test 时才抽得到
   query that fails is cached too, so a provider with no credential is asked once
   per `refresh` instead of once per draw.
 - **Nothing else.** No network call of its own, no model turn, no API key of its
-  own: a provider whose script needs a variable this machine does not have is
-  drawn unscored and says so in `status`.
+  own: a provider whose script needs a variable this machine does not have
+  reports nothing, which counts as no allowance, so the route is out and
+  `status` names the missing variable.
 
 ## Read the answer before trusting it
 
@@ -274,8 +275,10 @@ flash minimax-cn/MiniMax-M3.1-Flash  usable  0.85  85 left (3s old)
 pro   minimax-cn/MiniMax-M3          usable  0.85  85 left (3s old)
 ```
 
-`share` is the fraction of its own tightest window; `-` means unscored, which is
-a wallet or a provider that answered nothing, and `out` is a route the draw will
-not take — the `why` column always names which of the reasons above it was. The second line is the script's
+`share` is the fraction of its own tightest window; `-` means the reading states
+no window to score — a wallet balance, or nothing at all, and the two are told
+apart by `usable`: a wallet is drawn on a nominal share, a provider that answered
+nothing is `out`. `out` is a route the draw will not take — the `why` column
+always names which of the reasons above it was. The second line is the script's
 own `detail`, so a floor that looks wrong can be traced to the provider's number
 rather than to this tool.
