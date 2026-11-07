@@ -155,10 +155,13 @@ def main(argv):
         if any(c.isspace() for c in path):
             note("!! %r contains a space; the @ reference cannot be parsed -- "
                  "capture somewhere else" % path)
-        # The spelling the server parses. A bare `@<path>` was the old one, and
-        # the server drops it silently now: no prefix, no attachment. See the
-        # harness's own `image` skill for the whole rule.
-        out("@image: " + path)
+        if ")" in path:
+            note("!! %r contains ')'; that closes the @image(...) reference, so the "
+                 "server reads a shorter path -- capture somewhere else" % path)
+        # The spelling the server parses: `@image(<path>)`, the same meta the SPEC
+        # defines. A bare `@<path>` and the older `@image: <path>` are both read as
+        # prose now -- no prefix, no attachment, and nothing warns about it.
+        out("@image(%s)" % path)
         return 0
 
     if args.cmd == "tree":

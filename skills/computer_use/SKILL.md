@@ -41,7 +41,7 @@ Linux 还有一层分裂：X11 下这些工具直接驱动会话；**Wayland 按
 ## 主循环：看 → 定位 → 动 → 再看
 
 ```bash
-cu shot --scale 0.5          # 打印 `@image: C:\...png`，harness 自动把图交给模型
+cu shot --scale 0.5          # 打印 `@image(C:\...png)`，harness 自动把图交给模型
 cu tree --depth 5            # 控件名 + 屏幕矩形
 cu click 1719 851 --window 47974752
 cu type --window 47974752 "你好"
@@ -77,16 +77,16 @@ captured 577x352 src=1922x1173@467,144 scale=0.3
 
 ## 截图为什么能直接变成图
 
-`shot` 打印一行 `@image: C:\...\cu-xxxx.png`。harness 扫描**每个工具**的输出，
-认出 `@image:` 就：读文件 → 上传 Files API → 请求里作为 `input_image{file_id}` 发出。
-**不是 base64**，同一文件一轮只传一次。
+`shot` 打印一行 `@image(C:\...\cu-xxxx.png)`。harness 扫描**每个工具**的输出，
+认出 `@image(` 就：读文件 → 上传 Files API → 请求里作为 `input_image{file_id}` 发出。
+**不是 base64**，同一文件一轮只传一���。
 
-- **必须是 `@image:` 这个前缀**。裸的 `@C:\...png` 服务端**不认识、静默丢弃**——
-  2026-10-31 那条旧规则（"`@` 开头的图片扩展名"）已经删了，脚本里写字面量 `@路径`
-  的都会白跑一趟。同一个文件不必再 `image/show` 一次。
-- **路径不能有空格**——按空白切词，`@image: C:\...\has space.png` 只读到前半段。
-  `shot` 检测到空格会告警。
-- 模型不支持图片时引用被跳过，日志有 warn——**打印了 `@image:` 不等于你看到了**。
+- **必须是 `@image(<path>)` 这个形式** —— 它就是 SPEC 里的 meta。这不是"前缀"，是
+  一个有开有合的括号：服务端 `Reference::of_prefix` 要求 `@image(`，`meta::mentions`
+  再按括号取到 `)`。所以 `@image: <path>`（曾经的写法）和裸 `@<path>` **都只是普通文字**，
+  服务端不认识、**也不会告警**——2026-11-07 就是这么白拍了一整轮的截图。
+- **路径不能有空格，也不能有 `)`**：空格把名字截断，`)` 提前闭合引用。`shot` 两种都告警。
+- 模型不支持图片时引用被跳过，日志有 warn——**打印了 `@image(...)` 不等于你看到了**。
 
 实测确认过：把随机码画进图、再看图读出来，与封存答案一致。
 
@@ -152,7 +152,7 @@ powershell -NoProfile -Command "Get-Clipboard -Raw | Out-File -Encoding utf8 C:\
 |---|---|
 | `cu doctor` | 自检：DPI、控件树、INPUT 结构、截图 |
 | `cu windows` | 顶层窗口：hwnd、pid、矩形、标题（`*` 是前台） |
-| `cu shot [--window W] [--scale F] [--out P]` | 截图，打印 `@image: <路径>` |
+| `cu shot [--window W] [--scale F] [--out P]` | 截图，打印 `@image(<路径>)` |
 | `cu tree [--window W] [--depth N] [--max N]` | 控件树：类型、名字、屏幕矩形 |
 | `cu click X Y [--double] [--right] [--window W]` | 点击 |
 | `cu type [--window W] <文本>` | 输入文本（Unicode，中文正常） |

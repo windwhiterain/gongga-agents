@@ -34,6 +34,7 @@ import time
 HOME_DIR = os.environ.get("BROWSER_HOME", os.path.join(os.path.expanduser("~"), ".agents", "browser"))
 PORT_FILE = os.path.join(HOME_DIR, "port")
 CHOICE_FILE = os.path.join(HOME_DIR, "tab")
+MODE_FILE = os.path.join(HOME_DIR, "mode")
 
 
 def note(line):
@@ -71,14 +72,40 @@ def port():
 
 
 def connect(pw):
-    """The browser, or a message that says which step failed."""
+    """The browser, or a message that says which step failed.
+
+    # Invariant
+
+    Two doors, tried in order, whichever browser this is. A browser started with a
+    port of its own answers HTTP discovery on that port, so playwright finds the
+    targets itself. A real user profile is reached through
+    edge://inspect/#remote-debugging, and that server speaks CDP on a bare
+    websocket with no discovery endpoint beside it. Asking both in that order is
+    what lets one code path drive either, without asking which it is.
+    """
     number = port()
     if number is None:
-        raise SystemExit("no browser recorded; run 'browse start' first")
+        raise SystemExit("no browser recorded; run 'browse start' or 'browse attach' first")
+    failure = None
+    for endpoint in ("http://127.0.0.1:%d" % number,
+                     "ws://127.0.0.1:%d/devtools/browser" % number):
+        try:
+            return pw.chromium.connect_over_cdp(endpoint)
+        except Exception as exc:
+            failure = exc
+    hint = ('; tick "Allow remote debugging for this browser instance" at '
+            "edge://inspect/#remote-debugging and answer Allow on the prompt") if mode() == "attached" else (
+            "; run 'browse start'")
+    raise SystemExit("cannot reach the browser on port %d (%s)%s" % (number, first_line(failure), hint))
+
+
+def mode():
+    """Whose browser the recorded port is: `own` unless `attach` recorded otherwise."""
     try:
-        return pw.chromium.connect_over_cdp("http://127.0.0.1:%d" % number)
-    except Exception as exc:
-        raise SystemExit("cannot reach the browser on port %d (%s); run 'browse start'" % (number, exc))
+        with open(MODE_FILE, encoding="utf-8") as handle:
+            return handle.read().strip() or "own"
+    except OSError:
+        return "own"
 
 
 def current_page(browser):
@@ -230,11 +257,14 @@ def main(argv):
                 return 0
 
             if args.cmd == "shot":
-                path = os.path.join(tempfile.gettempdir(), "browse-%d.png" % os.getpid())
-                page.screenshot(path=path, scale="css" if args.scale == 1.0 else "device")
-                if any(c.isspace() for c in path):
-                    note("!! %r contains a space; the @ reference cannot be parsed" % path)
-                out("@image: " + path)
+                image_path = os.path.join(tempfile.gettempdir(), "browse-%d.png" % os.getpid())
+                page.screenshot(path=image_path, scale="css" if args.scale == 1.0 else "device")
+                if any(c.isspace() for c in image_path):
+                    note("!! %r contains a space; the @ reference cannot be parsed" % image_path)
+                if ")" in image_path:
+                    note("!! %r contains ')'; it closes the @image(...) reference early" % image_path)
+                # The meta spelling the server parses; `@image: <path>` is prose to it.
+                out("@image(%s)" % image_path)
                 return 0
 
             if args.cmd == "cookies":

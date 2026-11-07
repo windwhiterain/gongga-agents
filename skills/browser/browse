@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
-# A browser this skill owns: one Edge instance, a debugging port, one profile.
+# A browser this skill drives, reached one of two ways.
 #
-#   browse start                  # start it, and remember how to reach it
-#   browse stop                   # stop it
-#   browse status                 # is it up, and on which port
+#   browse start                  # start a browser of ours, and remember it
+#   browse attach [port]          # drive the browser the user already runs
+#   browse stop                   # stop ours; an attached one is left alone
+#   browse status                 # is it up, on which port, and whose
 #   browse doctor                 # can this machine drive a browser at all
 #
-# The point is one long-lived Edge that agent and human share. A second
+# `start` keeps one long-lived Edge with its own profile. A second
 # --remote-debugging-port against a profile that is already open does not listen:
 # the running browser swallows the request and the new port stays dead. So the
 # instance this skill starts is the only one with that profile, and it is started
 # with the port from the beginning.
+#
+# `attach` is the way to a browser that is the user's: since Chromium 136 the port
+# flag is ignored on a real user profile (a cookie-theft fix -- the process starts,
+# the port never opens), so the only door left is Chromium's own switch at
+# edge://inspect/#remote-debugging, which opens CDP on port 9222 with the human's
+# consent. Nothing here starts, copies or stops that browser.
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -19,9 +26,19 @@ PROFILE="${BROWSER_PROFILE:-$HOME_DIR/profile}"
 PORT_FILE="$HOME_DIR/port"
 PID_FILE="$HOME_DIR/edge.pid"
 LOG_FILE="$HOME_DIR/edge.log"
+# Whose browser the recorded port belongs to: "own" when `start` launched it,
+# "attached" when the user's own browser is being driven. `stop` decides by it.
+MODE_FILE="$HOME_DIR/mode"
 
 die() { printf '%s\n' "$*" >&2; exit 1; }
 say() { printf '%s\n' "$*"; }
+
+# Whose browser the recorded port is: `own` unless `attach` said otherwise.
+mode() {
+  local value=""
+  [[ -f "$MODE_FILE" ]] && value=$(tr -d '\r\n' <"$MODE_FILE")
+  printf '%s' "${value:-own}"
+}
 
 # Where Edge is. The Playwright-managed chromium is the fallback: it speaks the
 # same protocol, and a machine without Edge still gets a browser.
@@ -87,6 +104,13 @@ do_start() {
   local headless="--headless=new"
   [[ "${BROWSER_HEADED:-0}" == "1" ]] && headless=""
 
+  # One port at a time: `attach` and `start` never both hold a browser, so a
+  # verb is unambiguous about whose browser it drives.
+  if [[ "$(mode)" == "attached" && -f "$PORT_FILE" ]]; then
+    say "attached to the browser on port $(cat "$PORT_FILE"); 'browse stop' releases it first"
+    return 1
+  fi
+
   # An instance that is already up on our port is the one we want.
   if [[ -f "$PORT_FILE" ]] && port_open "$(cat "$PORT_FILE")"; then
     say "already up: $(browser_version "$(cat "$PORT_FILE")") on port $(cat "$PORT_FILE")"
@@ -128,6 +152,7 @@ do_start() {
   while (( waited < 60 )); do
     if port_open "$port"; then
       printf '%s\n' "$port" >"$PORT_FILE"
+      printf 'own\n' >"$MODE_FILE"
       say "started: $(browser_version "$port") on port $port"
       say "profile: $PROFILE"
       return 0
@@ -136,6 +161,13 @@ do_start() {
     waited=$(( waited + 1 ))
   done
   say "the browser did not answer on port $port after ${waited}s; log: $LOG_FILE"
+  # The process can be up with the port dead: since Chromium 136 the port flag is
+  # ignored when the profile is a real user profile, which is a silent refusal.
+  if [[ -n "$(our_pid)" ]]; then
+    say "the browser is running but its debugging port never opened."
+    say "if that profile is one a person uses, Chromium 136+ ignores the port flag there:"
+    say "  enable edge://inspect/#remote-debugging in that browser, then 'browse attach'"
+  fi
   return 1
 }
 
@@ -144,6 +176,13 @@ do_stop() {
   if [[ -f "$PORT_FILE" ]]; then
     local port pid
     port=$(cat "$PORT_FILE")
+    # An attached browser is the user's: this releases the connection and leaves
+    # the process alone, whatever its command line says.
+    if [[ "$(mode)" == "attached" ]]; then
+      say "released the browser on port $port; it is yours, so it keeps running"
+      rm -f "$PORT_FILE" "$PID_FILE" "$MODE_FILE"
+      return 0
+    fi
     pid=$(port_owner_pid "$port")
     if [[ -n "$pid" ]] && owns_profile "$pid"; then
       # Only the process that is this skill's browser: its command line names
@@ -155,11 +194,49 @@ do_stop() {
     else
       say "no browser on port $port"
     fi
-    rm -f "$PORT_FILE" "$PID_FILE"
+    rm -f "$PORT_FILE" "$PID_FILE" "$MODE_FILE"
   else
-    rm -f "$PID_FILE"
+    rm -f "$PID_FILE" "$MODE_FILE"
   fi
   (( stopped )) || say "nothing of ours was running"
+  return 0
+}
+
+# Drive the browser the user already runs, through Chromium's own consent switch.
+#
+# This is the only way to CDP a real user profile: since Chromium 136 the
+# --remote-debugging-port flag is ignored when the data directory is a person's
+# own, and the refusal is silent -- the browser starts and the port never opens.
+# edge://inspect/#remote-debugging opens CDP on a port instead, by the human's
+# consent, and that server answers on the websocket without HTTP discovery.
+do_attach() {
+  local port="${1:-9222}"
+  local current
+  current=$(cat "$PORT_FILE" 2>/dev/null)
+  if [[ "$current" == "$port" ]] && [[ "$(mode)" == "attached" ]] && port_open "$port"; then
+    say "already attached: port $port"
+    return 0
+  fi
+  local waited=0
+  while (( waited < 2 )); do
+    port_open "$port" && break
+    sleep 1
+    waited=$(( waited + 1 ))
+  done
+  if ! port_open "$port"; then
+    say "nothing answers on port $port."
+    say "In the browser you want driven, open edge://inspect/#remote-debugging and tick"
+    say "  \"Allow remote debugging for this browser instance\","
+    say "then run 'browse attach' again and answer Allow on the prompt."
+    say "Chromium 136+ ignores --remote-debugging-port on a real user profile, so this"
+    say "switch -- not a restart with a flag -- is the door."
+    return 1
+  fi
+  mkdir -p "$HOME_DIR"
+  printf '%s\n' "$port" >"$PORT_FILE"
+  printf 'attached\n' >"$MODE_FILE"
+  rm -f "$PID_FILE"
+  say "attached: port $port (a browser this skill did not start)"
   return 0
 }
 
@@ -206,8 +283,12 @@ do_status() {
     local port
     port=$(cat "$PORT_FILE")
     if port_open "$port"; then
-      say "up: $(browser_version "$port") on port $port"
-      say "profile: $PROFILE"
+      if [[ "$(mode)" == "attached" ]]; then
+        say "up: attached to port $port (a browser this skill did not start)"
+      else
+        say "up: $(browser_version "$port") on port $port"
+        say "profile: $PROFILE"
+      fi
       return 0
     fi
     say "the recorded port $port is dead; the browser is gone"
@@ -236,16 +317,24 @@ do_doctor() {
   else
     say "note not running; 'browse start' brings it up"
   fi
+  # A browser the user runs is reachable only through its own consent switch, so
+  # whether that switch is on is part of "can this machine be driven at all".
+  if port_open "${BROWSER_ATTACH_PORT:-9222}"; then
+    say "ok   attachable: something listens on ${BROWSER_ATTACH_PORT:-9222} (edge://inspect/#remote-debugging)"
+  else
+    say "note nothing on ${BROWSER_ATTACH_PORT:-9222}; for your own browser tick edge://inspect/#remote-debugging, then 'browse attach'"
+  fi
   return 0
 }
 
 case "${1:-}" in
   start) do_start ;;
+  attach) do_attach "${2:-}" ;;
   stop) do_stop ;;
   status) do_status ;;
   doctor) do_doctor ;;
   "")
-    say "usage: browse {start|stop|status|doctor}"
+    say "usage: browse {start|attach [port]|stop|status|doctor}"
     say "       browse <action> ...   # open text html click type press shot cookies tabs find"
     exit 2
     ;;
