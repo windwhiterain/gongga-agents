@@ -957,6 +957,10 @@ if ($DryRun) {
     Write-Host ""
     Write-Host (" 各项目累计释放（不含 DISM/回收站/CLI 自有统计）: {0}" -f (Format-Size $script:totalFreed)) -ForegroundColor Green
     Write-Host (" 磁盘可用空间实际增量（权威数字）:               {0}" -f (Format-Size $deltaTotal)) -ForegroundColor Green
+    if ($deltaTotal -lt $script:totalFreed) {
+        # 多 agent / 构建同时在写盘时，盘差会小于逐项累计；说清楚，别让读者以为白干了
+        Write-Host (" 注意：清理期间有其它进程在写盘，盘差小于逐项累计（本次逐项 {0}）" -f (Format-Size $script:totalFreed)) -ForegroundColor Yellow
+    }
     if ($script:skippedLocked -gt 0) {
         Write-Host (" 有 {0} 类项目因软件运行中被跳过或仅部分清理：关闭相关软件后重跑即可。" -f $script:skippedLocked) -ForegroundColor Yellow
     }
