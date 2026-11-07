@@ -178,28 +178,47 @@ class Route:
 
 
 def readings_of(catalog, providers, config, state, refresh, timeout, cached_only):
-    """Every provider's reading, from the cache when it is fresh and the scripts otherwise."""
+    """Every provider's reading, from the cache when it is fresh and the scripts otherwise.
+
+    # Invariant
+
+    The roster's queries are tried in file order and the first reading is the one
+    on record -- the same rule the server reads the same table by. A reader that
+    ran and said no falls through to the next one, because the next one may be the
+    product the allowance actually lives in now; a reader that answered nothing
+    (a timeout, a script that is not on disk) only falls through without being
+    allowed to speak for the provider.
+    """
     for provider in providers:
-        query = catalog.quota_target(provider)
-        if query is None:
+        queries = catalog.quota_targets(provider)
+        if not queries:
             continue
         if refresh > 0 and quota.fresh(state, provider["id"], refresh) is not None:
             continue
-        if cached_only and (state.get("readings") or {}).get(provider["id"]):
-            continue
         if cached_only:
             continue
-        path = catalog.script_path(query.get("script"))
-        if path is None:
-            quota.remember(state, provider["id"], None, f"no script at {query.get('script')}")
-            continue
-        credential = catalog.quota_credential(provider, query)
-        if not credential:
-            item = query.get("script_env") or provider.get("key_env") or "credential"
-            quota.remember(state, provider["id"], None, f"no {item} in the keystore or the environment")
-            continue
-        reading, failure = quota.run_script(path, credential, timeout)
-        quota.remember(state, provider["id"], reading, failure)
+        failure = None
+        answered = False
+        for query in queries:
+            path = catalog.script_path(query.get("script"))
+            if path is None:
+                failure = f"no script at {query.get('script')}"
+                continue
+            credential = catalog.quota_credential(provider, query)
+            if not credential:
+                item = query.get("script_env") or provider.get("key_env") or "credential"
+                failure = f"no {item} in the keystore or the environment"
+                continue
+            reading, said, spoke = quota.run_script(path, credential, timeout)
+            if reading is not None:
+                quota.remember(state, provider["id"], reading, None, True, query.get("unit"))
+                break
+            # The server keeps the last reader's reason (quota.rs, `run`): it is the
+            # one whose subject is the product the allowance would have come from.
+            failure = said
+            answered = answered or spoke
+        else:
+            quota.remember(state, provider["id"], None, failure, answered)
     try:
         quota.save_state(state)
     except OSError as error:
@@ -226,9 +245,11 @@ def evaluate(route, catalog, config, state):
     the draw can relax a mark without relaxing an allowance or a credential.
     """
     pool = config["pool"]
-    query = catalog.quota_target(route.provider)
-    route.unit = (query or {}).get("unit")
+    targets = catalog.quota_targets(route.provider)
     cached = (state.get("readings") or {}).get(route.provider["id"]) or {}
+    # The unit of the reading on record, not of the first query: a provider that
+    # fell through from a plan to credits reports a different kind of number.
+    route.unit = cached.get("unit") or (targets[0].get("unit") if targets else None)
     route.reading = cached.get("reading")
     route.share = quota.share_of(route.reading)
     # Within a tier: how much is left, times how much this machine wants it used.
@@ -243,7 +264,7 @@ def evaluate(route, catalog, config, state):
         return route
 
     route.usable, route.why = quota.state_of(route.reading, route.unit, pool.get("minimum") or {})
-    if query is None:
+    if not targets:
         route.why = "the roster publishes no quota for this provider"
     elif route.reading is None and cached.get("failure"):
         route.why = cached["failure"]

@@ -65,7 +65,17 @@ def parse_reading(text):
 
 
 def run_script(path, credential, timeout):
-    """One quota script, bounded: `(reading, error)` with exactly one of them set."""
+    """One quota script, bounded: `(reading, failure, answered)`.
+
+    # Invariant
+
+    `answered` separates the two failures that look alike from outside. A script
+    that ran and said no -- the plan is gone, the credential is not a plan key --
+    has answered the question, and its answer is that there is no allowance. A
+    timeout, a crash, a script that could not start has answered nothing, and says
+    nothing about the allowance. The two are cached differently, because a stale
+    number kept across a refusal is a route that can never leave the pool.
+    """
     command = [sys.executable, path]
     if credential:
         command += ["--key", credential]
@@ -76,14 +86,14 @@ def run_script(path, credential, timeout):
             errors="replace", timeout=timeout + 2,
         )
     except subprocess.TimeoutExpired:
-        return None, f"the script did not answer within {timeout}s"
+        return None, f"the script did not answer within {timeout}s", False
     except OSError as error:
-        return None, f"the script could not start: {error}"
+        return None, f"the script could not start: {error}", False
     reading = parse_reading(finished.stdout)
     if reading is None:
         said = (finished.stderr or "").strip().splitlines()
-        return None, said[-1] if said else f"the script printed no reading (exit {finished.returncode})"
-    return reading, None
+        return None, said[-1] if said else f"the script printed no reading (exit {finished.returncode})", True
+    return reading, None, True
 
 
 def window_share(reading):
@@ -157,17 +167,29 @@ def fresh(state, provider_id, refresh):
     return cached
 
 
-def remember(state, provider_id, reading, failure):
+def remember(state, provider_id, reading, failure, answered=True, unit=None):
     """Cache one provider's reading, or the failure that stood in for it.
 
-    A failed query keeps the last reading it had: a provider that answered a
-    minute ago still has that allowance, and a timeout says nothing about it.
+    # Invariant
+
+    Only silence keeps the last number. A query that did not answer -- a timeout,
+    a script that could not start -- says nothing about the allowance, so the
+    reading that was true a minute ago is still the best one there is. A query
+    that *answered* and reported no reading said the allowance is gone, so the
+    previous number is dropped rather than kept: keeping it is how a lapsed plan
+    keeps drawing on the headroom it had before it lapsed.
+
+    `unit` travels with the reading because a provider may fall back between
+    products -- a percentage of a plan, then a count of credits -- and the floor
+    a reading is held to is stated in the unit it was read in.
     """
     previous = (state.get("readings") or {}).get(provider_id) or {}
+    kept = previous.get("reading") if not answered else None
     state.setdefault("readings", {})[provider_id] = {
         "at": time.time(),
-        "reading": reading if reading is not None else previous.get("reading"),
+        "reading": reading if reading is not None else kept,
         "failure": failure,
+        "unit": unit if reading is not None else (previous.get("unit") if kept else None),
     }
 
 

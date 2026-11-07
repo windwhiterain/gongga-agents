@@ -76,6 +76,13 @@ them leave a route with no allowance to draw on, so it is not drawn. Treating a
 missing number as an open door is how an unpurchased provider got handed out
 with `-` in the share column beside it.
 
+**A number is only kept across silence, never across an answer.** A reader that
+timed out or never started says nothing about the allowance, so the reading that
+was true a minute ago still stands. A reader that ran and said *no* — the plan is
+gone, the key is not a plan key — has answered, and the old number is dropped:
+keeping it is how a provider whose subscription lapsed went on drawing on the
+percentage it had before it lapsed.
+
 When *nothing* is usable the draw may lift **a mark** — this machine's own
 temporary judgement — and says `model_pool: nothing is usable, drawn anyway` on
 stderr. It never lifts a credential, an allowance or a refusal: with none of
@@ -252,13 +259,22 @@ test  = 0.00     # 默认 0：只在你点名 --tier test 时才抽得到
   with neither is not drawn — the gate is the server's own.
 - **The credential a quota script takes** — the same one, which is what the
   server hands the script; a variable the script reads itself (`script_env`, a
-  console cookie) comes from the environment when this machine has it.
-- **The allowance** — each provider's `quota_query.script`, run once per
-  `refresh`: the same scripts the roster publishes, read through the same
-  contract. Readings are cached in `~/.model_pool/state.json` with their marks,
-  which is also where `mark` writes (`MODEL_POOL_STATE` points elsewhere). A
-  query that fails is cached too, so a provider with no credential is asked once
-  per `refresh` instead of once per draw.
+  console cookie) comes from the environment when this machine has it. A script
+  whose credential is *not* the API key — a console session, which is the only
+  thing that can read MiniMax's credits — looks its own entry up in the same
+  keystore (`minimax-console`) and says so by name when it is missing.
+- **The allowance** — each provider's `quota_query` scripts, in file order, run
+  once per `refresh`: the same scripts the roster publishes, read through the
+  same contract. File order is preference order and the first reader that answers
+  is the one on record — the server reads the same table by the same rule
+  (`crates/server/src/quota.rs`), so one provider can carry several products: an
+  M Plan's windows, then, when that plan is over, the credits the same key still
+  spends (`unit = "credit-left"`), then a pay-as-you-go wallet. A reader that
+  answers *no* falls through to the next; a reader that answers nothing only
+  reports why. Readings are cached in `~/.model_pool/state.json` with their unit
+  and their marks, which is also where `mark` writes (`MODEL_POOL_STATE` points
+  elsewhere). A failed query is cached too, so a provider with no credential is
+  asked once per `refresh` instead of once per draw.
 - **Nothing else.** No network call of its own, no model turn, no API key of its
   own: a provider whose script needs a variable this machine does not have
   reports nothing, which counts as no allowance, so the route is out and

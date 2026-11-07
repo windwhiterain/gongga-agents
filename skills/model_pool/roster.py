@@ -117,17 +117,20 @@ class Roster:
         candidate = os.path.join(os.path.dirname(self.path), script)
         return candidate if os.path.isfile(candidate) else None
 
-    def quota_target(self, provider):
-        """The first quota query the roster gives a script for.
+    def quota_targets(self, provider):
+        """Every quota query the roster gives a script for, in file order.
 
-        A provider can carry several queries (a subscription plan and a
-        pay-as-you-go wallet); only the script-bearing one says anything about
-        the allowance a model request spends.
+        # Invariant
+
+        File order is preference order, which is the rule the server reads the
+        same table by (`crates/server/src/quota.rs`, `run`): a provider may carry
+        more than one product -- a subscription plan, then a wallet, then the
+        credits a lapsed plan still spends -- and the first reader that answers is
+        the one the allowance is read from. Taking only the first would make a
+        provider whose plan ended unreadable even when a second reader could have
+        said what is left.
         """
-        for query in provider.get("quota_query") or []:
-            if query.get("script"):
-                return query
-        return None
+        return [query for query in provider.get("quota_query") or [] if query.get("script")]
 
     def quota_credential(self, provider, query):
         """The credential the quota script takes.

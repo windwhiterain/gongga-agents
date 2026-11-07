@@ -389,6 +389,30 @@ cache_ttl_tier = "隐式（唯一一档，5 分钟，命中即续期）"
   source = "https://github.com/MiniMax-AI/cli"
   note = "金额字段都是字符串；这个端点同样不在公开 API 参考里，来自官方 CLI 源码。"
 
+  # 套餐没了还剩什么。订阅 Key 能花两样东西：M Plan 额度（上面那条）和积分包，
+  # 官方口径是「没有 Token Plan 订阅也可以使用积分」，扣费顺序额度优先、积分其次。
+  # 文件顺序就是偏好顺序，所以这条排在额度**之后**：有额度时读到的是窗口百分比，
+  # 额度没了才落到这里读积分。
+  #
+  # 没有 key 能读它：同一把 sk-cp- Key 打这个端点返回 `401 not login`，只有控制台的
+  # 网页会话 Cookie 认。所以脚本自己去 `~/.agents/keys.toml` 的 `minimax-console`
+  # 里找 cookie（或环境变量 MINIMAX_CONSOLE_COOKIE），拿不到就明确拒绝。
+  [[provider.quota_query]]
+  id = "credit-remains"
+  method = "GET"
+  url = "https://www.minimax.cn/backend/account/token_plan_credit"
+  auth = "session-cookie"
+  unit = "credit-left"
+  applies_to = "积分包：订阅 Key 在套餐额度之外的余额（额度优先扣、积分其次）"
+  jsonpath = { remaining = "remaining_credits", total = "total_credits", used = "used_credits", expires = "balance_breakdown.buckets[].expire_time_ms" }
+  source = "https://platform.minimaxi.com/docs/token-plan/faq —— 控制台「套餐用量」页自己的 XHR；2026-11-07 本机实测"
+  note = """
+    响应里会把账户的 api_key 原样带回来，脚本只取数字，绝不转发（见 providers/minimax_credit.py）。
+    积分是预付余额，按目录价折算：1,000 积分 = ¥7，所以它是「还剩多少」而不是「百分之多少」，
+    unit 因此是 credit-left 而不是 percent-left。
+  """
+  script = "providers/minimax_credit.py"
+
 [[provider]]
 id = "kimi-coding"
 name = "Kimi 编程套餐（Moonshot coding plan）"
