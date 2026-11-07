@@ -11,7 +11,8 @@ metadata:
 
 脚本**没有清理项开关**——
 所有"删掉后会自动重建"的东西默认全清；`-DryRun` 是安全预览，不是开关。
-另一个参数 `-ProjectRoot` 是**范围**参数，见下文「项目构建产物」。
+另外两个参数：`-ProjectRoot` 是**范围**参数（见下文「项目构建产物」），
+`-NoElevate` 跳过 UAC 提权（无人值守会话用，系统级项目标记跳过）。
 
 ```bash
 # 本 skill 的目录：`@skill:` 展开里 `SKILL.md: <path>` 的父目录（`index_skill` 的 path 列同源）。
@@ -39,10 +40,14 @@ SKILL_DIR=<本 SKILL.md 所在目录>
    ```
 
 2. 用户确认（或本来就直接要求清理）后实跑。实跑会自动弹**一次 UAC**：
-   同意 → 用户级 + 系统级全清；取消 → 只清用户级，系统级项目打印跳过，不算失败。
+   同意 → 用户级 + 系统级全清；取消 → 只清用户级，系统级项目打印跳过。
+   **无人值守会话**（agent 自己跑，没人点 UAC）要加 `-NoElevate`：它直接走用户级，
+   不会卡在 UAC 弹窗上，也不会留下带 `-NoExit` 的提权窗口。
 
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/clean-disk.ps1"
+   # 无人值守：
+   powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/clean-disk.ps1" -NoElevate
    ```
 
    提权后的窗口带 `-NoExit`，跑完留着给用户看汇总。DISM 组件清理可能要几分钟，
@@ -50,6 +55,14 @@ SKILL_DIR=<本 SKILL.md 所在目录>
 
 3. 跑完汇报：每块盘的**可用空间前后差值**（权威释放量）、被跳过项、日志路径。
    日志固定在 `%LOCALAPPDATA%\DiskCleanup\logs\clean-<时间戳>.log`。
+
+**读结果不要靠读散文**：结束时脚本打印一行 `SUMMARY_JSON {...}`，字段是
+`freed_bytes`（盘差，权威）、`item_freed_bytes`（逐项累计）、`recycle_left`（回收站残留）、
+`blocked`（没清掉的项目与原因）、`warnings`、`skipped_locked`、`seconds`、`log`。
+**退出码也是有意义的**：`0` = 每一项都清完或本来就不存在；`1` = 有失败/残留/被占用。
+低空间告警下，`recycle_left > 0` 基本就是「回收站里有别的账号建的东西，需要管理员」。
+
+每一段都打印上一步耗时，用来分辨「这一步慢」和「这一步挂了」。
 
 4. 浏览器/IDE/Teams/Slack/Discord/JetBrains **运行中时对应缓存自动跳过**。
    提示用户关掉后重跑即可，**不要强杀进程**。
@@ -84,6 +97,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/clean-disk.ps1" 
 向用户说明代价：Rust/`.venv`/`node_modules` 删除后下次要重新编译或重新下载依赖。
 如果用户只是问"有哪些 Rust 仓库"而不是要清理，用仓库发现脚本回答（找 `Cargo.toml`
 且排除 `.cargo`/`target`/`.git`、见标记即停止下钻），不要直接跑清理。
+
+**DryRun 的每个产物会带「大小 + 文件数 + 最后写入时间」**（例：
+`[预览] Rust target  .worktrees/meta-reference\target = 12.87 GB（159606 个文件，最后写入 11-06 12:34）`）。
+有人正在编译的那份是"热"的，删掉它会让人家从头重编；先删隔夜没动过的。
+判冷热的数只有 DryRun 给，所以**多 agent 共机时先看这一列再决定删哪个**。
 
 ## 清理边界（设计决策，不要擅自改）
 
@@ -130,7 +148,24 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/clean-disk.ps1" 
 
 原同类脚本的典型错误：删除前量一次大小就当释放量——被占用没删掉的文件也被计入。
 本脚本每项都算 `before - after`（残留即占用文件），最终再以**固定盘可用空间前后差值**
-作为权威数字汇总，两项都打印。包管理器 CLI 和 DISM 自己释放的量只体现在盘差值里。
+作为权威数字汇总，两项都打印。
+
+包管理器 CLI 的缓存也是同一套算法：`-CacheDir` 给静态路径，`-CacheDirQueryArguments`
+则**问工具自己**（`uv cache dir`、`pnpm store path`、`pip cache dir`、`npm config get cache`）——
+猜路径会猜错，猜错就等于这一项没有计量（uv 一次能清掉几个 GB，在汇总里曾经是隐形的）。
+DISM 自己释放的量仍然只体现在盘差值里。
+
+### 回收站不再用 Clear-RecycleBin
+
+`Clear-RecycleBin` 在长路径 / 几十万文件的 bin 上会抛
+`Win32Exception: The system cannot find the path specified`，而调用方吞掉异常后**照报成功**；
+实测 68 GiB / 45 万文件时它还会挂死十几分钟不返回。现在第 11 步按 SID 目录走
+`Clear-Folder` 的 robocopy 镜像，并**再量一次**残留：
+
+- DryRun 打印每个 SID 的大小与文件数（以前只有一句「将清空」，实际占用要另外去扫）。
+- 残留 > 0 就打 `[部分]` 并提示「多半属于别的账号，需管理员」，同时进
+  `SUMMARY_JSON.recycle_left` 与退出码。回收站里另一个账号装的 Anaconda 就是这种：
+  `icacls /grant` 都是 *Access is denied*，只有提权能删。
 
 ### 受保护路径是安全闸，不是摆设
 
@@ -153,7 +188,14 @@ DryRun 下系统级目录大小可能因 ACL 统计不全，但保证零副作�
 
 `Start-Process -Verb RunAs` 必然开新窗口，不留住的话汇总一闪而过。宿主用
 `(Get-Process -Id $PID).Path` 取，所以从 powershell.exe 和 pwsh.exe 启动都能
-正确自我提权。脚本只有一个 switch，转发不会遇到参数拼接问题。
+正确自我提权。`-ProjectRoot` 转发时逐项加引号（`Start-Process` 按空格拼数组元素）。
+
+`-NoElevate` 跳过整段提权。以前 agent 想跑用户级只能靠
+`Invoke-Expression (Get-Content -Raw …)` 让 `$PSCommandPath` 为空——那是把
+「脚本的一个缺陷」当接口用；现在它是一个明说的开关。
+
+父进程用 `-PassThru -Wait` 拿子进程的退出码并原样返回，否则提权路径永远 `exit 0`，
+`SUMMARY_JSON` 里的结论与退出码也就对不上了。
 
 ## 环境要求
 

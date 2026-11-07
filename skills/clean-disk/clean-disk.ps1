@@ -3,7 +3,8 @@
     Windows 全量磁盘清理脚本（通用版，无清理项开关：可安全清理的全部清理）
 
 .DESCRIPTION
-    唯一参数 -DryRun 是安全预览模式（不删除、不提权、不动服务），不是清理项开关。
+    -DryRun 是安全预览模式（不删除、不提权、不动服务），不是清理项开关。
+    -NoElevate 不请求 UAC，直接跑用户级清理（无人值守会话用；系统级项目标记跳过）。
     -ProjectRoot <路径数组> 是唯一的"范围"参数：默认关闭；显式指定一个或多个代码
     根目录后，扫描并删除其中的构建产物（Rust/Maven target、node_modules、.NET
     bin/obj、Gradle/Flutter/CMake 的 build、Python 缓存/.venv 等），代价是下次
@@ -14,6 +15,8 @@
       - 真实删除用 robocopy 空目录镜像（/MIR /XJ）：长路径友好、不跟重解析点、
         被占用文件自动保留；每项按"清理前 - 残留"计算实际释放量
       - 结束时按固定盘可用空间前后差值给出每块盘的真实释放量
+      - 除人类可读汇总外，还输出一行机器可读摘要（前缀 SUMMARY_JSON），并用退出码
+        表示结果：0 = 每一项都清完或本来就不存在；1 = 有项目失败、残留或被占用
 
     清理范围（全部默认执行）：
       用户级  Temp/TMP、CrashDumps、SquirrelTemp、RailCrashReport、用户 WER
@@ -68,7 +71,8 @@
 [CmdletBinding()]
 param(
     [switch]$DryRun,
-    [string[]]$ProjectRoot
+    [string[]]$ProjectRoot,
+    [switch]$NoElevate
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -81,7 +85,8 @@ $isAdmin = ([Security.Principal.WindowsPrincipal] `
 
 # DryRun 绝不提权；实际清理需要系统级权限，自动提权一次。
 # 用 -NoExit 让提升后的窗口保留汇总输出；用户取消 UAC 则降级继续用户级清理。
-if (-not $DryRun -and -not $isAdmin -and $PSCommandPath) {
+# -NoElevate 跳过提权（无人值守会话），等价于用户在 UAC 上点"否"。
+if (-not $DryRun -and -not $isAdmin -and -not $NoElevate -and $PSCommandPath) {
     Write-Host '全量清理需要管理员权限，正在请求提权（请在 UAC 窗口点"是"；点"否"则只清用户级）...' -ForegroundColor Yellow
     try {
         $hostExe = (Get-Process -Id $PID).Path
@@ -91,14 +96,18 @@ if (-not $DryRun -and -not $isAdmin -and $PSCommandPath) {
             $argList += '-ProjectRoot'
             foreach ($r in $ProjectRoot) { $argList += "`"$r`"" }
         }
-        Start-Process -FilePath $hostExe -WorkingDirectory (Get-Location).Path `
-            -Verb RunAs -Wait -ArgumentList $argList | Out-Null
-        exit
+        # -PassThru 让父进程把提权子进程的退出码原样传出去，否则提权路径永远返回 0
+        $child = Start-Process -FilePath $hostExe -WorkingDirectory (Get-Location).Path `
+            -Verb RunAs -Wait -PassThru -ArgumentList $argList
+        exit $child.ExitCode
     } catch {
         Write-Host "提权被取消或失败：$($_.Exception.Message)" -ForegroundColor Yellow
         Write-Host '继续以普通权限执行（系统级项目将跳过）。' -ForegroundColor Yellow
         $isAdmin = $false
     }
+}
+if ($NoElevate -and -not $isAdmin -and -not $DryRun) {
+    Write-Host ' 已指定 -NoElevate：不请求提权，系统级项目将跳过。' -ForegroundColor Yellow
 }
 
 # ---------------- 日志 ----------------
@@ -111,6 +120,10 @@ Start-Transcript -Path $logPath -Append | Out-Null
 $script:totalFreed = [long]0
 $script:skippedLocked = 0
 $script:warnCount = 0
+$script:recycleLeft = [long]0
+$script:blocked = New-Object System.Collections.Generic.List[string]
+$script:sectionStarted = $null
+$script:startedAt = Get-Date
 
 # 受保护路径（精确匹配，不允许清空这些目录本身；其子目录如 Windows\Temp 仍可清）
 $script:protectedPaths = @(
@@ -145,6 +158,11 @@ function Format-Size {
 
 function Write-Section {
     param([string]$Title)
+    # 上一步耗时：卡住时一眼看得出停在哪一步（第 11 步曾经挂死二十分钟没有任何输出）
+    if ($script:sectionStarted) {
+        Write-Host ("                 （上一步耗时 {0:0.0}s）" -f ((Get-Date) - $script:sectionStarted).TotalSeconds) -ForegroundColor DarkGray
+    }
+    $script:sectionStarted = Get-Date
     Write-Host ""
     Write-Host "==================== $Title ====================" -ForegroundColor Green
 }
@@ -171,6 +189,32 @@ function Get-FolderSize {
         Measure-Object -Property Length -Sum
     if ($null -eq $sum -or $null -eq $sum.Sum) { return [long]0 }
     return [long]$sum.Sum
+}
+
+function Get-FolderStats {
+    <# 一次遍历给出字节数、文件数、最新写入时间：项目产物靠"最后写入"判冷热。#>
+    param([string]$Path)
+    $result = [pscustomobject]@{ Bytes = [long]0; Files = 0; Newest = $null }
+    if (-not (Test-Path -LiteralPath $Path)) { return $result }
+    [long]$bytes = 0
+    $count = 0
+    $newest = $null
+    foreach ($f in (Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue)) {
+        if ($f.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+        $bytes += $f.Length
+        $count++
+        if ($null -eq $newest -or $f.LastWriteTime -gt $newest) { $newest = $f.LastWriteTime }
+    }
+    $result.Bytes = $bytes
+    $result.Files = $count
+    $result.Newest = $newest
+    return $result
+}
+
+function Add-Blocked {
+    <# 记一项"没清掉/没清完"，进 SUMMARY_JSON 的 blocked 与退出码。 #>
+    param([string]$What)
+    $script:blocked.Add($What) | Out-Null
 }
 
 function Assert-Cleanable {
@@ -225,6 +269,7 @@ function Clear-Folder {
     $script:totalFreed += $freed
     if ($after -gt 0) {
         $script:skippedLocked++
+        Add-Blocked ("{0} 残留 {1}" -f $Label, (Format-Size $after))
         Write-Host ("  [部分] {0} - 释放 {1}，残留 {2}（文件被占用）" -f $Label, (Format-Size $freed), (Format-Size $after)) -ForegroundColor Cyan
     } else {
         Write-Host ("  [完成] {0} - {1}" -f $Label, (Format-Size $freed)) -ForegroundColor Cyan
@@ -271,20 +316,42 @@ function Remove-FilesByPattern {
     Write-Host ("  [完成] {0} - {1}" -f $Label, (Format-Size $freed)) -ForegroundColor Cyan
 }
 
+function Get-CacheCommandDirs {
+    <# 问包管理器自己"缓存在哪"：猜路径会猜错，猜错就等于没有计量。 #>
+    param([string]$Exe, [string[]]$QueryArguments)
+    $cmd = Get-Command $Exe -ErrorAction SilentlyContinue
+    if (-not $cmd) { return @() }
+    $out = & $cmd.Source @QueryArguments 2>$null | Select-Object -First 1
+    if ($out -and (Test-Path -LiteralPath ([string]$out))) { return @([string]$out) }
+    return @()
+}
+
 function Invoke-CacheCommand {
-    <# 调用包管理器自带清理命令。#>
+    <# 调用包管理器自带清理命令；能给缓存目录时按前后差值记实际释放量。#>
     param(
         [Parameter(Mandatory = $true)][string]$Exe,
         [Parameter(Mandatory = $true)][string[]]$Arguments,
-        [Parameter(Mandatory = $true)][string]$Label
+        [Parameter(Mandatory = $true)][string]$Label,
+        [string[]]$CacheDir,
+        [string[]]$CacheDirQueryArguments
     )
     $cmd = Get-Command $Exe -ErrorAction SilentlyContinue
     if (-not $cmd) {
         Write-Host ("  [跳过] {0} - 未安装" -f $Label) -ForegroundColor DarkGray
         return
     }
+    $dirs = @($CacheDir)
+    if ($CacheDirQueryArguments) {
+        $dirs += @(Get-CacheCommandDirs -Exe $Exe -QueryArguments $CacheDirQueryArguments)
+    }
+    [long]$beforeBytes = 0
+    foreach ($cd in $dirs) { if ($cd) { $beforeBytes += Get-FolderSize $cd } }
     if ($DryRun) {
-        Write-Host ("  [预览] {0} - 将执行: {1} {2}" -f $Label, $Exe, ($Arguments -join ' ')) -ForegroundColor Yellow
+        if ($beforeBytes -gt 0) {
+            Write-Host ("  [预览] {0} = {1} - 将执行: {2} {3}" -f $Label, (Format-Size $beforeBytes), $Exe, ($Arguments -join ' ')) -ForegroundColor Yellow
+        } else {
+            Write-Host ("  [预览] {0} - 将执行: {1} {2}" -f $Label, $Exe, ($Arguments -join ' ')) -ForegroundColor Yellow
+        }
         return
     }
     Write-Host ("  [执行] {0} - {1} {2} ..." -f $Label, $Exe, ($Arguments -join ' ')) -ForegroundColor Cyan
@@ -298,6 +365,17 @@ function Invoke-CacheCommand {
     } catch {
         Write-Host ("         执行失败: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
         $script:warnCount++
+    }
+    if ($beforeBytes -gt 0) {
+        [long]$afterBytes = 0
+        foreach ($cd in $dirs) { if ($cd) { $afterBytes += Get-FolderSize $cd } }
+        [long]$freed = $beforeBytes - $afterBytes
+        if ($freed -lt 0) { $freed = 0 }
+        $script:totalFreed += $freed
+        Write-Host ("         实际释放 {0}（{1} -> {2}）" -f (Format-Size $freed), (Format-Size $beforeBytes), (Format-Size $afterBytes)) -ForegroundColor Cyan
+    } else {
+        # 沉默等于「没计量」：说清楚是空还是路径没找到，否则这一项在汇总里永远隐形
+        Write-Host ("         未计量：缓存目录为空或不在预期位置（{0}）" -f (($dirs | Where-Object { $_ }) -join '; ')) -ForegroundColor DarkGray
     }
 }
 
@@ -404,9 +482,12 @@ function Remove-ArtifactFolder {
         $script:warnCount++
         return
     }
-    $before = Get-FolderSize $full
+    $stats = Get-FolderStats $full
+    $before = $stats.Bytes
     if ($DryRun) {
-        Write-Host ("  [预览] {0} = {1}" -f $Label, (Format-Size $before)) -ForegroundColor Yellow
+        # 大小 + 最后写入时间：判「冷/热」用，别删正在编译的那份
+        $stamp = if ($stats.Newest) { $stats.Newest.ToString('MM-dd HH:mm') } else { '未知' }
+        Write-Host ("  [预览] {0} = {1}（{2} 个文件，最后写入 {3}）" -f $Label, (Format-Size $before), $stats.Files, $stamp) -ForegroundColor Yellow
         return
     }
     $null = & robocopy.exe $script:emptyDir $full /MIR /XJ /R:0 /W:0 /NFL /NDL /NJH /NJS /NP /MT:8
@@ -597,7 +678,7 @@ foreach ($fam in $chromiumFamilies) {
             Where-Object { $_.Name -eq 'Default' -or $_.Name -like 'Profile *' -or $_.Name -eq 'System Profile' -or $_.Name -eq 'Guest Profile' })
         foreach ($pf in $profiles) {
             foreach ($cd in $chromiumCacheDirs) {
-                Clear-Folder -Path (Join-Path $pf.FullName $cd) -Label ("$fam.Name\$($pf.Name)\$cd")
+                Clear-Folder -Path (Join-Path $pf.FullName $cd) -Label ("$($fam.Name)\$($pf.Name)\$cd")
             }
         }
     }
@@ -694,17 +775,17 @@ if ($gradleCmd -and -not $DryRun) {
     Write-Host '  [预览] 将先执行 gradle --stop 再清 caches' -ForegroundColor Yellow
 }
 
-Invoke-CacheCommand -Exe 'npm'      -Arguments @('cache', 'clean', '--force') -Label 'npm 缓存'
-Invoke-CacheCommand -Exe 'pnpm'     -Arguments @('store', 'prune')             -Label 'pnpm store'
-Invoke-CacheCommand -Exe 'yarn'     -Arguments @('cache', 'clean')             -Label 'yarn 缓存'
-Invoke-CacheCommand -Exe 'bun'      -Arguments @('pm', 'cache', 'rm')          -Label 'bun 缓存'
-Invoke-CacheCommand -Exe 'uv'       -Arguments @('cache', 'clean')             -Label 'uv 缓存'
-Invoke-CacheCommand -Exe 'pip'      -Arguments @('cache', 'purge')             -Label 'pip 缓存'
-Invoke-CacheCommand -Exe 'dotnet'   -Arguments @('nuget', 'locals', 'all', '--clear') -Label 'dotnet/NuGet 缓存'
-Invoke-CacheCommand -Exe 'go'       -Arguments @('clean', '-cache', '-modcache') -Label 'go 构建与模块缓存'
+Invoke-CacheCommand -Exe 'npm'      -Arguments @('cache', 'clean', '--force') -Label 'npm 缓存' -CacheDirQueryArguments @('config', 'get', 'cache')
+Invoke-CacheCommand -Exe 'pnpm'     -Arguments @('store', 'prune')             -Label 'pnpm store' -CacheDirQueryArguments @('store', 'path')
+Invoke-CacheCommand -Exe 'yarn'     -Arguments @('cache', 'clean')             -Label 'yarn 缓存' -CacheDir @("$env:LOCALAPPDATA\Yarn\Cache")
+Invoke-CacheCommand -Exe 'bun'      -Arguments @('pm', 'cache', 'rm')          -Label 'bun 缓存' -CacheDir @("$env:LOCALAPPDATA\bun\install\cache")
+Invoke-CacheCommand -Exe 'uv'       -Arguments @('cache', 'clean')             -Label 'uv 缓存' -CacheDirQueryArguments @('cache', 'dir')
+Invoke-CacheCommand -Exe 'pip'      -Arguments @('cache', 'purge')             -Label 'pip 缓存' -CacheDirQueryArguments @('cache', 'dir')
+Invoke-CacheCommand -Exe 'dotnet'   -Arguments @('nuget', 'locals', 'all', '--clear') -Label 'dotnet/NuGet 缓存' -CacheDir @("$env:LOCALAPPDATA\NuGet\v3-cache", "$env:LOCALAPPDATA\NuGet\Cache")
+Invoke-CacheCommand -Exe 'go'       -Arguments @('clean', '-cache', '-modcache') -Label 'go 构建与模块缓存' -CacheDir @("$env:LOCALAPPDATA\go-build", "$env:USERPROFILE\go\pkg\mod")
 Invoke-CacheCommand -Exe 'conda'    -Arguments @('clean', '-afy')              -Label 'conda 缓存'
-Invoke-CacheCommand -Exe 'composer' -Arguments @('clear-cache')                -Label 'composer 缓存'
-Invoke-CacheCommand -Exe 'dart'     -Arguments @('pub', 'cache', 'clean', '-f') -Label 'pub (Flutter/Dart) 缓存'
+Invoke-CacheCommand -Exe 'composer' -Arguments @('clear-cache')                -Label 'composer 缓存' -CacheDir @("$env:LOCALAPPDATA\Composer\cache")
+Invoke-CacheCommand -Exe 'dart'     -Arguments @('pub', 'cache', 'clean', '-f') -Label 'pub (Flutter/Dart) 缓存' -CacheDir @("$env:LOCALAPPDATA\Pub\Cache")
 
 Write-Sub '已知缓存目录（未安装对应 CLI 或作为补充时直接清）'
 Clear-Folder -Path (Join-Path $env:USERPROFILE '.cargo\registry\cache')     'cargo registry crate 缓存'
@@ -821,13 +902,33 @@ if ($isAdmin) {
 }
 
 # ---- 11. 回收站（所有固定盘） ----
+# 不用 Clear-RecycleBin：它在这类 bin 上会抛 Win32Exception（shell API 枚举不了长路径）
+# 而调用方只能静默吞掉，实测 68 GiB / 45 万文件时还会挂死十几分钟不返回。改走
+# Clear-Folder 的 robocopy 镜像：长路径、ACL、被占用文件都吃得下，且量得到真实释放量。
 Write-Section '11/11 回收站（所有固定盘）'
 foreach ($d in $fixedDrives) {
-    if ($DryRun) {
-        Write-Host ("  [预览] 将清空 {0} 回收站" -f $d.Letter) -ForegroundColor Yellow
-    } else {
-        Clear-RecycleBin -DriveLetter $d.Letter.TrimEnd(':') -Force -ErrorAction SilentlyContinue
-        Write-Host ("  [完成] {0} 回收站已清空" -f $d.Letter) -ForegroundColor Cyan
+    $binBase = $d.Letter + [char]92 + [char]36 + 'Recycle.Bin'
+    $sidDirs = @(Get-ChildItem -LiteralPath $binBase -Directory -Force -ErrorAction SilentlyContinue)
+    if ($sidDirs.Count -eq 0) {
+        Write-Host ("  [空]   {0} 回收站" -f $d.Letter) -ForegroundColor DarkGray
+        continue
+    }
+    foreach ($sid in $sidDirs) {
+        $label = ("{0} 回收站\{1}" -f $d.Letter, $sid.Name)
+        if ($DryRun) {
+            $stats = Get-FolderStats $sid.FullName
+            if ($stats.Bytes -eq 0) { continue }
+            Write-Host ("  [预览] {0} = {1}（{2} 个文件）" -f $label, (Format-Size $stats.Bytes), $stats.Files) -ForegroundColor Yellow
+            continue
+        }
+        Clear-Folder -Path $sid.FullName -Label $label
+    }
+    if (-not $DryRun) {
+        $left = Get-FolderStats $binBase
+        if ($left.Bytes -gt 0) {
+            $script:recycleLeft += $left.Bytes
+            Write-Host ("  [部分] {0} 回收站仍残留 {1}（{2} 个文件）：这些多半属于别的账号，需以管理员重跑" -f $d.Letter, (Format-Size $left.Bytes), $left.Files) -ForegroundColor Yellow
+        }
     }
 }
 
@@ -866,9 +967,35 @@ if ($DryRun) {
 Write-Host (" 日志: {0}" -f $logPath) -ForegroundColor DarkGray
 Write-Host " 边界：个人文件、浏览器配置、聊天记录、Windows\Installer、休眠/页面文件、" -ForegroundColor DarkGray
 Write-Host "       系统还原点、事件日志、Docker 卷、项目构建产物不在清理范围内。" -ForegroundColor DarkGray
+if ($script:sectionStarted) {
+    Write-Host (" 总耗时: {0:0.0}s" -f ((Get-Date) - $script:startedAt).TotalSeconds) -ForegroundColor DarkGray
+}
 Write-Host "================================================" -ForegroundColor White
+
+# ---------------- 机器可读摘要 / 退出码 ----------------
+
+[long]$driveDelta = [long]0
+if (-not $DryRun) { $driveDelta = [long]$deltaTotal }
+$summary = [ordered]@{
+    dry_run          = [bool]$DryRun
+    admin            = [bool]$isAdmin
+    freed_bytes      = $driveDelta
+    item_freed_bytes = $script:totalFreed
+    recycle_left     = $script:recycleLeft
+    blocked          = @($script:blocked)
+    warnings         = $script:warnCount
+    skipped_locked   = $script:skippedLocked
+    seconds          = [math]::Round(((Get-Date) - $script:startedAt).TotalSeconds, 1)
+    log              = $logPath
+}
+Write-Host ("SUMMARY_JSON " + ($summary | ConvertTo-Json -Compress)) -ForegroundColor DarkGray
+
+# 退出码：0 = 每项都清完或本来就不存在；1 = 有失败/残留/被占用
+$exitCode = 0
+if ($script:warnCount -gt 0 -or $script:recycleLeft -gt 0) { $exitCode = 1 }
 
 # ---------------- 收尾 ----------------
 
 Remove-Item -LiteralPath $script:emptyDir -Recurse -Force -ErrorAction SilentlyContinue
 Stop-Transcript | Out-Null
+exit $exitCode
