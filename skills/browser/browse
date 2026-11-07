@@ -278,6 +278,67 @@ our_pid() {
     2>/dev/null | tr -d '\r' | head -n1
 }
 
+# Close a browser this skill did not start, the way a person does.
+#
+# A window close is a WM_CLOSE: the browser finishes writing its profile -- the
+# cookie store included -- and exits. Killing the process (`taskkill /F`, or the
+# job ending with its server) is the thing that does not: whatever it had only in
+# memory never reaches disk. Hence one code path, and it is this one.
+do_close() {
+  local wanted="${1:-}"
+  local native=""
+  [[ -n "$wanted" ]] && native=$(cygpath -w "$wanted" 2>/dev/null || printf '%s' "$wanted")
+  local roots
+  roots=$(powershell -NoProfile -Command \
+    "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" |
+       Where-Object { \$_.CommandLine -notlike '*--type=*' } |
+       Where-Object { \$_.MainWindowHandle -ne 0 } |
+       ForEach-Object { \$_.ProcessId }" 2>/dev/null | tr -d '\r')
+  if [[ -z "$roots" ]]; then
+    say "no browser window of that family is open"
+    return 0
+  fi
+  local pid closed=0
+  for pid in $roots; do
+    if [[ -n "$native" ]]; then
+      local command
+      command=$(powershell -NoProfile -Command \
+        "(Get-CimInstance Win32_Process -Filter 'ProcessId=$pid').CommandLine" 2>/dev/null | tr -d '\r')
+      [[ "$command" == *"$native"* ]] || continue
+    fi
+    # CloseMainWindow asks; it does not kill. A browser with several windows needs
+    # one ask per window, so the loop below repeats while the process is alive.
+    local asked=0
+    while (( asked < 8 )); do
+      powershell -NoProfile -Command "\
+        \$p = Get-Process -Id $pid -ErrorAction SilentlyContinue; \
+        if (-not \$p) { exit 0 } \
+        if (\$p.CloseMainWindow()) { Start-Sleep -Milliseconds 300; exit 0 } \
+        Start-Sleep -Milliseconds 200; exit 3" 2>/dev/null
+      case "$?" in
+        0) asked=$(( asked + 1 )); continue ;;
+        *) break ;;
+      esac
+    done
+    # It was asked; now it gets time to finish writing.
+    local waited=0
+    while (( waited < 30 )); do
+      powershell -NoProfile -Command "if (Get-Process -Id $pid -ErrorAction SilentlyContinue) { exit 1 } else { exit 0 }"
+      (( $? == 0 )) && break
+      sleep 1
+      waited=$(( waited + 1 ))
+    done
+    if powershell -NoProfile -Command "if (Get-Process -Id $pid -ErrorAction SilentlyContinue) { exit 1 } else { exit 0 }"; then
+      say "closed pid $pid the way a person does"
+      closed=$(( closed + 1 ))
+    else
+      say "pid $pid did not exit after being asked; it is still running and nothing was killed"
+    fi
+  done
+  (( closed )) || say "no browser matched; pass the profile directory to be sure which"
+  return 0
+}
+
 do_status() {
   if [[ -f "$PORT_FILE" ]]; then
     local port
@@ -330,11 +391,12 @@ do_doctor() {
 case "${1:-}" in
   start) do_start ;;
   attach) do_attach "${2:-}" ;;
+  close) do_close "${2:-}" ;;
   stop) do_stop ;;
   status) do_status ;;
   doctor) do_doctor ;;
   "")
-    say "usage: browse {start|attach [port]|stop|status|doctor}"
+    say "usage: browse {start|attach [port]|close [profile]|stop|status|doctor}"
     say "       browse <action> ...   # open text html click type press shot cookies tabs find"
     exit 2
     ;;

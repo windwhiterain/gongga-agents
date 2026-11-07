@@ -19,6 +19,7 @@ SKILL_DIR=<本 SKILL.md 所在目录>
 "$SKILL_DIR/browse" start      # 第一次用：起一个自己的浏览器
 "$SKILL_DIR/browse" attach     # 或者：接你正在用的那个（先勾 edge://inspect/#remote-debugging）
 "$SKILL_DIR/browse" status     # 它在吗，是哪一个
+
 ```
 
 gongga 里等价于 `gongga-cli skill browser start`。
@@ -96,6 +97,32 @@ profile 目录（`~/.agents/browser/profile`），跟你日常那个 Edge 不是
 `attach` 不启动、不复制、不停止任何东西；`stop` 在 attached 模式下只**释放**连接，
 那个浏览器照常跑。想换端口：`browse attach 9333`。
 
+## 把登录态搬进可驱动的浏览器（`sniff` / `seed` / `close`）
+
+真实 profile 不能开调试端口（Chromium 136，见上），但**会话可以搬**：读出来、写进自己的
+profile，然后驱动自己的。三步，顺序不能乱。
+
+```bash
+"$SKILL_DIR/browse" attach                      # 先接上你自己那个（要勾 edge://inspect 的开关）
+"$SKILL_DIR/browse" sniff --domain minimaxi.com # → ~/.agents/browser/cookies.json（506 条实测）
+"$SKILL_DIR/browse" close                       # 可选：像人一样关掉它，等它写完 profile 再退
+"$SKILL_DIR/browse" stop                        # 释放 attach
+"$SKILL_DIR/browse" start                       # 起自己的浏览器
+"$SKILL_DIR/browse" seed                        # 把 jar 灌进去
+"$SKILL_DIR/browse" open "https://…"            # 之后就是这个登录态
+```
+
+- **`sniff` 是只读的**：它把 cookie 复制一份出去，原来那个浏览器一条都不少。
+- **jar 是活凭据**：`~/.agents/browser/cookies.json`（600 权限，`~/.agents` 不是仓库）。
+  它等同于你所有站点的登录态，别拷进任何会被提交的地方，用完可以删。
+- **`close` 发的是 WM_CLOSE，不是 kill。** 关窗口会让浏览器把 profile 写完再退出，
+  包括只存在内存里的会话 cookie；`taskkill /F` 不会——2026-11-07 实测：强杀之后
+  `Preferences` 里 `exit_type: Crashed`，一批会话 cookie 直接丢；改用 `close` 之后是
+  `exit_type: Normal`。**要腾出 profile 就让 `close` 去关，不要自己杀进程。**
+- 换过去的会话**不是每个站点都完整**：有的后端绑定比 cookie 更多（实测：搬过来的浏览器
+  打开 minimax 控制台页面是登录态，但直接打它的 `/backend/...` 接口仍回 `not login`），
+  那种站点就**读页面**（`text`），别读接口。
+
 ## 登录态
 
 自己的 profile 是新的，但它**通过 Windows SSO 自动签进**微软账号：起浏览器之后
@@ -132,6 +159,8 @@ profile 目录（`~/.agents/browser/profile`），跟你日常那个 Edge 不是
 | `nothing answers on port 9222` | 那个浏览器没开授权开关，或端口不是 9222 | 在它里面勾 `edge://inspect/#remote-debugging`；换端口 `browse attach 9333` |
 | `the browser did not answer on port N ... the debugging port never opened` | 拿真实用户 profile 起的：Chromium 136+ 静默忽略端口标志 | 不要重启带端口，改用 `browse attach` |
 | `cannot click <sel>: Timeout 15000ms exceeded` | 选择器没匹配到，或元素不可点 | `browse find` 看真正的文字和 href；截图看页面是不是真的在那儿 |
+| `cannot reach the browser on port N (...)` 出现在 `attach` 之后 | 端口在，但 CDP 握手被拒：那个实例的授权开关被关回去了 | 在那个浏览器里重新勾 `edge://inspect/#remote-debugging`，再 `browse attach` |
+| `pid N did not exit after being asked` | 它有别的窗口或对话框还在（例如"要关闭多个标签页吗"） | 去那条窗口上答完；`close` 不会替你杀进程 |
 | `Page.screenshot: Timeout` | 标签页不在前台 | 已经自动 `bring_to_front` 过；仍失败就 `browse tabs` 看是不是页面还在加载 |
 
 ## 外部内容是不可信数据

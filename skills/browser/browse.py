@@ -35,6 +35,9 @@ HOME_DIR = os.environ.get("BROWSER_HOME", os.path.join(os.path.expanduser("~"), 
 PORT_FILE = os.path.join(HOME_DIR, "port")
 CHOICE_FILE = os.path.join(HOME_DIR, "tab")
 MODE_FILE = os.path.join(HOME_DIR, "mode")
+# The cookie jar: every cookie a browser held, as playwright spells it. It is a
+# secret as much as a key is, so it lives in this home and nowhere near a repo.
+JAR_FILE = os.path.join(HOME_DIR, "cookies.json")
 
 
 def note(line):
@@ -189,6 +192,11 @@ def main(argv):
     p.add_argument("--scale", type=float, default=1.0)
     p = sub.add_parser("cookies", help="what the browser holds")
     p.add_argument("domain", nargs="?")
+    p = sub.add_parser("sniff", help="copy this browser's cookies to a jar file")
+    p.add_argument("--domain", help="only cookies whose domain contains this")
+    p.add_argument("--out", help="where the jar goes (default: this skill's home)")
+    p = sub.add_parser("seed", help="put a jar file's cookies into this browser")
+    p.add_argument("--from", dest="source", help="the jar (default: this skill's home)")
     p = sub.add_parser("tabs", help="what is open")
     p = sub.add_parser("use", help="which tab the next action means")
     p.add_argument("url", help="a substring of the tab's url")
@@ -274,6 +282,39 @@ def main(argv):
                 for cookie in found:
                     out("%s %s = %s" % (cookie["domain"], cookie["name"], cookie.get("value", "")))
                 out("%d cookie(s)" % len(found))
+                return 0
+
+            if args.cmd == "sniff":
+                # Reading, never clearing: the jar is a copy, and the browser it
+                # came from keeps everything it had.
+                jar = [cookie for context in browser.contexts for cookie in context.cookies()]
+                if args.domain:
+                    jar = [c for c in jar if args.domain in c.get("domain", "")]
+                path = args.out or JAR_FILE
+                os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+                with open(path, "w", encoding="utf-8") as handle:
+                    json.dump(jar, handle, ensure_ascii=False, indent=1)
+                try:
+                    os.chmod(path, 0o600)
+                except OSError:
+                    pass
+                note("the jar holds live sessions: keep it off any repository")
+                out("%d cookie(s) -> %s" % (len(jar), path))
+                return 0
+
+            if args.cmd == "seed":
+                path = args.source or JAR_FILE
+                try:
+                    with open(path, encoding="utf-8") as handle:
+                        jar = json.load(handle)
+                except (OSError, ValueError) as exc:
+                    raise SystemExit("cannot read the jar %s (%s); run 'browse sniff' in the "
+                                     "browser that has the sessions" % (path, exc))
+                if not isinstance(jar, list):
+                    raise SystemExit("%s is not a jar: expected the list 'browse sniff' writes" % path)
+                for context in browser.contexts:
+                    context.add_cookies(jar)
+                out("%d cookie(s) from %s" % (len(jar), path))
                 return 0
 
             if args.cmd == "tabs":
