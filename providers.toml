@@ -1255,7 +1255,7 @@ kind = "vendor"
 # （填 conversation_id）与 HTTP 头 `X-Session-ID`（把人固定到同一推理实例）。两条都是免费的路由
 # 提示、都不创建缓存；服务端给两者的值都是会话目录。本机没有这把 key，两条都未实测。
 cache_affinity = true
-cache_session_header = true
+session_id_headers = ["X-Session-ID"]
 key_env = "TENCENT_API_KEY"
 key_prefix = "sk-tp-"
 homepage = "https://cloud.tencent.com/product/hub"
@@ -1854,3 +1854,29 @@ cache_ttl_tiers = { implicit = 300, explicit_1h = 3600, explicit_7d = 604800 } #
   available = false
   console = "https://console.volcengine.com/ark/region:cn-beijing/overview"
   note = "用量能查，余额不能：GetInferenceUsage（按模型 / 接入点 / ApiKeyID 过滤）只接受 Access Key 签名，ARK_API_KEY 调不了；2026-08-12 之后新建的 key 连 AuthToken 那条旧路也没了。另有 ListModelActivations / ListEndpoints 在同一个管控面。余额只有控制台与账单页 —— unverified，不冒充端点。"
+
+# ---------------------------------------------------------------------------
+# OpenCode Go：订阅制中转站，模型清单走 /models 动态发现，不逐个静态配置
+# ---------------------------------------------------------------------------
+[[provider]]
+id = "opencode-go"
+name = "OpenCode Go"
+kind = "relay"
+key_env = "OPENCODE_API_KEY"
+homepage = "https://opencode.ai/docs/zh-tw/go/"
+# 中转站模型随订阅变化、数量多，无法逐个静态配置：启动时由脚本 GET /models 并
+# 转成 FileModel。网关对所有模型 id 都在 /responses 上回答 Responses 形状，
+# 包括目录里标 chat-completions / messages / generate-content 的，故只配一个
+# Responses 端点，不按模型分 face。价格为 USD per 1M tokens，与端点口径一致。
+models_script = "providers/opencode_go.py"
+# 网关要求每个请求带会话头，缺失返回 400 MissingSessionID；值由服务端按会话
+# 生成（gongga-<session db id>）。它是 provider 自定义会话扩展，不是缓存键。
+# 网关未要求 body 里的 prompt_cache_key，故不写 cache_affinity、也不发该字段。
+session_id_headers = ["x-opencode-session"]
+retrieved = "2026-11-08"
+
+  [[provider.endpoint]]
+  id = "openai"
+  api = "openai-responses"
+  base_url = "https://opencode.ai/zen/go/v1"
+  auth = "bearer"
