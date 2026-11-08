@@ -19,9 +19,9 @@ Two harness mechanisms carry what an extra role used to:
   unreported failure is handed to `@monitor`, which finds the harness- or quota-side
   cause, fixes it, and can switch the session's model. Polity keeps no watcher and
   no repair command of its own.
-- **One composed `subscribe`** carries a role's answer to justice. `start` arms a
-  single pattern over both managed roles' `turn_end` and a bash action that relays
-  each match with `send_message`. The server does not inject a notice itself. The
+- **One `subscribe` per role** carries a role's answer to justice: `start` arms a
+  pattern over that role's `turn_end` and a `send_message` command, so the news
+  names the role that finished. The server does not inject a notice itself. The
   message names the session and carries the turn's `answer`, so a role ends its
   turn with the record id and the id reaches justice without a messenger.
 
@@ -98,19 +98,18 @@ flash), then arms justice's watch before anyone is briefed — a role nobody wou
 hear from is worse than no role, so a watch that fails to arm undoes the sessions
 it created.
 
-The watch is one composed regex, the same language `del_bash` speaks:
+The watch is one regex and one command per role:
 
 ```bash
-gongga-cli subscribe polity-<task_id> \
-  '^turn_end:polity-<task_id>-(advisor|premier)$' --persistant true \
-  --bash notice --cmd 'gongga-cli send_message --name "$GONGGA_SESSION" \
-    --message "$GONGGA_EVENT_KIND $GONGGA_EVENT_SESSION: $GONGGA_EVENT_PAYLOAD"'
+gongga-cli subscribe '^turn_end:polity-<task_id>-advisor$' \
+  '{"name": "send_message", "args": {"name": "<justice>", "message": "polity-<task_id>: advisor finished its turn"}}' \
+  --subscription polity-<task_id>-advisor --session <justice> --persistant true
 ```
 
-A match only runs that command. The server assigns the three `GONGGA_EVENT_*`
-variables inside the callback's subshell; `$GONGGA_SESSION` is justice, not the
-role named by the event. The dedicated `notice` shell keeps the callback off the
-shell where justice is running other work.
+A match only runs that command, and the command is a server cmd: it carries no
+event fields, so the news says which role spoke by which watch fired. The command
+runs in the session that armed it, which is justice's -- no `notice` shell and no
+`GONGGA_EVENT_*` variables are involved.
 
 `turn_end` fires for failed turns too — its payload's `outcome` says which — and the
 monitor is already repairing those, so the workflow waits on this one event kind.
@@ -310,7 +309,7 @@ the revised SPEC; old plan approvals do not carry over.
   premier saying "done" is not acceptance.
 - Keep task JSONL. Delete implementation sessions according to `subagent`. Delete role
   sessions when recovery is no longer needed and no work is running, and let justice
-  drop the watch with `del_subscribe polity-<task_id>` once the task is archived.
+  drop the watches with `del_subscription polity-<task_id>-advisor --session <justice>` once the task is archived.
 - No automatic polling, automatic approval, treating a proposal as a plan, or secrets
   in records.
 - Use the ordinary workflow for a simple task rather than creating sessions for one

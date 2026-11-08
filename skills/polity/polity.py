@@ -32,11 +32,6 @@ REQUIREMENT_STATES = ("met", "unmet", "not-applicable")
 VERDICTS = ("approve", "revise", "reject")
 VIOLATIONS = ("none", "premise", "direct")
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
-NOTICE_SHELL = "notice"
-NOTICE_COMMAND = (
-    'gongga-cli send_message --name "$GONGGA_SESSION" '
-    '--message "$GONGGA_EVENT_KIND $GONGGA_EVENT_SESSION: $GONGGA_EVENT_PAYLOAD"'
-)
 
 
 def fail(message):
@@ -346,18 +341,43 @@ def session_name(task, role):
     return f"polity-{task}-{role}"
 
 
-def watch_pattern(task):
-    """One composed pattern over every managed role's turn end.
+def watch_name(task, role):
+    """What one role's watch is armed as, and dropped by.
+
+    # Invariant
+
+    One watch per role, because the news must say which role spoke: a match runs a
+    command with no event fields to interpolate, so the identity comes from which
+    pattern fired.
+    """
+    return f"polity-{task}-{role}"
+
+
+def watch_pattern(task, role):
+    """The pattern over one role's turn end.
 
     # Invariant
 
     The task id is escaped before it is a pattern: it may spell a regex
-    metacharacter, and a watch that matches a stranger's session is worse than
-    no watch. `turn_end` fires for failures too -- its payload's `outcome`
-    says which -- and the server's monitor repairs a failed role session, so
-    one kind is the whole vocabulary the workflow waits on.
+    metacharacter, and a watch that matches a stranger's session is worse than no
+    watch. `turn_end` fires for failures too -- its payload's `outcome` says which
+    -- and the server's monitor repairs a failed role session, so one kind is the
+    whole vocabulary the workflow waits on.
     """
-    return f"^turn_end:{re.escape(f'polity-{task}-')}(advisor|premier)$"
+    return f"^turn_end:{re.escape(f'polity-{task}-')}{role}$"
+
+
+def watch_action(task, role):
+    """What a match does: tell justice, in a message that names the role."""
+    return json.dumps(
+        {
+            "name": "send_message",
+            "args": {
+                "name": os.environ.get("GONGGA_SESSION", ""),
+                "message": f"polity-{task}: {role} finished its turn",
+            },
+        }
+    )
 
 
 def role_brief(task, role, spec):
@@ -441,19 +461,21 @@ def cmd_start(args):
     roles = {}
     for role in ("advisor", "premier"):
         roles[role] = create_role(task, role, cwd, args.remote)
-    watch = {"name": f"polity-{task}", "pattern": watch_pattern(task)}
+    watches = []
     try:
-        cli(
-            "subscribe",
-            watch["name"],
-            watch["pattern"],
-            "--persistant",
-            "true",
-            "--bash",
-            NOTICE_SHELL,
-            "--cmd",
-            NOTICE_COMMAND,
-        )
+        for role in ("advisor", "premier"):
+            cli(
+                "subscribe",
+                watch_pattern(task, role),
+                watch_action(task, role),
+                "--subscription",
+                watch_name(task, role),
+                "--session",
+                justice,
+                "--persistant",
+                "true",
+            )
+            watches.append(watch_name(task, role))
     except Exception:
         for role in roles:
             with suppress(Exception):
@@ -470,7 +492,7 @@ def cmd_start(args):
         "cwd": cwd,
         "remote": args.remote,
         "roles": {"justice": {"session": justice}, **roles},
-        "watch": watch,
+        "watch": watches,
         "state": "planning",
         "note": "state is descriptive; the records and their references are authoritative",
     }
@@ -511,7 +533,7 @@ def cmd_start(args):
                 "task": task,
                 "state": "planning",
                 "roles": record["roles"],
-                "watch": watch,
+                "watch": watches,
             },
             indent=2,
         )
