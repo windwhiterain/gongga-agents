@@ -363,7 +363,8 @@ class PolityTest(unittest.TestCase):
         self.record(
             "requirement",
             "justice",
-            {"text": "answered for this task", "closes": "requirement-1"},
+            {"text": "answered for this task", "closes": "requirement-1",
+             "dropped": True},
         )
         with self.assertRaisesRegex(ValueError, "requirement-2"):
             self.record("judgement", "justice", dict(judge, requirements={}))

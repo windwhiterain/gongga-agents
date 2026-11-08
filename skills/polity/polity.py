@@ -103,8 +103,10 @@ def find_record(records, kind, identifier):
 def open_requirements(records):
     """Every requirement no later requirement record has closed.
 
-    A record carrying `closes` is the closure event itself, not a new
-    requirement: it states why one is dropped, and asks for nothing.
+    A record that replaces another carries both: `closes` names what it drops and
+    its own `text` is the rule that now stands. One that only closes something --
+    "superseded, nothing to answer" -- says `"dropped": true`, because otherwise
+    its text would read as a rule nobody can meet.
     """
     closed = {
         record["closes"]
@@ -115,7 +117,7 @@ def open_requirements(records):
         record
         for record in records
         if record.get("kind") == "requirement"
-        and not record.get("closes")
+        and not record.get("dropped")
         and record["id"] not in closed
     ]
 
@@ -260,6 +262,8 @@ def normalize(kind, payload):
                 fail(f"requirement.{field} must be a string")
         if "closes" in payload and not payload["closes"].strip():
             fail("requirement.closes must name a requirement")
+        if "dropped" in payload and not isinstance(payload["dropped"], bool):
+            fail("requirement.dropped must be true or false")
     elif kind == "session":
         required_strings(payload, ("role", "session"))
         if payload["role"] not in ("justice", "advisor", "premier"):
