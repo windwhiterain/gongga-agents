@@ -19,7 +19,16 @@ import sys
 
 
 ROLES = {"justice": "pro", "advisor": "sota", "premier": "flash"}
-RECORDS = ("proposal", "plan", "judgement", "report", "spec_amendment")
+RECORDS = (
+    "requirement",
+    "proposal",
+    "plan",
+    "judgement",
+    "report",
+    "spec_amendment",
+    "session",
+)
+REQUIREMENT_STATES = ("met", "unmet", "not-applicable")
 VERDICTS = ("approve", "revise", "reject")
 VIOLATIONS = ("none", "premise", "direct")
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
@@ -89,6 +98,26 @@ def find_record(records, kind, identifier):
     if len(found) != 1:
         fail(f"expected one {kind} {identifier!r}, found {len(found)}")
     return found[0]
+
+
+def open_requirements(records):
+    """Every requirement no later requirement record has closed.
+
+    A record carrying `closes` is the closure event itself, not a new
+    requirement: it states why one is dropped, and asks for nothing.
+    """
+    closed = {
+        record["closes"]
+        for record in records
+        if record.get("kind") == "requirement" and record.get("closes")
+    }
+    return [
+        record
+        for record in records
+        if record.get("kind") == "requirement"
+        and not record.get("closes")
+        and record["id"] not in closed
+    ]
 
 
 def record_id(records, kind, number=None):
@@ -198,9 +227,48 @@ def normalize(kind, payload):
             string_list(payload, "spec_refs")
         if payload["spec_violation"] != "none" and not payload.get("spec_refs"):
             fail("a premise or direct violation needs spec_refs")
+        if "verification" in payload:
+            string_list(payload, "verification")
+        if "requirements" in payload:
+            answers = payload["requirements"]
+            if not isinstance(answers, dict):
+                fail("judgement.requirements must map a requirement id to its state")
+            for identifier, state in answers.items():
+                if state not in REQUIREMENT_STATES:
+                    fail(
+                        "judgement.requirements values must be met, unmet, or "
+                        "not-applicable"
+                    )
+        # A judgement on a plan or a report is an answer to someone's work: the
+        # reason says what justice thinks, `verification` says what justice ran.
+        if payload["subject"].startswith(("plan:", "report:")) and not payload.get(
+            "verification"
+        ):
+            fail(
+                "a judgement on a plan or a report carries `verification`: the "
+                "commands justice ran and what they printed"
+            )
     elif kind == "report":
         string_list(payload, "changes")
         string_list(payload, "verification")
+    elif kind == "requirement":
+        # What the user asked for, in their words: justice writes it down so a
+        # later judgement answers a fixed sentence instead of a memory.
+        required_strings(payload, ("text",))
+        for field in ("source", "closes"):
+            if field in payload and not isinstance(payload[field], str):
+                fail(f"requirement.{field} must be a string")
+        if "closes" in payload and not payload["closes"].strip():
+            fail("requirement.closes must name a requirement")
+    elif kind == "session":
+        required_strings(payload, ("role", "session"))
+        if payload["role"] not in ("justice", "advisor", "premier"):
+            fail("session.role must be justice, advisor, or premier")
+        # A field given as None says "not set" -- no remote means this machine --
+        # so only a non-string, non-null value is a mistake.
+        for field in ("model", "remote", "cwd", "note"):
+            if payload.get(field) is not None and not isinstance(payload[field], str):
+                fail(f"session.{field} must be a string when it is given")
     elif kind == "spec_amendment":
         required_strings(
             payload, ("ref_proposal", "ref_judgement", "user_decision", "change")
@@ -306,27 +374,56 @@ def role_brief(task, role, spec):
             "your own work."
         ),
         "premier": (
-            "Wait for an approved plan id. Only then dispatch implementation to "
-            "subagents (flash, pro for hard work), in separate worktrees, review the "
-            "result, and write a report for justice. Never change the plan or spec."
+            "Stand by. No plan is approved yet, so there is nothing to do this turn: "
+            "answer in one line and stop. Dispatching implementation (subagents in "
+            "separate worktrees), reviewing the result and writing the report all "
+            "begin when justice sends an approved plan id. Never change the plan or "
+            "the spec."
         ),
     }
     return common + " " + duties[role]
 
 
-def create_role(task, role, cwd):
+def role_tier(role):
+    """The tier this run draws a role's model at.
+
+    # Invariant
+
+    `POLITY_TIER` moves every role and `POLITY_TIER_<ROLE>` moves one, so a run
+    that names no variable spends exactly the table above. Justice is this
+    session: its entry only fixes the tier the user may switch this session to,
+    never a session `start` creates.
+    """
+    return (
+        os.environ.get(f"POLITY_TIER_{role.upper()}")
+        or os.environ.get("POLITY_TIER")
+        or ROLES[role]
+    )
+
+
+def create_role(task, role, cwd, remote=None):
     session = session_name(task, role)
-    model = draw_model(ROLES[role])
-    cli("set_session", "--session", session, "--cwd", cwd, "--model", model)
-    return {"session": session, "model": model}
+    model = draw_model(role_tier(role))
+    place = ["--remote", remote] if remote else []
+    cli("set_session", "--name", session, "--cwd", cwd, "--model", model, *place)
+    return {"session": session, "model": model, "cwd": cwd, "remote": remote}
 
 
 def cmd_start(args):
     task = checked_name(args.task, "task")
-    cwd = str(Path(args.cwd).expanduser().resolve())
-    spec = str(Path(args.spec).expanduser().resolve())
-    if not Path(spec).is_file():
-        fail(f"spec does not exist: {spec}")
+    # A spec and a cwd name files on the machine the roles run on. With
+    # `--remote` they are the peer's paths, and this machine's filesystem says
+    # nothing about them: resolving or testing them here would check a
+    # different checkout, or none at all.
+    if args.remote:
+        cwd, spec = args.cwd, args.spec
+        if not spec.strip():
+            fail("spec must not be empty")
+    else:
+        cwd = str(Path(args.cwd).expanduser().resolve())
+        spec = str(Path(args.spec).expanduser().resolve())
+        if not Path(spec).is_file():
+            fail(f"spec does not exist: {spec}")
     if not args.goal.strip():
         fail("goal must not be empty")
     path = task_file(task, args.home)
@@ -339,7 +436,7 @@ def cmd_start(args):
         fail("run start from the justice session; GONGGA_SESSION is not set")
     roles = {}
     for role in ("advisor", "premier"):
-        roles[role] = create_role(task, role, cwd)
+        roles[role] = create_role(task, role, cwd, args.remote)
     watch = {"name": f"polity-{task}", "pattern": watch_pattern(task)}
     try:
         cli(
@@ -356,7 +453,7 @@ def cmd_start(args):
     except Exception:
         for role in roles:
             with suppress(Exception):
-                cli("del_session", roles[role]["session"])
+                cli("del_session", "--name", roles[role]["session"])
         raise
     record = {
         "version": 1,
@@ -367,6 +464,7 @@ def cmd_start(args):
         "goal": args.goal,
         "spec": spec,
         "cwd": cwd,
+        "remote": args.remote,
         "roles": {"justice": {"session": justice}, **roles},
         "watch": watch,
         "state": "planning",
@@ -378,7 +476,26 @@ def cmd_start(args):
             brief = role_brief(task, role, record["spec"])
             if role == "advisor":
                 brief += f" The user's goal is: {args.goal}"
-            cli("send_message", "--session", roles[role]["session"], "--message", brief)
+            cli("send_message", "--name", roles[role]["session"], "--message", brief)
+            # What the role actually runs on, on the record: the task record holds
+            # what `start` drew, and a later model swap otherwise leaves it lying.
+            append_record(
+                path,
+                {
+                    "version": 1,
+                    "kind": "session",
+                    "id": record_id(read_task(task, args.home)[1], "session"),
+                    "task": task,
+                    "created_at": now(),
+                    "actor": "justice",
+                    "role": role,
+                    "session": roles[role]["session"],
+                    "model": roles[role]["model"],
+                    "remote": args.remote,
+                    "cwd": cwd,
+                    "note": "created by start",
+                },
+            )
     except Exception:
         # The failed start remains inspectable rather than pretending to be ready.
         if not path.exists():
@@ -419,12 +536,29 @@ def record_document(args, task, path):
         fail("only premier can write a report")
     if args.kind in ("judgement", "spec_amendment") and args.actor != "justice":
         fail("only justice can record a judgement or the user's spec decision")
+    if args.kind == "requirement" and args.actor != "justice":
+        fail("only justice records the user's requirements")
+    if args.kind == "requirement" and payload.get("closes"):
+        find_record(records, "requirement", payload["closes"])
+    if args.kind == "session" and args.actor not in ("justice", "advisor", "premier"):
+        fail("a session record names its actor: justice, advisor, or premier")
     identifier = record_id(records, args.kind, args.id)
     if args.id is not None:
         checked_name(args.id, "id")
         if any(record.get("id") == args.id for record in records):
             fail(f"record id already exists: {identifier}")
     if args.kind == "judgement":
+        open_ids = [record["id"] for record in open_requirements(records)]
+        answers = payload.get("requirements", {})
+        unknown = sorted(set(answers) - set(open_ids))
+        if unknown:
+            fail(f"judgement.requirements names no open requirement: {unknown}")
+        missing = [identifier for identifier in open_ids if identifier not in answers]
+        if missing:
+            fail(
+                "a judgement answers every open requirement: "
+                f"missing {missing} from {open_ids}"
+            )
         subject = payload["subject"]
         match = re.fullmatch(r"(proposal|plan|report):(.+)", subject)
         if not match:
@@ -517,9 +651,14 @@ def cmd_dispatch(args):
         f"Justice approved it in judgement {judgement['id']}. "
         "Read the plan from the task records before dispatching subagents. "
         "Review all work and submit a report referencing this plan. "
-        "Do not expand its scope or amend the spec."
+        "Do not expand its scope or amend the spec. "
+        "Two rules for landing, because a checkout's branch is not yours to assume: "
+        "read `git -C <checkout> rev-parse --abbrev-ref HEAD` first and land only on "
+        "the branch the plan names -- if that checkout is on another branch, land "
+        "from a temporary worktree instead of moving a live one; and stage by path, "
+        "so another session's uncommitted work is never carried by your commit."
     )
-    cli("send_message", "--session", session, "--message", message)
+    cli("send_message", "--name", session, "--message", message)
     print(json.dumps({"task": task, "plan": args.plan, "premier": session}, indent=2))
 
 
@@ -539,6 +678,7 @@ def cmd_status(args):
                 "spec": initial["spec"],
                 "roles": initial["roles"],
                 "records": summary,
+                "open_requirements": open_requirements(records),
                 "latest": documents[-1] if documents else None,
                 "file": str(task_file(task, args.home)),
             },
@@ -560,6 +700,10 @@ def build_parser():
     start.add_argument("--spec", required=True)
     start.add_argument("--goal", required=True)
     start.add_argument("--cwd", default=".")
+    start.add_argument(
+        "--remote",
+        help="Gongga remote whose machine holds the checkout; omit for this machine",
+    )
     start.set_defaults(handler=cmd_start)
 
     record = commands.add_parser("record", help="validate and append a record")

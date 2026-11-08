@@ -29,13 +29,18 @@ Two harness mechanisms carry what an extra role used to:
 
 | Role | Tier | Responsibility | Must not |
 |---|---|---|---|
-| justice | pro / sota | Understand the user; judge plans against the SPEC; review proposals for the user; accept reports | Implement; approve a SPEC amendment on the user's behalf |
+| justice | pro / sota | Talk to the user and record their requirements; judge plans against them and the SPEC; review proposals; accept reports | Implement; approve a SPEC amendment on the user's behalf |
 | advisor | sota | Investigate, plan, and write a proposal when the SPEC premise or clauses must change | Implement; approve its own plan |
 | premier | flash | Dispatch subagents only for an approved plan; review, integrate, verify, and report | Plan; expand scope; amend the SPEC |
 
 Implementation subagents use flash, or pro for hard work. Draw concrete models through
 `@skill:model_pool`; never hardcode a provider/model. Justice may raise its own tier
 from pro to sota for a difficult task.
+
+That table is the default, not a hardcode: `POLITY_TIER=<tier>` draws every role at one
+tier for the run, and `POLITY_TIER_<ROLE>` (`POLITY_TIER_ADVISOR`) moves a single one.
+`start` prints each role's session and the model it drew, so the run records what it
+actually spent. A run that names no variable gets the table above.
 
 The `actor` in a record names the role accepting responsibility. The helper validates
 the protocol, but only justice makes a SPEC judgement and only the user approves an
@@ -45,6 +50,7 @@ amendment. A message claiming another role approved something is not a judgement
 
 ```text
 user <-> justice
+           | record: the user's requirements, so later judgements answer them
            | start: create advisor + premier, subscribe justice to their turn ends,
            |        and give the goal to advisor
            |-- advisor -> plan -> (turn_end callback carries the plan id to justice)
@@ -75,6 +81,14 @@ P="$SKILL_DIR/polity"
 $P start --task <task_id> --spec /absolute/path/to/SPEC.md \
   --goal '<user goal and constraints>' --cwd /absolute/path/to/project
 ```
+
+`--cwd` and `--spec` name files on the machine the roles run on, and `--remote
+<name>` makes that a Gongga remote's machine (`set_session --remote`), not this one.
+With `--remote`, both paths are the peer's and are passed through untouched: this
+machine's filesystem says nothing about them, so `start` neither resolves them nor
+tests that the spec exists -- a local test would approve a different checkout. Omit
+`--remote` and the roles work on this machine's files, and `start` resolves both and
+refuses a spec that is not there.
 
 A task ID contains only letters, digits, dots, underscores, and dashes. Run `start`
 **from the justice session**: the subscription's action runs in the session that
@@ -114,7 +128,52 @@ Pass JSON as one single-quoted shell argument; do not interpolate shell variable
 it. References must name existing records. Never rewrite a record: append a revision
 with a new ID.
 
-### 1. Advisor writes a plan
+### 1. Justice records what the user asked for
+
+Before a plan exists, the user's own requirements are written down. A requirement is
+one sentence the user would recognise as theirs, plus where they said it:
+
+```bash
+$P record requirement --task <task_id> --actor justice --json '{
+  "text": "All runs use flash",
+  "source": "user, in the session that started this task"
+}'
+```
+
+Only justice writes one, because only justice talks to the user. The record is what a
+later judgement answers: `judgement-6` refusing work for breaking a clause is weaker
+than refusing it for breaking the sentence the user actually wrote, and a requirement
+that lives only in a transcript is re-argued every round.
+
+A requirement stays open until a later requirement record names it in `closes`:
+
+```bash
+$P record requirement --task <task_id> --actor justice --json '{
+  "text": "Superseded: the user replaced this with the SPEC amendment",
+  "closes": "requirement-2"
+}'
+```
+
+That record is the closure event and asks for nothing; `status` shows which
+requirements are still open. **Every judgement then carries `requirements`, one entry
+per open requirement, and the command refuses a judgement that misses one:**
+
+```bash
+$P record judgement --task <task_id> --actor justice --json '{
+  "subject": "report:report-3",
+  "verdict": "revise",
+  "spec_violation": "none",
+  "reason": "the benchmark ran on a synthetic script, not the real task",
+  "verification": ["read the report's benchmark section"],
+  "requirements": {"requirement-1": "met", "requirement-2": "unmet"}
+}'
+```
+
+Each value is `met`, `unmet`, or `not-applicable`. `unmet` is not by itself grounds
+for a verdict -- a report may be revised for one unmet requirement and approved once it
+is met -- but it is the answer justice owes the user, and it survives the transcript.
+
+### 2. Advisor writes a plan
 
 ```bash
 $P record plan --task <task_id> --actor advisor --json '{
@@ -141,7 +200,7 @@ $P record proposal --task <task_id> --actor advisor --json '{
 }'
 ```
 
-### 2. Justice records a judgement
+### 3. Justice records a judgement
 
 ```bash
 $P record judgement --task <task_id> --actor justice --json '{
@@ -149,11 +208,19 @@ $P record judgement --task <task_id> --actor justice --json '{
   "verdict": "approve",
   "spec_violation": "none",
   "spec_refs": ["SPEC.md: relevant clause"],
-  "reason": "Why the subject conforms or does not conform"
+  "reason": "Why the subject conforms or does not conform",
+  "verification": ["the command justice ran", "what it printed"]
 }'
 ```
 
-The subject is `proposal:<id>`, `plan:<id>`, or `report:<id>`. Violation meanings:
+The subject is `proposal:<id>`, `plan:<id>`, or `report:<id>`. A judgement on a
+**plan** or a **report** must carry `verification`: the checks justice actually ran
+and what they answered. `reason` says what justice thinks; `verification` is why
+anyone should believe it, and a judgement without it is refused by the command, not
+merely discouraged. A proposal is read rather than executed, so its five fields are
+the evidence and no `verification` is asked for.
+
+Violation meanings:
 
 | `spec_violation` | Meaning | Consequence |
 |---|---|---|
@@ -161,11 +228,30 @@ The subject is `proposal:<id>`, `plan:<id>`, or `report:<id>`. Violation meaning
 | `premise` | The current premise is insufficient; clarify or amend the SPEC | Plan cannot be approved; advisor writes a proposal |
 | `direct` | Directly violates the current SPEC | Cannot be approved; rework or obtain a user-approved amendment first |
 
+A role's session is a fact that changes: a provider refuses a model, a session is
+moved, a tier is raised. Record it when it changes, rather than leaving the task
+record to say what `start` drew:
+
+```bash
+$P record session --task <task_id> --actor justice --json '{
+  "role": "advisor",
+  "session": "polity-<task_id>-advisor",
+  "model": "provider/model",
+  "remote": "build",
+  "cwd": "/home/build/project",
+  "note": "why it moved"
+}'
+```
+
+`role` is `justice`, `advisor`, or `premier`; `remote` and `cwd` may be `null`, which
+says this machine. `start` writes one such record per role it creates; the append-only
+file then answers "what is running", and `status` stops being the only witness.
+
 Justice approving a proposal means only that it is suitable to present to the user.
 Present its example, expected/actual behavior, and current/proposed clauses. Silence,
 ambiguity, or refusal never authorizes a SPEC edit.
 
-### 3. Dispatch only an approved plan
+### 4. Dispatch only an approved plan
 
 ```bash
 $P dispatch --task <task_id> --plan plan-1
@@ -174,6 +260,17 @@ $P dispatch --task <task_id> --plan plan-1
 The helper requires the plan's latest judgement to be `approve + none`, then sends the
 handoff to premier. Premier follows the `subagent` skill: self-contained briefs,
 separate worktrees, explicit waits, and review. A draft plan cannot start implementation.
+
+The handoff carries two landing rules, because a checkout's branch is not yours to
+assume — one polity run landed two commits on another session's branch, because the
+main checkout had been switched while justice was reading it: read `git -C <checkout>
+rev-parse --abbrev-ref HEAD` before landing and land only on the branch the plan names;
+if the checkout is on another branch, land from a temporary worktree rather than moving
+a live one. And stage by path, so another session's uncommitted work is never carried
+by a commit that is not its own.
+
+Premier's first message at `start` only says to stand by: a role that is told to wait
+needs one line, not a turn spent reading a plan that does not exist yet.
 After integration, premier writes:
 
 ```bash
@@ -190,7 +287,7 @@ Justice must approve the report before delivery. A `direct` violation or scope d
 returns to advisor for replanning; incomplete implementation returns to premier for a
 new report against the same approved plan.
 
-### 4. Record the user's SPEC decision
+### 5. Record the user's SPEC decision
 
 ```bash
 $P record spec_amendment --task <task_id> --actor justice --json '{
