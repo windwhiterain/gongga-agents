@@ -129,48 +129,38 @@ with a new ID.
 
 ### 1. Justice records what the user asked for
 
-Before a plan exists, the user's own requirements are written down. A requirement is
-one sentence the user would recognise as theirs, plus where they said it:
+Before a plan exists, the user's own requirements are written down. SPEC names the
+record `requirement{proposals, plans, reports, solved}`: the sentence the user would
+recognise as theirs, the records that answer it, and whether it is done.
 
 ```bash
 $P record requirement --task <task_id> --actor justice --json '{
   "text": "All runs use flash",
-  "source": "user, in the session that started this task"
+  "source": "user, in the session that started this task",
+  "plans": ["plan-1"]
 }'
 ```
 
-Only justice writes one, because only justice talks to the user. The record is what a
-later judgement answers: `judgement-6` refusing work for breaking a clause is weaker
-than refusing it for breaking the sentence the user actually wrote, and a requirement
-that lives only in a transcript is re-argued every round.
+Only justice writes one, because only justice talks to the user. `proposals`,
+`plans` and `reports` are lists of record ids, and each id must name a record that
+exists -- a reference to nothing is a claim nobody can check. Leave them out while the
+requirement is unanswered, and add them when the record that answers it lands.
 
-A requirement stays open until a later requirement record names it in `closes`:
+A requirement stays open until a later requirement record says `"solved": true` for
+it. `status` prints the open set, which is the list of sentences still owed an
+answer. Recording the solved form again is the closure:
 
 ```bash
 $P record requirement --task <task_id> --actor justice --json '{
-  "text": "Superseded: the user replaced this with the SPEC amendment",
-  "closes": "requirement-2"
+  "text": "All runs use flash -- satisfied by plan-1 and report-5",
+  "reports": ["report-5"],
+  "solved": true
 }'
 ```
 
-That record is the closure event and asks for nothing; `status` shows which
-requirements are still open. **Every judgement then carries `requirements`, one entry
-per open requirement, and the command refuses a judgement that misses one:**
-
-```bash
-$P record judgement --task <task_id> --actor justice --json '{
-  "subject": "report:report-3",
-  "verdict": "revise",
-  "spec_violation": "none",
-  "reason": "the benchmark ran on a synthetic script, not the real task",
-  "verification": ["read the report's benchmark section"],
-  "requirements": {"requirement-1": "met", "requirement-2": "unmet"}
-}'
-```
-
-Each value is `met`, `unmet`, or `not-applicable`. `unmet` is not by itself grounds
-for a verdict -- a report may be revised for one unmet requirement and approved once it
-is met -- but it is the answer justice owes the user, and it survives the transcript.
+That says what closed it, so the next reader does not have to reconstruct the link.
+A `judgement` may still carry a `requirements` map of its own; it is a convenience for
+the reasoning, not the record's answer -- `solved` is.
 
 ### 2. Advisor writes a plan
 

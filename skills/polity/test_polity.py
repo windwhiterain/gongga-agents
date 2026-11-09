@@ -314,71 +314,40 @@ class PolityTest(unittest.TestCase):
         self.assertEqual(records[-1]["kind"], "requirement")
         self.assertEqual([r["id"] for r in polity.open_requirements(records)], ["requirement-1"])
 
-    def test_a_judgement_answers_every_open_requirement(self):
-        self.record("requirement", "justice", {"text": "no synthetic bench"})
-        self.record("requirement", "justice", {"text": "all runs use flash"})
+    def test_a_requirement_names_the_records_that_answer_it(self):
         self.record(
             "plan",
             "advisor",
             {"spec_refs": ["Spec"], "steps": ["implement"], "acceptance": ["ran"]},
         )
-        judge = {
-            "subject": "plan:plan-1",
-            "verdict": "revise",
-            "spec_violation": "none",
-            "reason": "the plan names a scripted bench",
-            "verification": ["read the plan against the two requirements"],
-        }
-        with self.assertRaisesRegex(ValueError, "every open requirement"):
-            self.record("judgement", "justice", judge)
-        partial = dict(judge, requirements={"requirement-1": "unmet"})
-        with self.assertRaisesRegex(ValueError, "every open requirement"):
-            self.record("judgement", "justice", partial)
-        unknown = dict(
-            judge,
-            requirements={
-                "requirement-1": "unmet",
-                "requirement-2": "met",
-                "requirement-9": "met",
-            },
-        )
-        with self.assertRaisesRegex(ValueError, "no open requirement"):
-            self.record("judgement", "justice", unknown)
-        wrong_state = dict(
-            judge,
-            requirements={"requirement-1": "mostly", "requirement-2": "met"},
-        )
-        with self.assertRaisesRegex(ValueError, "met, unmet, or"):
-            self.record("judgement", "justice", wrong_state)
-        self.record(
-            "judgement",
-            "justice",
-            dict(
-                judge,
-                requirements={"requirement-1": "unmet", "requirement-2": "met"},
-            ),
-        )
-        # Closing one is a later requirement record naming it, so the next
-        # judgement answers only what is still open.
         self.record(
             "requirement",
             "justice",
-            {"text": "answered for this task", "closes": "requirement-1",
-             "dropped": True},
+            {"text": "no synthetic bench", "plans": ["plan-1"]},
         )
-        with self.assertRaisesRegex(ValueError, "requirement-2"):
-            self.record("judgement", "justice", dict(judge, requirements={}))
-        open_ids = [r["id"] for r in polity.open_requirements(polity.read_task("demo", self.home)[1])]
-        self.assertEqual(open_ids, ["requirement-2"])
-
-    def test_closing_an_unknown_requirement_is_refused(self):
-        with self.assertRaisesRegex(ValueError, "expected one requirement"):
+        # A reference to nothing is a claim nobody can check.
+        with self.assertRaisesRegex(ValueError, "expected one plan"):
             self.record(
                 "requirement",
                 "justice",
-                {"text": "done", "closes": "requirement-7"},
+                {"text": "all runs use flash", "plans": ["plan-9"]},
             )
-
+        open_ids = [
+            r["id"] for r in polity.open_requirements(polity.read_task("demo", self.home)[1])
+        ]
+        self.assertEqual(open_ids, ["requirement-1"])
+        # `solved` is the flag the SPEC names, and it is the only one.
+        self.record(
+            "requirement",
+            "justice",
+            {"text": "the plan answers it", "solved": True},
+        )
+        open_ids = [
+            r["id"] for r in polity.open_requirements(polity.read_task("demo", self.home)[1])
+        ]
+        self.assertEqual(open_ids, ["requirement-1"])
+        with self.assertRaisesRegex(ValueError, "solved must be true or false"):
+            self.record("requirement", "justice", {"text": "x", "solved": "yes"})
 
 if __name__ == "__main__":
     unittest.main()

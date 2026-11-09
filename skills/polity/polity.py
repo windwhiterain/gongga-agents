@@ -96,24 +96,11 @@ def find_record(records, kind, identifier):
 
 
 def open_requirements(records):
-    """Every requirement no later requirement record has closed.
-
-    A record that replaces another carries both: `closes` names what it drops and
-    its own `text` is the rule that now stands. One that only closes something --
-    "superseded, nothing to answer" -- says `"dropped": true`, because otherwise
-    its text would read as a rule nobody can meet.
-    """
-    closed = {
-        record["closes"]
-        for record in records
-        if record.get("kind") == "requirement" and record.get("closes")
-    }
+    """Every requirement still unsolved: SPEC says `solved`, so that is the flag."""
     return [
         record
         for record in records
-        if record.get("kind") == "requirement"
-        and not record.get("dropped")
-        and record["id"] not in closed
+        if record.get("kind") == "requirement" and not record.get("solved")
     ]
 
 
@@ -249,16 +236,13 @@ def normalize(kind, payload):
         string_list(payload, "changes")
         string_list(payload, "verification")
     elif kind == "requirement":
-        # What the user asked for, in their words: justice writes it down so a
-        # later judgement answers a fixed sentence instead of a memory.
+        # SPEC: what the user asked for, and the records that answer it.
         required_strings(payload, ("text",))
-        for field in ("source", "closes"):
-            if field in payload and not isinstance(payload[field], str):
-                fail(f"requirement.{field} must be a string")
-        if "closes" in payload and not payload["closes"].strip():
-            fail("requirement.closes must name a requirement")
-        if "dropped" in payload and not isinstance(payload["dropped"], bool):
-            fail("requirement.dropped must be true or false")
+        for field in ("proposals", "plans", "reports"):
+            if field in payload:
+                string_list(payload, field)
+        if "solved" in payload and not isinstance(payload["solved"], bool):
+            fail("requirement.solved must be true or false")
     elif kind == "session":
         required_strings(payload, ("role", "session"))
         if payload["role"] not in ("justice", "advisor", "premier"):
@@ -564,8 +548,15 @@ def record_document(args, task, path):
         fail("only justice can record a judgement or the user's spec decision")
     if args.kind == "requirement" and args.actor != "justice":
         fail("only justice records the user's requirements")
-    if args.kind == "requirement" and payload.get("closes"):
-        find_record(records, "requirement", payload["closes"])
+    if args.kind == "requirement":
+        # A reference to nothing is a claim nobody can check.
+        for field, kind in (
+            ("proposals", "proposal"),
+            ("plans", "plan"),
+            ("reports", "report"),
+        ):
+            for identifier in payload.get(field, []):
+                find_record(records, kind, identifier)
     if args.kind == "session" and args.actor not in ("justice", "advisor", "premier"):
         fail("a session record names its actor: justice, advisor, or premier")
     identifier = record_id(records, args.kind, args.id)
@@ -574,17 +565,6 @@ def record_document(args, task, path):
         if any(record.get("id") == args.id for record in records):
             fail(f"record id already exists: {identifier}")
     if args.kind == "judgement":
-        open_ids = [record["id"] for record in open_requirements(records)]
-        answers = payload.get("requirements", {})
-        unknown = sorted(set(answers) - set(open_ids))
-        if unknown:
-            fail(f"judgement.requirements names no open requirement: {unknown}")
-        missing = [identifier for identifier in open_ids if identifier not in answers]
-        if missing:
-            fail(
-                "a judgement answers every open requirement: "
-                f"missing {missing} from {open_ids}"
-            )
         subject = payload["subject"]
         match = re.fullmatch(r"(proposal|plan|report):(.+)", subject)
         if not match:
