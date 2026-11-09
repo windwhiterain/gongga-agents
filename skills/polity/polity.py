@@ -96,11 +96,25 @@ def find_record(records, kind, identifier):
 
 
 def open_requirements(records):
-    """Every requirement still unsolved: SPEC says `solved`, so that is the flag."""
+    """Every requirement still unsolved.
+
+    A solved record closes the one its `ref` names; without a `ref` it is a
+    requirement of its own that arrives already solved, which is a way of recording
+    something the user asked for after it was done.
+    """
+    closed = {
+        record["ref"]
+        for record in records
+        if record.get("kind") == "requirement"
+        and record.get("solved")
+        and record.get("ref")
+    }
     return [
         record
         for record in records
-        if record.get("kind") == "requirement" and not record.get("solved")
+        if record.get("kind") == "requirement"
+        and not record.get("solved")
+        and record["id"] not in closed
     ]
 
 
@@ -243,6 +257,8 @@ def normalize(kind, payload):
                 string_list(payload, field)
         if "solved" in payload and not isinstance(payload["solved"], bool):
             fail("requirement.solved must be true or false")
+        if "ref" in payload and not isinstance(payload["ref"], str):
+            fail("requirement.ref must be the id of the requirement it restates")
     elif kind == "session":
         required_strings(payload, ("role", "session"))
         if payload["role"] not in ("justice", "advisor", "premier"):
@@ -557,6 +573,8 @@ def record_document(args, task, path):
         ):
             for identifier in payload.get(field, []):
                 find_record(records, kind, identifier)
+        if payload.get("ref"):
+            find_record(records, "requirement", payload["ref"])
     if args.kind == "session" and args.actor not in ("justice", "advisor", "premier"):
         fail("a session record names its actor: justice, advisor, or premier")
     identifier = record_id(records, args.kind, args.id)

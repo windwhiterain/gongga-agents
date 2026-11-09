@@ -146,8 +146,8 @@ Only justice writes one, because only justice talks to the user. `proposals`,
 exists -- a reference to nothing is a claim nobody can check. Leave them out while the
 requirement is unanswered, and add them when the record that answers it lands.
 
-A requirement stays open until a later requirement record says `"solved": true` for
-it. `status` prints the open set, which is the list of sentences still owed an
+A requirement stays open until a later requirement record names it in `"ref"` and
+says `"solved": true`. `status` prints the open set, which is the list of sentences still owed an
 answer. Recording the solved form again is the closure:
 
 ```bash
