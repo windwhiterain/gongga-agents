@@ -103,6 +103,47 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/clean-disk.ps1" 
 有人正在编译的那份是"热"的，删掉它会让人家从头重编；先删隔夜没动过的。
 判冷热的数只有 DryRun 给，所以**多 agent 共机时先看这一列再决定删哪个**。
 
+## 清理之后仍然不够：找「被遗忘的空间」
+
+`clean-disk.ps1` 只清**缓存**——能被工具重新生成的东西。磁盘还是不够、或者清完立刻又满时，
+缺的那块通常在三类地方，它们都按设计不在主脚本范围内：
+
+| 为什么主脚本碰不到 | 例子（本机实测） |
+| --- | --- |
+| **没人清**：某个装过就忘的安装/打包 | 回收站里一整套 Anaconda3（15.9 GiB，需要管理员）；`AppData\Local	i-build-cache\mambaforge`（另一个 conda，2.98 GiB）；`cycles\.transfer\cycles-transfer.tar`（一次性传输包，13.3 GiB） |
+| **删了功能，没删产物** | `C:\ProgramData\gongga\gongga-disk-reserve`：`disk::Reserve` 被换掉后留下的 1 GiB 空壳文件，代码里已无创建者 |
+| **看不见**：非管理员读不出来 | `C:\System Volume Information`（还原点/卷影副本，读出来是 0）；`C:\Windows\Temp`、`Prefetch` 同理 |
+
+用同目录的 `find-forgotten.ps1` 找它们（**只读，永不删除**）：
+
+```bash
+powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/find-forgotten.ps1"
+# 只看更大的、要更多条目：
+powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/find-forgotten.ps1" -MinMB 500 -Top 40
+```
+
+它走一遍全盘（本机 170 万文件约 2 分钟），输出七节：卷 → 最大文件 → 孤儿安装/备份目录 →
+一次性打包/镜像 → **大但不要删** → 非管理员量不到的位置 → `ProgramData` 下的应用目录。
+每行都带一个结论列，照它办：
+
+| 结论 | 怎么办 |
+| --- | --- |
+| `可删` | 直接删（如已送达的 tar、旧镜像） |
+| `需确认` | **问用户**：装过什么、还要不要、那份备份还要不要回滚 |
+| `不要删` | 一律不动。`pagefile.sys` / `hiberfil.sys` 是**功能取舍**（`powercfg /h off` 才回收休眠文件），`WinSxS` 只能走 DISM，`Windows\Installer` 与 `ProgramData\Package Cache` 删了就装不回去、也卸不掉 |
+| `需管理员` | 提权才量得到/删得掉；`System Volume Information` 用 `vssadmin list shadowstorage` |
+
+几条硬规矩：
+
+- **`需确认` 不等于可删。** 备份目录（`*ackups`、`*.old`）可能是唯一的回滚点；用户目录（如 `C:	mp` 里的
+  `edge_cookies.db`、`dskey`）是**用户数据**，不是缓存，别顺手删。
+- **孤儿安装要连痕迹一起看。** conda 类安装即使目录删了，也会留下
+  `Start Menu\Programs\<名字>` 快捷方式和卸载注册项——目录、快捷方式、注册项三处都清了才算干净。
+- **回收站里的东西可能不归你。** 别的账号装的软件删到回收站后，本账号 `icacls /grant` 也是
+  *Access is denied*，只有提权能删；主脚本会用 `recycle_left` 报出来。
+- **删完功能顺手清它的路径。** 改完代码 `grep` 一遍这个功能写过的目录/文件（见
+  `AGENTS.md`「功能删掉时，它在盘上的产物也要删」）。
+
 ## 清理边界（设计决策，不要擅自改）
 
 | 清（可重建） | 永不碰 |
