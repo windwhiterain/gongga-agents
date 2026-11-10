@@ -27,7 +27,7 @@ def load():
     spec = importlib.util.spec_from_file_location("cuwin", os.path.join(HERE, "cuwin.py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    mod.list_windows = lambda all_desktops=False: list(WINDOWS)
+    mod.list_windows = lambda: list(WINDOWS)
     return mod
 
 

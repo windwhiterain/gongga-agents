@@ -2,7 +2,6 @@
 # requires-python = ">=3.9"
 # dependencies = [
 #   "comtypes; sys_platform == 'win32'",
-#   "pyvda; sys_platform == 'win32'",
 #   "pyobjc-framework-Quartz; sys_platform == 'darwin'",
 # ]
 # ///
@@ -12,10 +11,6 @@ The point of this file is the interface, not the mechanism: `shot`, `tree`,
 `click`, `type`, `key`, `focus`, `windows`, `doctor` mean the same thing
 everywhere, so only the backend changes. Backends live in cuwin.py, cumac.py and
 culinux.py.
-
-`desktop` is the exception: only Windows has virtual desktops this can drive
-through an interface rather than by guessing hotkeys, so the other backends say
-so instead of pretending.
 
 Coordinates are screen pixels in the same space the UI tree reports. That is only
 true because every backend makes its process DPI aware on Windows and works in
@@ -61,12 +56,6 @@ def shown_id(backend, win):
     return formatter(win["hwnd"]) if formatter else str(win["hwnd"])
 
 
-def require_desktops(backend, name):
-    """Virtual desktops are Windows only; say so rather than fail on a missing attribute."""
-    if not hasattr(backend, "list_desktops"):
-        raise RuntimeError("the %s backend has no virtual desktops; this command is Windows only" % name)
-
-
 def claim_target(backend, spec):
     """Focus the named window, or report who owns the keyboard right now.
 
@@ -96,28 +85,6 @@ def main(argv):
     sub = parser.add_subparsers(dest="cmd")
     sub.add_parser("doctor", help="check that this skill can work here")
     p = sub.add_parser("windows", help="list top-level windows")
-    p.add_argument("--all-desktops", action="store_true",
-                   help="include windows on other virtual desktops, with their number (Windows)")
-    desktop = sub.add_parser("desktop", help="list and drive virtual desktops (Windows)")
-    actions = desktop.add_subparsers(dest="action")
-    actions.add_parser("ls", help="list desktops; also what a bare `cu desktop` does")
-    p = actions.add_parser("new", help="create a desktop without switching to it")
-    p.add_argument("--name")
-    p = actions.add_parser("go", help="switch to a desktop")
-    p.add_argument("number", type=int)
-    p = actions.add_parser("rm", help="remove a desktop; its windows go to the fallback")
-    p.add_argument("number", type=int)
-    p.add_argument("--fallback", type=int, help="desktop to land on if removing the current one")
-    p = actions.add_parser("name", help="rename a desktop")
-    p.add_argument("number", type=int)
-    p.add_argument("name")
-    p = actions.add_parser("move", help="move a window to a desktop")
-    p.add_argument("window")
-    p.add_argument("number", type=int)
-    p = actions.add_parser("pin", help="show a window on every desktop")
-    p.add_argument("window")
-    p = actions.add_parser("unpin", help="stop showing a window on every desktop")
-    p.add_argument("window")
     p = sub.add_parser("shot", help="capture the screen or one window")
     p.add_argument("--window")
     p.add_argument("--scale", type=float, default=1.0)
@@ -160,11 +127,8 @@ def main(argv):
         return 0 if ok else 1
 
     if args.cmd == "windows":
-        if args.all_desktops:
-            require_desktops(backend, name)
-        wins = backend.list_windows(all_desktops=True) if args.all_desktops else backend.list_windows()
         current = backend.foreground()["hwnd"]
-        for w in wins:
+        for w in backend.list_windows():
             mark = "*" if w["hwnd"] == current else " "
             title = w["title"]
             if len(title) > 55:
@@ -172,57 +136,8 @@ def main(argv):
             # The backend decides how an id looks: Windows hwnds are decimal,
             # X11 ids are conventionally hexadecimal.
             shown = backend.format_id(w["hwnd"]) if hasattr(backend, "format_id") else str(w["hwnd"])
-            # Empty without the flag, so the line stays byte-identical to before it.
-            column = ""
-            if args.all_desktops:
-                number = w.get("desktop")
-                column = "d%-3s" % (number if number is not None else "?")
-            out("%s%9s %7d %s@%d,%d %dx%d  %s"
-                % (mark, shown, w["pid"], column, w["x"], w["y"], w["w"], w["h"], title))
-        return 0
-
-    if args.cmd == "desktop":
-        require_desktops(backend, name)
-        action = args.action or "ls"
-        if action == "ls":
-            for d in backend.list_desktops():
-                out("%s%2d  %-24s %s" % ("*" if d["current"] else " ", d["number"],
-                                         d["name"] or "(unnamed)", d["id"]))
-            return 0
-        if action == "new":
-            d = backend.create_desktop(args.name)
-            out("created desktop %d %s; still on desktop %d"
-                % (d["number"], d["id"], backend.current_desktop()["number"]))
-            return 0
-        if action == "go":
-            if not backend.switch_desktop(args.number):
-                raise SystemExit("switching to desktop %d did not take; still on %d"
-                                 % (args.number, backend.current_desktop()["number"]))
-            out("on desktop %d" % args.number)
-            return 0
-        if action == "rm":
-            if not backend.remove_desktop(args.number, args.fallback):
-                raise SystemExit("desktop %d is still there" % args.number)
-            out("removed desktop %d; %d left, on desktop %d"
-                % (args.number, len(backend.list_desktops()), backend.current_desktop()["number"]))
-            return 0
-        if action == "name":
-            if not backend.rename_desktop(args.number, args.name):
-                raise SystemExit("desktop %d did not take the name %r" % (args.number, args.name))
-            out("desktop %d is now %r" % (args.number, args.name))
-            return 0
-        win = backend.resolve_window(args.window, all_desktops=True)
-        shown = shown_id(backend, win)
-        if action == "move":
-            if not backend.move_window(win["hwnd"], args.number):
-                raise SystemExit("could not move %s %r to desktop %d"
-                                 % (shown, win["title"], args.number))
-            out("moved %s %r to desktop %d" % (shown, win["title"], args.number))
-            return 0
-        pinned = action == "pin"
-        if not backend.set_window_pinned(win["hwnd"], pinned):
-            raise SystemExit("could not %s %s %r" % (action, shown, win["title"]))
-        out("%s %s %r" % ("pinned" if pinned else "unpinned", shown, win["title"]))
+            out("%s%9s %7d @%d,%d %dx%d  %s"
+                % (mark, shown, w["pid"], w["x"], w["y"], w["w"], w["h"], title))
         return 0
 
     if args.cmd == "shot":
