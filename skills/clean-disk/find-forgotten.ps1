@@ -61,7 +61,9 @@ $bigFiles = New-Object System.Collections.Generic.List[object]
 $staleFiles = New-Object System.Collections.Generic.List[object]
 $images = New-Object System.Collections.Generic.List[object]
 $orphanInstalls = New-Object System.Collections.Generic.List[object]
-$archiveExt = @('.tar', '.zip', '.7z', '.gz', '.tgz', '.iso', '.vhdx', '.vhd', '.vmdk', '.wim', '.dmp', '.bak')
+# 归档可以直接删；虚拟磁盘/镜像**不能**——那是正在用的机器盘，只能压缩，不能删
+$archiveExt = @('.tar', '.zip', '.7z', '.gz', '.tgz', '.iso', '.bak', '.dmp')
+$diskImageExt = @('.vhdx', '.vhd', '.vmdk', '.vdi', '.qcow2', '.wim')
 $installLeaf = '^(?i)(anaconda3?|miniconda3?|miniforge3?|mambaforge|micromamba)$'
 $pruneLeaf = @('System Volume Information', 'WinSxS', '$Recycle.Bin', 'node_modules', '.git')
 
@@ -84,8 +86,12 @@ foreach ($v in $volumes) {
                     if ($fi.LastWriteTime -lt $staleCut) {
                         $staleFiles.Add([pscustomobject]@{ Path = $f; Size = $len; When = $fi.LastWriteTime })
                     }
-                    if ($archiveExt -contains [IO.Path]::GetExtension($f).ToLower()) {
-                        $images.Add([pscustomobject]@{ Path = $f; Size = $len; When = $fi.LastWriteTime })
+                    $ext = [IO.Path]::GetExtension($f).ToLower()
+                    if ($archiveExt -contains $ext) {
+                        $images.Add([pscustomobject]@{ Path = $f; Size = $len; When = $fi.LastWriteTime; Verdict = '可删·若已送达' })
+                    } elseif ($diskImageExt -contains $ext) {
+                        # WSL/虚拟机磁盘：删了等于删机器；只能 wsl --shutdown + Optimize-VHD 压缩
+                        $images.Add([pscustomobject]@{ Path = $f; Size = $len; When = $fi.LastWriteTime; Verdict = '需确认·在用磁盘' })
                     }
                 }
             }
@@ -140,7 +146,7 @@ if ($images.Count -eq 0) {
     Write-Host '  无' -ForegroundColor DarkGray
 } else {
     $images | Sort-Object Size -Descending | Select-Object -First 15 | ForEach-Object {
-        Write-Host ('  {0,-11} {1,-17} 可删·若已送达  {2}' -f (Format-Size $_.Size), $_.When.ToString('yyyy-MM-dd HH:mm'), $_.Path)
+        Write-Host ('  {0,-11} {1,-17} {2,-13} {3}' -f (Format-Size $_.Size), $_.When.ToString('yyyy-MM-dd HH:mm'), $_.Verdict, $_.Path)
     }
 }
 

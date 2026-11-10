@@ -135,6 +135,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/find-forgotten.p
 
 几条硬规矩：
 
+- **虚拟磁盘不是归档。** `.vhdx`/`.vhd`/`.wim` 是**正在用的机器盘**（WSL 的 `ext4.vhdx` 能到几十 GiB）：
+  删掉等于删掉那台机器。要回收只能 `wsl --shutdown` 之后 `Optimize-VHD`/`diskpart compact`，属于单独一步。
+  脚本给它的结论是 `需确认·在用磁盘`，不是 `可删`。
 - **`需确认` 不等于可删。** 备份目录（`*ackups`、`*.old`）可能是唯一的回滚点；用户目录（如 `C:	mp` 里的
   `edge_cookies.db`、`dskey`）是**用户数据**，不是缓存，别顺手删。
 - **孤儿安装要连痕迹一起看。** conda 类安装即使目录删了，也会留下
