@@ -1,6 +1,6 @@
 ---
 name: computer_use
-description: 用鼠标和键盘真的操作桌面——截图看屏、按控件树定位、点击/打字/按键，然后截图确认。任何只能通过图形界面完成的事（原生应用、装不了 CLI 的软件、拖拽、菜单）用它。Windows 已验证，macOS/Linux 后端已写但未实测。
+description: 用鼠标和键盘真的操作桌面——截图看屏、按控件树定位、点击/打字/按键，然后截图确认；也能新建/切换虚拟桌面、把窗口搬过去，把自己的活和用户隔开（虚拟桌面仅 Windows）。任何只能通过图形界面完成的事（原生应用、装不了 CLI 的软件、拖拽、菜单）用它。Windows 已验证，macOS/Linux 后端已写但未实测。
 metadata:
   entry: cu
 ---
@@ -9,6 +9,8 @@ metadata:
 
 `$SKILL_DIR/cu` 是一条命令，三个平台：`shot`、`tree`、`click`、
 `type`、`key`、`focus`、`windows`、`doctor` 在哪儿都叫这个名字，只有后端换掉。
+`desktop` 是唯一的例外：只有 Windows 有能用接口驱动的虚拟桌面，别的后端会直说
+不支持，而不是去猜一套热键。
 
 ```bash
 # 本 skill 的目录：`@skill:` 展开里 `SKILL.md: <path>` 的父目录（`index_skill` 的 path 列同源）。
@@ -26,7 +28,7 @@ SKILL_DIR=<本 SKILL.md 所在目录>
 
 | 平台 | 后端 | 状态 |
 |---|---|---|
-| Windows | `cuwin.py`：ctypes + UIAutomation | **实测通过**（截图、控件树、点击、打字、组合键、焦点） |
+| Windows | `cuwin.py`：ctypes + UIAutomation + pyvda | **实测通过**（截图、控件树、点击、打字、组合键、焦点、虚拟桌面全套；build 22631） |
 | macOS | `cumac.py`：Quartz + Accessibility + `screencapture` | 未实测，按文档写的 |
 | Linux (X11) | `culinux.py`：`xdotool`/`wmctrl`/ImageMagick | **实测通过**（Ubuntu 24.04 + openbox + Xvfb：8 条命令全跑通，中文字符串完整落地） |
 
@@ -104,6 +106,62 @@ could not focus 198124 "SPEC.md - gongga"; refusing to send input blind
 
 不带 `--window` 时先打印当前前台是谁：`target: foreground hwnd=... "..."`。
 
+## 虚拟桌面：把自己的活和用户隔开（仅 Windows）
+
+这是用户的真实桌面，agent 在上面点来点去本来就是在打扰人。虚拟桌面让这件事可隔离：
+新建一个，把自己的窗口搬过去，切过去干活，干完切回来、删掉。
+
+```bash
+cu desktop                       # 列出：* 是当前，然后号、名字、GUID
+cu desktop new --name agent      # 新建，**不切过去**
+cu windows                       # 找到自己要搬的那个窗口
+cu desktop move 1381468 2        # 搬到 2 号
+cu desktop go 2                  # 切过去（读回确认才算数）
+cu shot --window 1381468 --scale 0.5
+cu desktop go 1                  # 干完切回用户那个
+cu desktop rm 2 --fallback 1     # 删掉，窗口落到 fallback
+```
+
+`cu desktop` 不带动作就是 `ls`。其余动作：`name N NAME` 改名、`pin W` 让窗口出现在
+每个桌面、`unpin W` 取消。`W` 和别处一样，可以是 hwnd 或标题片段。
+
+**为什么是 pyvda**：创建/切换桌面没有文档化的 Win32 API，走的是 shell 的
+`IVirtualDesktopManagerInternal`，它的 GUID 随 build 换。pyvda（MIT，只依赖
+comtypes——本来就在）import 时逐个试 GUID 做特征探测，覆盖到 build 26100。这份
+build 知识放在一个有人维护的地方，比在这里抄一张会悄悄过期的表强。**懒加载**：只有
+desktop 命令和 `--all-desktops` 才 import 它，所以 pyvda 认不出的 build 上
+`shot`/`tree`/`click` 照常能用，`doctor` 单独报一行、且不参与 usable 投票。
+
+### 别的桌面上的窗口默认是隐形的
+
+`cu windows` 看不见它们，`--window` 也解析不到——**这是有意的**：截不到，也点不着。
+shell 用 `DWMWA_CLOAKED` 把不在当前桌面的窗口藏起来（实测值 2）。要看全：
+
+```bash
+cu windows --all-desktops        # 多一列 d<号>；d? 是 view collection 里没有它
+```
+
+对别的桌面上的窗口直接 `shot` / `focus` / `type`，会拒绝并说清它在哪儿：
+
+```
+error: no window with hwnd 1381468; it is on desktop 2 -- run: cu desktop go 2, or cu windows --all-desktops
+```
+
+**cloak=2 不等于「在别的桌面上」**：UWP 幽灵窗口（「Windows 输入体验」）读回来也是 2，
+只按 cloak 放行就会把它放回来。真正的判据是 view collection 里有没有它的桌面号——
+幽灵没有。所以 `--all-desktops` 只放回**有桌面号、且号不等于当前桌面**的那些。
+
+### 实测出来的语义（别按直觉猜）
+
+| 事 | 实测结果 |
+|---|---|
+| `new` 会切过去吗 | **不会**：current 不变，桌面数 +1 |
+| `rm` 掉当前桌面 | 切到 `--fallback`；不给就落到 1 号 |
+| `rm` 只剩的那一个 | 拒绝：`cannot remove desktop 1: it is the only one` |
+| `rm` 之后的编号 | 幸存者立刻重编号，所以后端按 **GUID** 核对删没删掉，不按号 |
+| `pin` 后切桌面 | 窗口跟着出现在每个桌面；`unpin` 后回到它原本那个 |
+| 每个动作的成败 | 都读回核对（`go` 读 current、`move` 读窗口所在桌面、`pin` 读 is_pinned），不把「COM 没抛异常」当成功 |
+
 ## 浏览器：读一页正文
 
 浏览器没有「正文」这个控件：整页是一个 `Document`，`tree` 只给一个巨大的矩形，
@@ -150,14 +208,21 @@ powershell -NoProfile -Command "Get-Clipboard -Raw | Out-File -Encoding utf8 C:\
 
 | 命令 | 作用 |
 |---|---|
-| `cu doctor` | 自检：DPI、控件树、INPUT 结构、截图 |
-| `cu windows` | 顶层窗口：hwnd、pid、矩形、标题（`*` 是前台） |
+| `cu doctor` | 自检：DPI、控件树、INPUT 结构、截图、虚拟桌面 |
+| `cu windows [--all-desktops]` | 顶层窗口：hwnd、pid、矩形、标题（`*` 是前台）；加旗标则含别的桌面并多一列 `d<号>` |
 | `cu shot [--window W] [--scale F] [--out P]` | 截图，打印 `@image(<路径>)` |
 | `cu tree [--window W] [--depth N] [--max N]` | 控件树：类型、名字、屏幕矩形 |
 | `cu click X Y [--double] [--right] [--window W]` | 点击 |
 | `cu type [--window W] <文本>` | 输入文本（Unicode，中文正常） |
 | `cu key [--window W] ctrl+s` | 组合键 |
 | `cu focus W` | 把窗口拿到前台 |
+| `cu desktop [ls]` | 列虚拟桌面（仅 Windows，下同）：`*` 是当前，号、名字、GUID |
+| `cu desktop new [--name N]` | 新建一个桌面，**不切过去** |
+| `cu desktop go N` | 切到 N 号桌面 |
+| `cu desktop rm N [--fallback M]` | 删掉 N 号；删的是当前桌面时落到 M（默认 1） |
+| `cu desktop name N NAME` | 给桌面改名 |
+| `cu desktop move W N` | 把窗口搬到 N 号桌面 |
+| `cu desktop pin W` / `unpin W` | 让窗口出现在每个桌面 / 取消 |
 
 `W` 可写 hwnd（`47974752`）或标题片段（`"Notepad"`）；片段匹配多个时报错列候选。
 `key` 支持 `ctrl` `shift` `alt` `win` `f1`–`f24` `enter` `tab` `esc` `space`
@@ -175,6 +240,10 @@ powershell -NoProfile -Command "Get-Clipboard -Raw | Out-File -Encoding utf8 C:\
 | `tree` 报 `Cannot convert "∞" to Int32` | 无矩形的控件 UIA 返回无穷大 | Python 版按 right/bottom 是否 0 判空，打印 `?` |
 | `key enter` 报成功但没反应（Linux） | X11 的键名是 `Return`；`xdotool` 遇到未知键名时打印 `No such key name` 却仍然 exit 0 | `culinux.py` 显式映射友好名→keysym，未知键直接 ValueError，并检查 stderr |
 | Windows 上多出「Windows 输入体验」之类幽灵窗口 | UWP 隐藏窗口，`EnumWindows` 看得见但点不着 | 用 `DwmGetWindowAttribute(DWMWA_CLOAKED)` 过滤 |
+| 加了 `--all-desktops` 之后幽灵窗口又回来了 | 幽灵的 cloak 也是 **2**（`DWM_CLOAKED_SHELL`），和「在别的桌面上」同一个值，光看 cloak 分不开 | 判据改成 view collection 里的桌面号：幽灵没有号，真窗口有且不等于当前桌面 |
+| 别的桌面上的窗口 `cu windows` 找不到、`--window` 报 no window | shell 把它 cloak 了，默认列举按设计跳过 | `cu windows --all-desktops` 看它在几号，再 `cu desktop go N`；错误信息本身也会这么说 |
+| `cu desktop rm 2` 之后按号核对，说「还在」 | 删掉一个，幸存者立刻重编号，2 号又存在了（是原来的 3 号） | 按 **GUID** 核对删没删掉 |
+| 以为 `desktop new` 会切过去，接着就在原桌面上截图 | Windows 创建桌面**不切换** | `new` 之后显式 `go`；`new` 的输出会告诉你当前还在几号 |
 | `--window` 被 PowerShell 当自己的参数 | PS 参数解析套在脚本参数上 | PS 回落版走 `CU_ARGV` 环境变量（`\x1f` 分隔） |
 | `ctrl+a` 复制回一串 URL | 焦点还在地址栏（`ctrl+l` 之后没点进正文，或点击落空） | `ctrl+a` 之后截图：整页变蓝才是正文；落地后看第一行是不是 `http` |
 | 点击把页面切到别的标签、或别的应用 | 坐标从上一帧算的，或落在了标签栏/窗口外；`--window` 只保证把窗口拉前台，不保证坐标在它里面 | 坐标从最近一张 `shot` 算，点击前后各一张图 |

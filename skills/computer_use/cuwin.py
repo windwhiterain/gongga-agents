@@ -13,6 +13,7 @@ Two things here are not stylistic choices but responses to measured failures:
   ``SendInput`` report success while delivering nothing.
 """
 
+import _ctypes
 import ctypes
 import os
 import struct
@@ -116,21 +117,32 @@ def click(x, y, double=False, right=False):
 # --- windows -----------------------------------------------------------------
 
 
-def list_windows():
-    """Visible top-level windows with titles, via Win32 rather than UIA."""
+def list_windows(all_desktops=False):
+    """Visible top-level windows with titles, via Win32 rather than UIA.
+
+    Cloaked windows stay out by default: nothing can be clicked in a UWP ghost, and
+    a window on another desktop is not on screen to capture. With ``all_desktops``
+    the ones on another desktop come back carrying their number, which is what
+    makes a window findable before it can be moved or switched to.
+    """
+    current, numbering = _desktop_numbering() if all_desktops else (None, None)
     found = []
 
     @ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
     def visit(hwnd, _):
         if not user32.IsWindowVisible(hwnd):
             return True
-        # UWP apps keep hidden windows around; DWM calls them cloaked. They are
-        # visible to EnumWindows but nothing can be clicked in them.
         cloaked = wt.DWORD(0)
         if dwmapi.DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED,
                                         ctypes.byref(cloaked), ctypes.sizeof(cloaked)) == 0:
             if cloaked.value:
-                return True
+                # DWM_CLOAKED_SHELL (2, measured on build 22631) covers two different
+                # things: a window on another desktop, and a hidden UWP ghost such as
+                # "Windows 输入体验". Only the view collection tells them apart -- a
+                # ghost has no desktop at all.
+                desktop = numbering.get(int(hwnd)) if numbering is not None else None
+                if desktop is None or desktop == current:
+                    return True
         n = user32.GetWindowTextLengthW(hwnd)
         if n == 0:
             return True
@@ -141,20 +153,46 @@ def list_windows():
             return True
         pid = wt.DWORD()
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        found.append({
+        entry = {
             "hwnd": int(hwnd), "pid": pid.value, "title": buf.value,
             "x": rect.left, "y": rect.top,
             "w": rect.right - rect.left, "h": rect.bottom - rect.top,
-        })
+        }
+        if numbering is not None:
+            entry["desktop"] = numbering.get(int(hwnd))
+        found.append(entry)
         return True
 
     user32.EnumWindows(visit, 0)
     return found
 
 
-def resolve_window(spec):
+def _elsewhere(spec):
+    """The desktop a window is on when the default listing cannot see it."""
+    try:
+        wins = list_windows(all_desktops=True)
+    except RuntimeError:
+        return None
+    for w in wins:
+        if str(w["hwnd"]) == str(spec) or str(spec).lower() in w["title"].lower():
+            return w.get("desktop")
+    return None
+
+
+def _not_found(spec):
+    """Name the desktop instead of only saying the window is not here."""
+    message = ("no window with hwnd %s" % spec) if str(spec).isdigit() \
+        else ("no window matches %r" % spec)
+    desktop = _elsewhere(spec)
+    if desktop is not None:
+        return ("%s; it is on desktop %d -- run: cu desktop go %d, "
+                "or cu windows --all-desktops" % (message, desktop, desktop))
+    return "%s (run: cu windows)" % message
+
+
+def resolve_window(spec, all_desktops=False):
     """Accept a hwnd or a title fragment; refuse to guess between matches."""
-    wins = list_windows()
+    wins = list_windows(all_desktops=all_desktops)
     if spec is None:
         return None
     spec = str(spec)
@@ -162,12 +200,12 @@ def resolve_window(spec):
         for w in wins:
             if str(w["hwnd"]) == spec:
                 return w
-        raise LookupError("no window with hwnd %s (run: cu windows)" % spec)
+        raise LookupError(_not_found(spec))
     hits = [w for w in wins if spec.lower() in w["title"].lower()]
     if len(hits) == 1:
         return hits[0]
     if not hits:
-        raise LookupError("no window matches %r (run: cu windows)" % spec)
+        raise LookupError(_not_found(spec))
     listing = "\n".join("  %d  %s" % (h["hwnd"], h["title"]) for h in hits)
     raise LookupError("window %r is ambiguous, use a hwnd:\n%s" % (spec, listing))
 
@@ -205,6 +243,126 @@ def force_foreground(hwnd):
         user32.AttachThreadInput(mine, fg_thread, False)
     time.sleep(0.15)
     return user32.GetForegroundWindow() == hwnd
+
+
+# --- virtual desktops ----------------------------------------------------------
+#
+# Creating and switching desktops has no documented Win32 API: it goes through the
+# shell's IVirtualDesktopManagerInternal, whose GUID changes between builds. pyvda
+# binds it and feature-detects the GUID at import time, so the build knowledge lives
+# in one maintained place rather than in a table here that goes stale silently.
+
+
+def _pyvda():
+    """Import the desktop accessor only where a desktop command needs it.
+
+    pyvda probes COM interfaces while importing and raises NotImplementedError on a
+    build it does not recognise. At module scope that would take shot, tree and
+    input down with it, so the optional feature pays for its own dependency.
+    """
+    try:
+        import pyvda
+    except ImportError:
+        raise RuntimeError("pyvda is missing; run through `cu` so uv resolves it, "
+                           "or: pip install pyvda") from None
+    except NotImplementedError as exc:
+        raise RuntimeError("pyvda found no virtual-desktop interface on this build: %s"
+                           % exc) from None
+    return pyvda
+
+
+def _desktops():
+    """One pass: task-view order is the numbering, so it is never recomputed per row."""
+    pyvda = _pyvda()
+    current = str(pyvda.VirtualDesktop.current().id)
+    return [{"number": i, "id": str(d.id), "name": d.name, "current": str(d.id) == current}
+            for i, d in enumerate(pyvda.get_virtual_desktops(), 1)]
+
+
+def list_desktops():
+    return _desktops()
+
+
+def current_desktop():
+    for d in _desktops():
+        if d["current"]:
+            return d
+    raise RuntimeError("Windows reports no current virtual desktop")
+
+
+def _resolve_desktop(number):
+    count = len(list_desktops())
+    if not 1 <= number <= count:
+        raise LookupError("no desktop %d; there are %d (run: cu desktop)" % (number, count))
+    return _pyvda().VirtualDesktop(number)
+
+
+def _desktop_numbering():
+    """(current number, hwnd -> number), in one pass over the view collection."""
+    pyvda = _pyvda()
+    numbers = {str(d.id): i for i, d in enumerate(pyvda.get_virtual_desktops(), 1)}
+    current = numbers[str(pyvda.VirtualDesktop.current().id)]
+    return current, {v.hwnd: numbers.get(str(v.desktop_id))
+                     for v in pyvda.get_apps_by_z_order(False, False)}
+
+
+def create_desktop(name=None):
+    """Create a desktop and stay where we are: Windows does not switch on create."""
+    vd = _pyvda().VirtualDesktop.create()
+    if name:
+        vd.rename(name)
+    return {"number": vd.number, "id": str(vd.id), "name": vd.name}
+
+
+def switch_desktop(number):
+    _resolve_desktop(number).go()
+    time.sleep(0.4)
+    return current_desktop()["number"] == number
+
+
+def remove_desktop(number, fallback=None):
+    """Remove by id, not by number: the survivors renumber the moment it is gone."""
+    # Windows answers COMError(E_INVALIDARG) for both of these, which says nothing
+    # a caller can act on.
+    if len(list_desktops()) == 1:
+        raise RuntimeError("cannot remove desktop %d: it is the only one" % number)
+    if fallback == number:
+        raise RuntimeError("fallback must differ from the desktop being removed (%d)" % number)
+    vd = _resolve_desktop(number)
+    gone = str(vd.id)
+    vd.remove(_resolve_desktop(fallback) if fallback is not None else None)
+    return all(d["id"] != gone for d in list_desktops())
+
+
+def rename_desktop(number, name):
+    _resolve_desktop(number).rename(name)
+    return list_desktops()[number - 1]["name"] == name
+
+
+def _view(hwnd):
+    try:
+        return _pyvda().AppView(int(hwnd))
+    except _ctypes.COMError:
+        raise LookupError("window %s has no virtual-desktop view; it cannot be moved or pinned"
+                          % hwnd) from None
+
+
+def window_desktop(hwnd):
+    return _view(hwnd).desktop.number
+
+
+def move_window(hwnd, number):
+    _view(hwnd).move(_resolve_desktop(number))
+    return window_desktop(hwnd) == number
+
+
+def set_window_pinned(hwnd, pinned):
+    view = _view(hwnd)
+    if pinned:
+        view.pin()
+    else:
+        view.unpin()
+    return view.is_pinned() == pinned
 
 
 # --- UI tree -----------------------------------------------------------------
@@ -380,6 +538,14 @@ def doctor():
 
     found = list_windows()
     out.append(("EnumWindows: %d visible titled windows" % len(found), len(found) > 0))
+
+    # Optional: shot, tree and input work without it, so it reports but does not vote.
+    try:
+        desktops = list_desktops()
+        out.append(("virtual desktops: %d, current %d (pyvda)"
+                    % (len(desktops), current_desktop()["number"]), True))
+    except Exception as exc:  # noqa: BLE001 - doctor reports, it does not raise
+        out.append(("virtual desktops: unavailable (%s)" % exc, False))
 
     size = ctypes.sizeof(INPUT)
     want = 40 if ctypes.sizeof(ctypes.c_void_p) == 8 else 28
