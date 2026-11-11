@@ -5,6 +5,8 @@
 .DESCRIPTION
     -DryRun 是安全预览模式（不删除、不提权、不动服务），不是清理项开关。
     -NoElevate 不请求 UAC，直接跑用户级清理（无人值守会话用；系统级项目标记跳过）。
+    -RemoveUpgradeLeftovers 才删 $WINDOWS.~BT / $WINDOWS.~WS / Windows.old；
+    默认只报告大小并给出官方通道：那关系到能不能回退旧系统，不该由顺手清理决定。
     -ProjectRoot <路径数组> 是唯一的"范围"参数：默认关闭；显式指定一个或多个代码
     根目录后，扫描并删除其中的构建产物（Rust/Maven target、node_modules、.NET
     bin/obj、Gradle/Flutter/CMake 的 build、Python 缓存/.venv 等），代价是下次
@@ -72,7 +74,8 @@
 param(
     [switch]$DryRun,
     [string[]]$ProjectRoot,
-    [switch]$NoElevate
+    [switch]$NoElevate,
+    [switch]$RemoveUpgradeLeftovers
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -121,6 +124,8 @@ $script:totalFreed = [long]0
 $script:skippedLocked = 0
 $script:warnCount = 0
 $script:recycleLeft = [long]0
+$script:legacyLeft = [long]0
+$script:kernelError = ''
 $script:blocked = New-Object System.Collections.Generic.List[string]
 $script:sectionStarted = $null
 $script:startedAt = Get-Date
@@ -183,34 +188,132 @@ function Test-ProcessRunning {
 
 function Get-FolderSize {
     param([string]$Path)
-    if (-not (Test-Path -LiteralPath $Path)) { return [long]0 }
-    $sum = Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue |
-        Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) } |
-        Measure-Object -Property Length -Sum
-    if ($null -eq $sum -or $null -eq $sum.Sum) { return [long]0 }
-    return [long]$sum.Sum
+    return [long](Get-TreeEntries -Path $Path -SumBytes)
 }
 
 function Get-FolderStats {
-    <# 一次遍历给出字节数、文件数、最新写入时间：项目产物靠"最后写入"判冷热。#>
+    <# 字节数、文件数、最新写入时间：项目产物靠"最后写入"判冷热。 #>
     param([string]$Path)
-    $result = [pscustomobject]@{ Bytes = [long]0; Files = 0; Newest = $null }
-    if (-not (Test-Path -LiteralPath $Path)) { return $result }
-    [long]$bytes = 0
-    $count = 0
-    $newest = $null
-    foreach ($f in (Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue)) {
-        if ($f.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
-        $bytes += $f.Length
-        $count++
-        if ($null -eq $newest -or $f.LastWriteTime -gt $newest) { $newest = $f.LastWriteTime }
-    }
-    $result.Bytes = $bytes
-    $result.Files = $count
-    $result.Newest = $newest
-    return $result
+    return Get-TreeEntries -Path $Path -Stats
 }
 
+function Get-TreeEntries {
+    <# 这棵树唯一的遍历方式，一条规矩：跳过 reparse point（junction / 挂载点 / 符号链接）。
+       跟着链接走会把同一片文件反复访问：实测一个自指 junction 让 icacls /T 把 5 个文件
+       放大成 1992 次路径访问；robocopy 一直用 /XJ 防这个，逐文件改权限那两步却没有防。
+       不产生逐文件对象：-SumBytes 只要字节数，-Stats 要三项，-DirectoriesOnly 只交目录。
+     #>
+    param([string]$Path, [switch]$SumBytes, [switch]$Stats, [switch]$DirectoriesOnly)
+    [long]$sum = 0
+    $files = 0
+    $newest = $null
+    $result = [pscustomobject]@{ Bytes = [long]0; Files = 0; Newest = $null }
+    if (-not (Test-Path -LiteralPath $Path)) {
+        if ($SumBytes) { return [long]0 }
+        if ($Stats) { return $result }
+        return
+    }
+    $stack = New-Object System.Collections.Generic.Stack[string]
+    $stack.Push((Get-Item -LiteralPath $Path -Force).FullName.TrimEnd([char]92))
+    while ($stack.Count) {
+        $dir = $stack.Pop()
+        $entries = $null
+        try { $entries = [IO.Directory]::GetFileSystemEntries($dir) } catch { continue }
+        foreach ($e in $entries) {
+            $attr = $null
+            try { $attr = [IO.File]::GetAttributes($e) } catch { continue }
+            if ($attr -band [IO.FileAttributes]::ReparsePoint) { continue }
+            if ($attr -band [IO.FileAttributes]::Directory) {
+                $stack.Push($e)
+                if ($DirectoriesOnly) { $e }
+            } elseif (-not $DirectoriesOnly) {
+                $len = [long]0
+                $when = $null
+                try {
+                    $fi = New-Object IO.FileInfo $e
+                    $len = $fi.Length
+                    $when = $fi.LastWriteTime
+                } catch { continue }
+                $sum += $len
+                $files++
+                if ($null -eq $newest -or $when -gt $newest) { $newest = $when }
+            }
+        }
+    }
+    if ($SumBytes) { return $sum }
+    if ($Stats) {
+        $result.Bytes = $sum
+        $result.Files = $files
+        $result.Newest = $newest
+        return $result
+    }
+}
+
+$script:nativeReady = $false
+try {
+    $nativeCode = @'
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    public static extern IntPtr CreateFileW(string name, uint access, uint share, IntPtr sa, uint disp, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool CloseHandle(IntPtr h);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool SetFileInformationByHandle(IntPtr h, int infoClass, byte[] info, uint size);
+'@
+    Add-Type -Namespace GonggaFs -Name Native -MemberDefinition $nativeCode -ErrorAction Stop
+    $script:nativeReady = $true
+} catch {
+    Write-Host '  [警告] 装载内核递归删除接口失败，退回逐文件删除。' -ForegroundColor Yellow
+}
+
+function Remove-TreeInKernel {
+    <# 一次调用让内核递归删除整棵子树（POSIX 语义的 FileDispositionInfoEx）：用户态零遍历。
+       失败（权限不足、被占用）返回 $false 并留下 win32 错误号，调用方退回 robocopy 镜像。
+       实测本机 Win11 22621：class 21 + DELETE|POSIX 在 backup / backup+posix / 带不带 \?\ 前缀的
+       五种组合下全部返回 win32=145 (ERROR_DIR_NOT_EMPTY)，即这台机器上不递归；退回路径才是真删。 #>
+    param([string]$Path)
+    if (-not $script:nativeReady) { return $false }
+    $bs = [string][char]92
+    # \?\ 前缀的路径是字面量：斜杠不会被规范化，必须自己换成反斜杠
+    $target = $Path.Replace('/', $bs).TrimEnd($bs)
+    $prefix = $bs + $bs + '?' + $bs   # \?\ 前缀：两个反斜杠 + ? + 一个反斜杠
+    if (-not $target.StartsWith($prefix)) { $target = $prefix + $target }
+    $h = [GonggaFs.Native]::CreateFileW($target, 0x00010000, 0x00000007, [IntPtr]::Zero, 3, 0x02000000, [IntPtr]::Zero)
+    if ($h.ToInt64() -eq -1) {
+        $script:kernelError = 'CreateFileW win32=' + [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        return $false
+    }
+    try {
+        $flags = [BitConverter]::GetBytes([uint32](1 -bor 2 -bor 16))
+        $ok = [GonggaFs.Native]::SetFileInformationByHandle($h, 21, $flags, 4)
+        if (-not $ok) {
+            $script:kernelError = 'FileDispositionInfoEx win32=' + [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        } else {
+            $script:kernelError = 'ok'
+        }
+        return [bool]$ok
+    } catch {
+        $script:kernelError = 'exception: ' + $_.Exception.Message
+        return $false
+    } finally {
+        [void][GonggaFs.Native]::CloseHandle($h)
+    }
+}
+
+function Repair-TreeDeleteAccess {
+    <# 为删除准备权限：只碰**目录**（删文件要的是父目录的 FILE_DELETE_CHILD，逐文件写 SD 是浪费），
+       目录列表来自 reparse-safe 的 Get-TreeEntries；takeown 不再带 /R、icacls 不再带 /T。 #>
+    param([string]$Path)
+    $dirs = @($Path)
+    $dirs += @(Get-TreeEntries -Path $Path -DirectoriesOnly)
+    foreach ($d in $dirs) {
+        $null = & takeown.exe /F $d /A 2>&1 | Out-Null
+    }
+    $list = Join-Path $env:LOCALAPPDATA ('DiskCleanup' + [char]92 + 'acl-' + $PID + '.txt')
+    $dirs | Out-File -LiteralPath $list -Encoding oem
+    $null = & icacls.exe /L $list /grant '*S-1-5-32-544:(OI)(CI)F' /C /Q 2>&1 | Out-Null
+    Remove-Item -LiteralPath $list -Force -ErrorAction SilentlyContinue
+    return $dirs.Count
+}
 function Add-Blocked {
     <# 记一项"没清掉/没清完"，进 SUMMARY_JSON 的 blocked 与退出码。 #>
     param([string]$What)
@@ -426,7 +529,10 @@ function Stop-ServicesAndInvoke {
 }
 
 function Remove-LegacySystemFolder {
-    <# Windows.old / $WINDOWS.~BT 等遗留目录：夺取所有权后清空并删除根目录。#>
+    <# Windows.old / $WINDOWS.~BT 这类升级残留：默认**只报告**，要删必须显式点名
+       -RemoveUpgradeLeftovers。理由有二：一是它决定能不能回退旧系统，不该由顺手清理决定；
+       二是逐文件夺取所有权在这种树上会放大成几小时（跟着 junction 走 + 每个文件写一次 SD），
+       而官方本来就有做这件事的通道（磁盘清理的"Windows 更新清理"、DISM）。 #>
     param([string]$Path, [string]$Label)
     if (-not (Test-Path -LiteralPath $Path)) {
         Write-Host ("  [跳过] {0} - 不存在" -f $Label) -ForegroundColor DarkGray
@@ -434,25 +540,37 @@ function Remove-LegacySystemFolder {
     }
     $before = Get-FolderSize $Path
     if ($before -eq 0) {
-        if (-not $DryRun) { Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue }
+        if (-not $DryRun) { $null = Remove-TreeInKernel $Path }
         Write-Host ("  [空]   {0}" -f $Label) -ForegroundColor DarkGray
         return
     }
-    if ($DryRun) {
-        Write-Host ("  [预览] {0} = {1}（删除后无法回退旧系统）" -f $Label, (Format-Size $before)) -ForegroundColor Yellow
+    if ($DryRun -or -not $RemoveUpgradeLeftovers) {
+        $how = if ($DryRun) { '[预览]' } else { '[报告]' }
+        Write-Host ("  {0} {1} = {2} - 默认不删（它决定能否回退旧系统）" -f $how, $Label, (Format-Size $before)) -ForegroundColor Yellow
+        if (-not $DryRun) {
+            Write-Host '         要清它：加 -RemoveUpgradeLeftovers，或走官方通道 cleanmgr /"Windows 更新清理"、DISM /StartComponentCleanup' -ForegroundColor DarkGray
+            Add-Blocked ("{0} 未清理（默认不删升级残留，{1}）" -f $Label, (Format-Size $before))
+            $script:legacyLeft += $before
+        }
         return
     }
-    Write-Host ("  [处理] {0} - {1}，夺取所有权中 ..." -f $Label, (Format-Size $before)) -ForegroundColor Cyan
-    & takeown.exe /F $Path /R /A /D Y 2>&1 | Out-Null
-    & icacls.exe $Path /grant '*S-1-5-32-544:(OI)(CI)F' /T /C /Q 2>&1 | Out-Null
-    $null = & robocopy.exe $script:emptyDir $Path /MIR /XJ /R:0 /W:0 /NFL /NDL /NJH /NJS /NP /MT:8
-    Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host ("  [处理] {0} - {1}，先让内核一次删掉整棵树（不逐文件）..." -f $Label, (Format-Size $before)) -ForegroundColor Cyan
+    if (-not (Remove-TreeInKernel $Path)) {
+        Write-Host '         内核递归删除没成功，逐目录补权限后再试（只碰目录，跟着链接走的 /R 与 /T 已不用）' -ForegroundColor DarkGray
+        $n = Repair-TreeDeleteAccess $Path
+        Write-Host ("         已处理 {0} 个目录" -f $n) -ForegroundColor DarkGray
+        if (-not (Remove-TreeInKernel $Path)) {
+            $null = & robocopy.exe $script:emptyDir $Path /MIR /XJ /R:0 /W:0 /NFL /NDL /NJH /NJS /NP /MT:8
+            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
     $after = Get-FolderSize $Path
     $freed = $before - $after
     if ($freed -lt 0) { $freed = 0 }
     $script:totalFreed += $freed
-    if (Test-Path -LiteralPath $Path) {
-        Write-Host ("  [部分] {0} - 释放 {1}，目录仍有残留（权限占用）" -f $Label, (Format-Size $freed)) -ForegroundColor Yellow
+    if ($after -gt 0) {
+        $script:legacyLeft += $after
+        Write-Host ("  [部分] {0} - 释放 {1}，残留 {2}（权限或占用；这类残留要管理员或官方通道）" -f $Label, (Format-Size $freed), (Format-Size $after)) -ForegroundColor Yellow
     } else {
         Write-Host ("  [完成] {0} - {1}，目录已移除" -f $Label, (Format-Size $freed)) -ForegroundColor Cyan
     }
@@ -490,9 +608,13 @@ function Remove-ArtifactFolder {
         Write-Host ("  [预览] {0} = {1}（{2} 个文件，最后写入 {3}）" -f $Label, (Format-Size $before), $stats.Files, $stamp) -ForegroundColor Yellow
         return
     }
-    $null = & robocopy.exe $script:emptyDir $full /MIR /XJ /R:0 /W:0 /NFL /NDL /NJH /NJS /NP /MT:8
-    $rc = $LASTEXITCODE
-    Remove-Item -LiteralPath $full -Recurse -Force -ErrorAction SilentlyContinue
+    # 先让内核一次删完整棵树（零遍历）；不行才退回逐文件的镜像清空
+    $rc = 0
+    if (-not (Remove-TreeInKernel $full)) {
+        $null = & robocopy.exe $script:emptyDir $full /MIR /XJ /R:0 /W:0 /NFL /NDL /NJH /NJS /NP /MT:8
+        $rc = $LASTEXITCODE
+        Remove-Item -LiteralPath $full -Recurse -Force -ErrorAction SilentlyContinue
+    }
     $after = [long]0
     if (Test-Path -LiteralPath $full) { $after = Get-FolderSize $full }
     $freed = [long]($before - $after)
@@ -986,6 +1108,7 @@ $summary = [ordered]@{
     freed_bytes      = $driveDelta
     item_freed_bytes = $script:totalFreed
     recycle_left     = $script:recycleLeft
+    legacy_left        = $script:legacyLeft
     blocked          = @($script:blocked)
     warnings         = $script:warnCount
     skipped_locked   = $script:skippedLocked
@@ -996,7 +1119,7 @@ Write-Host ("SUMMARY_JSON " + ($summary | ConvertTo-Json -Compress)) -Foreground
 
 # 退出码：0 = 每项都清完或本来就不存在；1 = 有失败/残留/被占用
 $exitCode = 0
-if ($script:warnCount -gt 0 -or $script:recycleLeft -gt 0) { $exitCode = 1 }
+if ($script:warnCount -gt 0 -or $script:recycleLeft -gt 0 -or $script:legacyLeft -gt 0) { $exitCode = 1 }
 
 # ---------------- 收尾 ----------------
 
