@@ -13,7 +13,9 @@ page reads:
 
 The credential is therefore a **console session cookie**, not an API key: open the
 subscription page, copy the whole `Cookie:` header of any request, and store it
-under `QWEN_CONSOLE_COOKIE` (or pass it as `--key`). The gateway rejects a custom
+under `QWEN_CONSOLE_COOKIE` (or pass it as `--key`), or -- the way the server's own
+reader finds it -- under `qwen-console` in `~/.agents/keys.toml`, because the
+provider's entry there is the model key. The gateway rejects a custom
 `User-Agent` with `PostonlyOrTokenError`, so the request is sent with the
 browser's.
 
@@ -35,6 +37,7 @@ import math
 import os
 import re
 import sys
+import tomllib
 import uuid
 
 import contract
@@ -46,6 +49,13 @@ DASHBOARD_URL = f"{CONSOLE_ORIGIN}/analytics/token-plan/individual"
 INFO_URL = f"{CONSOLE_ORIGIN}/tool/user/info.json"
 ENV_NAME = "QWEN_CONSOLE_COOKIE"
 FALLBACK_ENV_NAME = "BAILIAN_CONSOLE_COOKIE"
+
+# Where a cookie may live besides the environment: the keystore beside the roster,
+# under a name of its own, because the provider's entry there is the API key and the
+# console wants the session, not the key. The same shape `minimax_credit.py` uses.
+KEYSTORE = os.path.join(os.environ.get("GONGGA_AGENTS_HOME")
+                        or os.path.join(os.path.expanduser("~"), ".agents"), "keys.toml")
+KEYSTORE_NAME = "qwen-console"
 
 # The console's own gateway vocabulary, which its front end hardcodes.
 GATEWAY_ACTION = "BroadScopeAspnGateway"
@@ -191,7 +201,8 @@ def call_gateway(inner, cookie, sec_token, timeout_ms, base_url=GATEWAY_URL, fet
         if code is None:
             code = refused.group(0)
         raise contract.BalanceError(
-            f"{code}: the console session was refused; copy a fresh Cookie line from the subscription page")
+            f"{code}: the console session was refused; copy a fresh `Cookie:` line from the "
+            f'subscription page into "{KEYSTORE_NAME}" in {KEYSTORE}')
     inner_data = contract.field(contract.field(payload, "data"), "DataV2")
     envelope = contract.field(inner_data, "data")
     if not contract.is_object(envelope):
@@ -214,21 +225,56 @@ def optional_gateway(inner, cookie, sec_token, timeout_ms, base_url, fetch=None)
         return None
 
 
+def keystore_cookie():
+    """The cookie kept beside the roster under a name of its own, if any.
+
+    # Invariant
+
+    It is a separate entry from the provider's own, because the provider's entry is
+    the API key and the console wants a session. The keystore is the one place a
+    secret lives on this machine, so a cookie goes there rather than into a file of
+    its own.
+    """
+    try:
+        with open(KEYSTORE, "rb") as handle:
+            kept = (tomllib.load(handle).get("keys") or {}).get(KEYSTORE_NAME)
+        return kept if isinstance(kept, str) and kept else None
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+
+
+def cookie_of(options):
+    """The console session, refusing a credential that is not one.
+
+    A quota script is handed the provider's API key by default, and a key is not a
+    session: sent as a cookie it comes back `BailianGateway.Login.NotLogined`, which
+    would read as a refused session when it means "no cookie was ever sent". So a
+    value that does not look like a `Cookie:` line is refused by name instead.
+    """
+    if "=" not in contract.js_string(options.key):
+        raise contract.BalanceError(
+            f'no console cookie: add "{KEYSTORE_NAME}" to the [keys] table of {KEYSTORE}, '
+            f"or set {ENV_NAME} -- copy the `Cookie:` line of a signed-in console session "
+            "(the model key is not a console session)")
+    return options.key
+
+
 def read_balance(options, fetch=None):
     """Read the Qwen Token Plan's remaining allowance.
 
     The two side calls are each allowed to fail: a tier total this script cannot
     read costs the Credits in `detail`, not the ratio the plan is scored by.
     """
+    cookie = cookie_of(options)
     try:
         # The console publishes the CSRF token to a signed-in session; a cookie
         # that already carries one is used before the extra call is made.
-        token = cookie_value(options.key, "sec_token")
+        token = cookie_value(cookie, "sec_token")
         if token is None:
-            token = read_sec_token(options.key, options.timeout_ms, fetch=fetch)
-        usage = call_gateway("usage", options.key, token, options.timeout_ms, options.base_url, fetch=fetch)
-        quota = optional_gateway("quota-config", options.key, token, options.timeout_ms, options.base_url, fetch=fetch)
-        subscription = optional_gateway("subscription", options.key, token, options.timeout_ms,
+            token = read_sec_token(cookie, options.timeout_ms, fetch=fetch)
+        usage = call_gateway("usage", cookie, token, options.timeout_ms, options.base_url, fetch=fetch)
+        quota = optional_gateway("quota-config", cookie, token, options.timeout_ms, options.base_url, fetch=fetch)
+        subscription = optional_gateway("subscription", cookie, token, options.timeout_ms,
                                         options.base_url, fetch=fetch)
         return {"reading": parse(usage, quota, subscription), "payload": {"usage": usage, "quota": quota,
                                                                          "subscription": subscription}}
@@ -313,6 +359,12 @@ def main():
         fallback_env_name=FALLBACK_ENV_NAME, script_name=os.path.basename(__file__))
     if options is None:
         return
+    # The harness hands a quota script the provider's API key, which is not this
+    # script's credential -- so anything that is not a `Cookie:` line is replaced by
+    # the console session, wherever it was kept. A hand-run that passes a real one
+    # keeps it.
+    if "=" not in contract.js_string(options.key):
+        options.key = keystore_cookie() or options.key
     result = read_balance(options)
     contract.emit_reading(result["reading"], raw=options.raw, payload=result.get("payload"))
 

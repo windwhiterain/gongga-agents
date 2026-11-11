@@ -202,9 +202,11 @@ SHARES = kimi.parse({"usages": {"limit_5h": {"used_ratio": 0}, "limit_7d": {"use
 
 def refused_scripts():
     """Every script answers a refusal with zero, and only a refusal."""
-    for name, reader, status in [("deepseek", deepseek, 401), ("minimax-cn", minimax, 401),
-                                 ("qwen", qwen, 401), ("kimi-coding", kimi, 401)]:
-        result = reader.read_balance(options(), fetch=lambda url, **kw: response(status, False, "denied"))
+    # The credential each reader is handed: a key for the key-based ones, and a
+    # `Cookie:` line for qwen, which refuses anything else before a request is made.
+    for name, reader, status, key in [("deepseek", deepseek, 401, "k"), ("minimax-cn", minimax, 401, "k"),
+                                      ("qwen", qwen, 401, "a=1"), ("kimi-coding", kimi, 401, "k")]:
+        result = reader.read_balance(options(key), fetch=lambda url, **kw: response(status, False, "denied"))
         assert_equal(result["reading"]["remaining"], 0, f"{name} reports the refusal as an exhausted allowance")
         assert_match(result["reading"].get("error"), rf"HTTP {status}", f"{name} says which status refused it")
 
