@@ -354,8 +354,17 @@ def reset_of(usage, key):
 
 
 def main():
+    # A hand run has no credential in the environment, and this script's credential
+    # is a console session that lives in the keystore -- so the keystore fills the
+    # variable the option reader looks for, and the harness-supplied model key is
+    # replaced further down.
+    environment = dict(os.environ)
+    if not environment.get(ENV_NAME) and not environment.get(FALLBACK_ENV_NAME):
+        kept = keystore_cookie()
+        if kept:
+            environment[ENV_NAME] = kept
     options = contract.read_options(
-        sys.argv[1:], os.environ, ENV_NAME, GATEWAY_URL, PROVIDER,
+        sys.argv[1:], environment, ENV_NAME, GATEWAY_URL, PROVIDER,
         fallback_env_name=FALLBACK_ENV_NAME, script_name=os.path.basename(__file__))
     if options is None:
         return
