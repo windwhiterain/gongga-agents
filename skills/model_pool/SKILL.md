@@ -1,6 +1,6 @@
 ---
 name: model_pool
-description: Pick the model a spawned agent should run on — one `<provider>/<model id>` string that `gongga-cli set_session --model` takes verbatim, drawn inside the tier the work calls for (flash / pro / sota, named on every call), and only from models this machine can actually run right now: still in the roster, credentialed, with allowance above its floor, entitled on this account, and not marked out. Use it when a subagent has no model to name, when a spawn hit a quota wall and needs another, or when you are placing the work itself: flash for search / explore / investigate / implement, pro for hard implement and review, sota for plan and core review. Triggers - 挑模型 / 派子 agent 用哪个模型 / 有额度的模型 / model pool / flash pro sota 概率.
+description: Pick the model a spawned agent should run on — one `<provider>/<model id>` string that `gongga-cli set_session --model` takes verbatim, or, when the spawn takes a whole config, SPEC's `ModelConfig` for that model; drawn inside the tier the work calls for (flash / pro / sota, named on every call), and only from models this machine can actually run right now: still in the roster, credentialed, with allowance above its floor, entitled on this account, and not marked out. Use it when a subagent has no model to name, when a spawn hit a quota wall and needs another, or when you are placing the work itself: flash for search / explore / investigate / implement, pro for hard implement and review, sota for plan and core review. Triggers - 挑模型 / 派子 agent 用哪个模型 / 有额度的模型 / model pool / flash pro sota 概率.
 metadata:
   entry: model_pool
 ---
@@ -11,11 +11,12 @@ One command, one line, and that line is already the argument:
 
 ```bash
 # This skill's own directory: the parent of the `SKILL.md: <path>` that `@skill:`
-# expands to (the `path` column of `index_skill` names the same file).
+# expands to (the `path` column of `skill`'s table names the same file).
 # In gongga, `gongga-cli skill <name> ...` runs the entry the frontmatter declares.
 SKILL_DIR=<the directory this SKILL.md is in>
 S="$SKILL_DIR/model_pool"
 $S pick --tier flash --provider deepseek-official   # -> deepseek-official/deepseek-flash
+$S pick_config --tier flash --provider deepseek-official   # -> the ModelConfig below
 ```
 
 ```bash
@@ -26,6 +27,33 @@ gongga-cli send_message --name scout --message "read the failing test and report
 The server resolves `<provider>/<model id>` exactly as this prints it, so the
 value needs no trimming, quoting or mapping. Everything that is *not* the model
 goes to stderr: warnings, `--explain`, nothing to strip on the way in.
+
+## The same draw, as the config a session is created with
+
+A spawn that takes one model string wants `pick`. A spawn that takes a whole
+session config -- SPEC's `SessionConfig.model_config` -- wants `pick_config`: the
+same draw, the same tier, the same gates, printed as SPEC's `ModelConfig` instead
+of one line.
+
+```bash
+$S pick_config --tier flash
+# {"model":{"provider":"deepseek-official","model":"deepseek-flash"},
+#  "thinking":null,"ctx_limit":null,"cache_tier":null}
+```
+
+`pick` and `pick_config` are one lottery told two ways, so picking a string here
+and a config there cannot hand out two different models. What differs is only
+what stdout carries: one `<provider>/<model id>` for `pick`, one JSON document
+for `pick_config` -- still exactly one thing to parse, with warnings and
+`--explain` on stderr as before. `--json` is `pick --json`'s decision, with the
+config under `model_config`.
+
+The three fields SPEC defaults are `null`, which is SPEC's `provider_default()`:
+this skill decides *which model*, and how that model is asked -- thinking effort,
+context budget, cache tier -- is the provider's own answer for the model it
+serves. SPEC re-defaults all three on a model change, so a caller that wants one
+named sets it on the object it hands on; a value invented here would be this tool
+answering a question it cannot.
 
 ## What a draw decides
 
@@ -124,13 +152,14 @@ after adding keys, and again with `--force` after buying something.
 | Command | What it answers |
 |---|---|
 | `model_pool pick --tier TIER [--provider ID] [--json] [--explain] [--seed N]` | one draw inside that tier; `--json` for the decision, `--explain` for every candidate on stderr |
+| `model_pool pick_config --tier TIER [--provider ID] [--json] [--explain] [--seed N]` | the same draw as SPEC's `ModelConfig`, one JSON object on stdout; `--json` for the decision, with the config under `model_config` |
 | `model_pool status [--provider ID]` | every route: tier, usable or not, share, and the provider's own detail line |
 | `model_pool tiers` | the three tiers, their weights, and the models inside each |
 | `model_pool probe [--force] [--provider ID]` | ask each provider whether this account may run the model |
 | `model_pool mark <provider/model\|provider> [--minutes N] [--reason TEXT] [--clear]` | keep a route out of the draw, or release it |
 
-Flags on `pick` and `status`: `--refresh S` (how long a cached reading answers,
-`0` asks again), `--cached` (never run a quota script), `--timeout S`,
+Flags on `pick`, `pick_config` and `status`: `--refresh S` (how long a cached reading
+answers, `0` asks again), `--cached` (never run a quota script), `--timeout S`,
 `--probe` (also refresh the entitlement verdicts).
 
 ## When a spawn hits the wall
