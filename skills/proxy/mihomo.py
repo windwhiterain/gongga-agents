@@ -491,6 +491,14 @@ def cmd_doctor(discovered, core):
     out("mixed port        %s" % (mixed or "not set"))
     groups = groups_of(core.proxies())
     out("policy groups     %d" % len(groups))
+    # A vendor ships a notice as a selectable entry, and a group can be left pointing at
+    # one. Everything routed through that group then fails, and the failure reads as a
+    # broken node -- this is the one line that says otherwise.
+    stranded = sorted(name for name, group in groups.items() if is_notice(group.get("now") or ""))
+    if stranded:
+        out("not routing       %s" % ", ".join(stranded))
+        out("                  the choice is a notice, not a route; pick a real node:")
+        out('                  proxy core use "<group>" "<node>"')
     if mixed:
         try:
             measure_transfer(mixed, 1, "http://cp.cloudflare.com/generate_204")

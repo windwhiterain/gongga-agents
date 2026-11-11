@@ -537,6 +537,29 @@ def proxy_url_for(config):
     return "http://%s:%d" % (listen.get("host", "127.0.0.1"), listen.get("port", 7899))
 
 
+def system_proxy():
+    """What this OS hands programs that read the registry instead of the environment.
+
+    # Invariant
+
+    Reads, never writes: another program owning this slot is the usual reason a port
+    "changed" under a reader's feet, and naming the owner is the whole answer.
+    """
+    if os.name != "nt":
+        return None
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Internet Settings") as key:
+            enabled, _ = winreg.QueryValueEx(key, "ProxyEnable")
+            if not enabled:
+                return None
+            server, _ = winreg.QueryValueEx(key, "ProxyServer")
+            return str(server) or None
+    except OSError:
+        return None
+
+
 def server_is_listening(config, timeout=1.0):
     listen = config.get("listen", {})
     try:
@@ -842,6 +865,11 @@ def main(argv):
         out("listening         %s" % ("yes" if server_is_listening(config) else "no"))
         out("rules             %d" % len(config["rules"]))
         out("upstreams         %s" % ", ".join(config["upstreams"]))
+        system = system_proxy()
+        if system:
+            mine = proxy_url_for(config)
+            same = system == mine or system == mine.replace("http://", "")
+            out("system proxy      %s%s" % (system, "" if same else "  <- another program, not this one"))
         recent = Decisions().recent(10)
         if recent:
             out()
@@ -856,13 +884,20 @@ def main(argv):
 
     if args.cmd == "env":
         url = proxy_url_for(config)
+        live = server_is_listening(config)
+        if not live:
+            out("# nothing answers on %s yet: these point at a port with no proxy behind it" % url)
+            out("# start it with `proxy serve`")
         out('export HTTPS_PROXY="%s"' % url)
         out('export HTTP_PROXY="%s"' % url)
         out('export ALL_PROXY="%s"' % url)
         out('export NO_PROXY="localhost,127.0.0.1,::1"')
         out()
         out("# uv and pip read the environment; git does not")
-        out("git config --global http.proxy %s" % url)
+        if live:
+            out("git config --global http.proxy %s" % url)
+        else:
+            out("# git is left alone until something answers on %s" % url)
         return 0
 
     if args.cmd == "add":
