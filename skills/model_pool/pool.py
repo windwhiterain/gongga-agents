@@ -455,11 +455,96 @@ def prepared(args, config, preference, catalog):
     return routes, state
 
 
-def cmd_pick(args, config, preference, catalog):
-    order, weights = weights_of(preference, args.weights)
+def drawn(args, config, preference, catalog):
+    """One draw over the evaluated candidates: `(route, how, order, weights, routes)`.
+
+    # Invariant
+
+    `pick` and `pick_config` are one lottery told two ways. The candidates, their
+    weighting, the fallback for a dry pool and the seed all live here, so a model
+    printed as a string and a `ModelConfig` printed as a dict can never come from
+    two different draws. Only what is printed differs.
+
+    `route` is `None` only when the draw itself found nothing; an empty candidate
+    set is a refusal (`prepared`), not an empty draw.
+    """
+    order, weights = weights_of(preference, getattr(args, "weights", None))
     routes, _state = prepared(args, config, preference, catalog)
     rng = random.Random(args.seed) if args.seed is not None else random.Random()
     route, how = draw(routes, order, weights, rng)
+    return route, how, order, weights, routes
+
+
+def explain(args, routes, how):
+    """Every candidate and the draw that picked one, on stderr: what `--explain` adds."""
+    note(f"draw: {how}", args.quiet)
+    for row in routes:
+        share = "-" if row.share is None else f"{row.share:.2f}"
+        note(
+            f"  {row.tier:<5} {row.key:<44} {row.usable!s:<5} {share:<5} "
+            f"x{row.multiplier:<4g} ={row.weight:<6.2f} {row.why}",
+            args.quiet,
+        )
+
+
+def model_config_of(route, thinking=None, ctx_limit=None, cache_tier=None):
+    """SPEC's `ModelConfig` for one drawn route.
+
+    # Invariant
+
+    The three fields SPEC defaults are `None` -- `provider_default()` in SPEC's
+    spelling -- because this draw decides *which model*, and how that model is
+    asked (thinking effort, context budget, cache tier) is the provider's own
+    answer for the model it serves. SPEC re-defaults all three on a model change,
+    so a caller that wants one named sets it on this dict; a value invented here
+    would be this tool answering a question it cannot.
+    """
+    return {
+        "model": {"provider": route.provider["id"], "model": route.model["id"]},
+        "thinking": thinking,
+        "ctx_limit": ctx_limit,
+        "cache_tier": cache_tier,
+    }
+
+
+def pick_config(tier, provider=None, weights=None, seed=None, refresh=None, timeout=None,
+                cached=False, probe=False, config=None, preference=None,
+                thinking=None, ctx_limit=None, cache_tier=None):
+    """One model inside `tier`, answered as SPEC's `ModelConfig`.
+
+    # Contract
+
+    The draw is `pick`'s: the same roster walk, the same multiplier whitelist in
+    `preference.toml`, the same credential, allowance, entitlement and mark gates,
+    and the same allowance x multiplier weighting inside the tier. `tier` is
+    required for the reason `pick --tier` is: which tier a piece of work belongs to
+    is the caller's judgement, never this tool's.
+
+    What comes back is the dict `new_session` and `set_session` take as a
+    `ModelConfig`, with the three provider-defaulted fields left `None`. A refusal
+    -- no roster, no candidate in that tier -- is a `SystemExit` carrying the same
+    sentence the command line would print, so a caller that cannot draw learns why
+    rather than drawing from nothing.
+    """
+    settings, _config_path, _config_exists = load_config(config)
+    opinion, _preference_path = load_preference(preference)
+    catalog = roster.load()
+    if catalog is None:
+        raise SystemExit(f"no roster at {roster.catalog_path()}")
+    # The draw's own reading of its arguments, built the way the command line
+    # builds it, so both faces of this skill run `prepared` over one shape.
+    args = argparse.Namespace(
+        provider=provider, tier=tier, weights=weights, seed=seed, refresh=refresh,
+        timeout=timeout, cached=cached, probe=probe,
+    )
+    route, how, _order, _weights, _routes = drawn(args, settings, opinion, catalog)
+    if route is None:
+        raise SystemExit(f"nothing to draw: {how}")
+    return model_config_of(route, thinking, ctx_limit, cache_tier)
+
+
+def cmd_pick(args, config, preference, catalog):
+    route, how, order, weights, routes = drawn(args, config, preference, catalog)
     if route is None:
         raise SystemExit(f"nothing to draw: {how}")
     if not route.usable:
@@ -467,14 +552,7 @@ def cmd_pick(args, config, preference, catalog):
         # left; saying so on stderr keeps the model on stdout exactly one line.
         note(f"model_pool: nothing is usable, drawn anyway: {how}", args.quiet)
     if args.explain:
-        note(f"draw: {how}", args.quiet)
-        for row in routes:
-            share = "-" if row.share is None else f"{row.share:.2f}"
-            note(
-                f"  {row.tier:<5} {row.key:<44} {row.usable!s:<5} {share:<5} "
-                f"x{row.multiplier:<4g} ={row.weight:<6.2f} {row.why}",
-                args.quiet,
-            )
+        explain(args, routes, how)
     if args.json:
         print(json.dumps({
             "model": route.key,
@@ -489,6 +567,43 @@ def cmd_pick(args, config, preference, catalog):
         }, ensure_ascii=False, separators=(",", ":")))
         return
     print(route.key)
+
+
+def cmd_pick_config(args, config, preference, catalog):
+    """The draw `pick` makes, printed as the `ModelConfig` a session is created with.
+
+    # Invariant
+
+    stdout carries one JSON document and nothing else -- an object under the
+    default, `pick --json`'s decision under `--json` -- so a caller parses stdout
+    and reads its warnings on stderr. A warning folded into the object would be an
+    answer that does not parse.
+    """
+    route, how, order, weights, routes = drawn(args, config, preference, catalog)
+    if route is None:
+        raise SystemExit(f"nothing to draw: {how}")
+    if not route.usable:
+        # The same promise `pick` makes: a spawn has to run somewhere, and the
+        # reason it is a bad model belongs on stderr, not inside the answer.
+        note(f"model_pool: nothing is usable, drawn anyway: {how}", args.quiet)
+    if args.explain:
+        explain(args, routes, how)
+    config_out = model_config_of(route)
+    if args.json:
+        print(json.dumps({
+            "model_config": config_out,
+            "model": route.key,
+            "provider": route.provider["id"],
+            "id": route.model["id"],
+            "name": route.model.get("name"),
+            "tier": route.tier,
+            "share": route.share,
+            "multiplier": route.multiplier,
+            "reason": how,
+            "weights": {tier: weights[tier] for tier in order},
+        }, ensure_ascii=False, separators=(",", ":")))
+        return
+    print(json.dumps(config_out, ensure_ascii=False, separators=(",", ":")))
 
 
 def cmd_status(args, config, preference, catalog):
@@ -642,6 +757,19 @@ def build_parser():
     pick.add_argument("--quiet", action="store_true", help="no explanation at all")
     pick.add_argument("--seed", type=int, help="draw with this seed, for a repeatable answer")
     pick.set_defaults(handler=cmd_pick)
+
+    picked = sub.add_parser(
+        "pick_config", parents=[common],
+        help="draw one model and print SPEC's ModelConfig for it",
+    )
+    picked.add_argument(
+        "--json", action="store_true",
+        help="print the draw's decision instead, with the config under `model_config`",
+    )
+    picked.add_argument("--explain", action="store_true", help="print the candidates and why on stderr")
+    picked.add_argument("--quiet", action="store_true", help="no explanation at all")
+    picked.add_argument("--seed", type=int, help="draw with this seed, for a repeatable answer")
+    picked.set_defaults(handler=cmd_pick_config)
 
     status = sub.add_parser("status", parents=[common], help="every route, its tier, and whether it is drawable")
     status.add_argument("--json", action="store_true")
