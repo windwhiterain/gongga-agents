@@ -199,6 +199,36 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/find-forgotten.p
 猜路径会猜错，猜错就等于这一项没有计量（uv 一次能清掉几个 GB，在汇总里曾经是隐形的）。
 DISM 自己释放的量仍然只体现在盘差值里。
 
+### 升级残留：默认只报告，要删必须点名
+
+`$WINDOWS.~BT` / `$WINDOWS.~WS` / `Windows.old` 决定能不能回退旧系统，不该被顺手清掉；
+而且逐文件夺取所有权在这种树上会放大成几小时（`takeown /R` 和 `icacls /T` 会跟着
+ junction 走：实测一个自指 junction 把 5 个文件变成 1992 次路径访问，本机 Win11 上
+ 一个 33.88 GB 的 `$WINDOWS.~BT` 因此跑了 18 小时还没出结果）。
+
+所以现在的默认行为是：
+
+```
+  [报告] $WINDOWS.~BT（临时安装文件） = 33.88 GB - 默认不删（它决定能否回退旧系统）
+         要清它：加 -RemoveUpgradeLeftovers，或走官方通道 cleanmgr /"Windows 更新清理"、DISM /StartComponentCleanup
+```
+
+同时这一项会进 `SUMMARY_JSON.legacy_left` 和 `blocked`，退出码变 `1`。要真的删：
+`-RemoveUpgradeLeftovers`，脚本先试内核递归删除（一次调用、不遍历），失败才退回镜像，
+并且只对**目录**补权限（删文件要的是父目录的 `FILE_DELETE_CHILD`，逐文件写 SD 是浪费）。
+
+实测记录：`FileDispositionInfoEx`（class 21）+ `DELETE|POSIX_SEMANTICS` 在本机
+Win11 22621 的五种 flags/前缀组合全部返回 `win32=145 ERROR_DIR_NOT_EMPTY`，
+也就是这台机器上内核不递归——**退回路径才是真删的那条**。留着这次尝试是因为它在
+支持的机器上省掉整趟遍历，但别把它当已验证的胜利。
+
+### 遍历只有一条规矩
+
+`Get-TreeEntries` 是脚本里唯一的递归实现：跳过 reparse point，不产生逐文件对象，
+按需要给出字节数 / 文件数+最后写入 / 目录列表。`Get-FolderSize`、`Get-FolderStats`、
+补权限那一步全部走它（旧的 `Get-ChildItem -Recurse` 版本在四处比对中字节数完全一致：
+`diff=0`）。新增清理项时不要再自己写第三种遍历。
+
 ### 回收站不再用 Clear-RecycleBin
 
 `Clear-RecycleBin` 在长路径 / 几十万文件的 bin 上会抛
