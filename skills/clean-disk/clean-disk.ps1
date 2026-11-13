@@ -126,6 +126,8 @@ $script:warnCount = 0
 $script:recycleLeft = [long]0
 $script:legacyLeft = [long]0
 $script:kernelError = ''
+$script:cleanedByTool = 0
+$script:cleanMethod = ''
 $script:blocked = New-Object System.Collections.Generic.List[string]
 $script:sectionStarted = $null
 $script:startedAt = Get-Date
@@ -588,9 +590,39 @@ function Test-DirHasFile {
     return $false
 }
 
+function Invoke-CargoClean {
+    <# Rust 产物优先交给 cargo 自己清：`cargo clean` 尊重 CARGO_TARGET_DIR 与
+       .cargo/config.toml 的 build.target-dir，能清到「按目录名扫不出来」的那份产物 ——
+       本仓库的 evolve 就把构建放在 .dev/target，重定向到仓库外同理。
+       cargo 不在 PATH、清单解析失败、离线元数据缺失都返回 $false，调用方退回按路径删。 #>
+    param([string]$WorkspaceRoot)
+    $cmd = Get-Command cargo -ErrorAction SilentlyContinue
+    if (-not $cmd) {
+        $script:cleanMethod = 'cargo-missing'
+        Add-Blocked 'cargo 不在 PATH，产物改用路径删除'
+        return $false
+    }
+    try {
+        Push-Location -LiteralPath $WorkspaceRoot
+        try {
+            $null = & $cmd.Source clean --offline 2>&1 | Out-Null
+            $code = $LASTEXITCODE
+        } finally { Pop-Location }
+        if ($code -eq 0) { $script:cleanMethod = 'cargo-clean'; return $true }
+        $script:cleanMethod = 'cargo-clean-rc-' + $code
+        Add-Blocked ('cargo clean 退出码 ' + $code)
+        return $false
+    } catch {
+        $script:cleanMethod = 'cargo-clean-failed'
+        Add-Blocked ('cargo clean 失败: ' + $_.Exception.Message)
+        return $false
+    }
+}
+
 function Remove-ArtifactFolder {
     <# 删除构建产物目录本身（与 Clear-Folder 不同，target/node_modules 连根一起删）。#>
-    param([string]$Path, [string]$Label)
+    param([string]$Path, [string]$Label, [string]$Kind = '', [string]$WorkspaceRoot = '')
+    $script:cleanMethod = ''
     if (-not (Test-Path -LiteralPath $Path)) { return }
     $item = Get-Item -LiteralPath $Path -Force
     if (-not $item.PSIsContainer) { return }
@@ -605,12 +637,18 @@ function Remove-ArtifactFolder {
     if ($DryRun) {
         # 大小 + 最后写入时间：判「冷/热」用，别删正在编译的那份
         $stamp = if ($stats.Newest) { $stats.Newest.ToString('MM-dd HH:mm') } else { '未知' }
-        Write-Host ("  [预览] {0} = {1}（{2} 个文件，最后写入 {3}）" -f $Label, (Format-Size $before), $stats.Files, $stamp) -ForegroundColor Yellow
+        $how = ''
+        if ($Kind -eq 'Rust target') { $how = '；实跑先试 cargo clean' }
+        Write-Host ("  [预览] {0} = {1}（{2} 个文件，最后写入 {3}{4}）" -f $Label, (Format-Size $before), $stats.Files, $stamp, $how) -ForegroundColor Yellow
         return
     }
-    # 先让内核一次删完整棵树（零遍历）；不行才退回逐文件的镜像清空
+    # Rust 产物先问 cargo：它知道被 CARGO_TARGET_DIR/config 重定向到哪
+    if ($Kind -eq 'Rust target' -and $WorkspaceRoot) {
+        if (Invoke-CargoClean -WorkspaceRoot $WorkspaceRoot) { $script:cleanedByTool++ }
+    }
+    # 剩下没清干净的（或不该由工具清的）：先让内核一次删完整棵树（零遍历）；不行才退回逐文件的镜像清空
     $rc = 0
-    if (-not (Remove-TreeInKernel $full)) {
+    if ((Get-FolderSize $full) -gt 0 -and -not (Remove-TreeInKernel $full)) {
         $null = & robocopy.exe $script:emptyDir $full /MIR /XJ /R:0 /W:0 /NFL /NDL /NJH /NJS /NP /MT:8
         $rc = $LASTEXITCODE
         Remove-Item -LiteralPath $full -Recurse -Force -ErrorAction SilentlyContinue
@@ -620,13 +658,15 @@ function Remove-ArtifactFolder {
     $freed = [long]($before - $after)
     if ($freed -lt 0) { $freed = 0 }
     $script:totalFreed += $freed
+    $how = $script:cleanMethod
+    if (-not $how) { $how = 'path' }
     if ($after -gt 0) {
         $script:skippedLocked++
-        Write-Host ("  [部分] {0} - 释放 {1}，残留 {2}（文件被占用，先停掉构建/开发服务器）" -f $Label, (Format-Size $freed), (Format-Size $after)) -ForegroundColor Cyan
+        Write-Host ("  [部分] {0} - 释放 {1}，残留 {2}（文件被占用，先停掉构建/开发服务器）方式={3}" -f $Label, (Format-Size $freed), (Format-Size $after), $how) -ForegroundColor Cyan
     } elseif (Test-Path -LiteralPath $full) {
-        Write-Host ("  [完成] {0} - 释放 {1}（内容已清空，空目录因权限保留）" -f $Label, (Format-Size $freed)) -ForegroundColor Cyan
+        Write-Host ("  [完成] {0} - 释放 {1}（内容已清空，空目录因权限保留）方式={2}" -f $Label, (Format-Size $freed), $how) -ForegroundColor Cyan
     } else {
-        Write-Host ("  [完成] {0} - 释放 {1}" -f $Label, (Format-Size $freed)) -ForegroundColor Cyan
+        Write-Host ("  [完成] {0} - 释放 {1}，方式={2}" -f $Label, (Format-Size $freed), $how) -ForegroundColor Cyan
     }
     if ($rc -ge 8) {
         Write-Host ("         robocopy 退出码 {0}，部分项目可能因权限不足未清理" -f $rc) -ForegroundColor Red
@@ -708,7 +748,7 @@ function Invoke-ProjectArtifactClean {
         if ($kind) {
             $rel = $dir.Substring($rootFull.TrimEnd('\').Length).TrimStart('\')
             if (-not $rel) { $rel = '.' }
-            Remove-ArtifactFolder -Path $dir -Label ("{0,-16} {1}" -f $kind, $rel)
+            Remove-ArtifactFolder -Path $dir -Label ("{0,-16} {1}" -f $kind, $rel) -Kind $kind -WorkspaceRoot $parent
             $hit++
             continue   # 产物目录本身不再下钻（避免重复统计嵌套 node_modules/target）
         }
@@ -1085,6 +1125,9 @@ if ($DryRun) {
     }
     if ($script:skippedLocked -gt 0) {
         Write-Host (" 有 {0} 类项目因软件运行中被跳过或仅部分清理：关闭相关软件后重跑即可。" -f $script:skippedLocked) -ForegroundColor Yellow
+    }
+    if ($script:cleanedByTool -gt 0) {
+        Write-Host (" 其中 {0} 个产物目录由构建工具自己清掉（cargo clean）" -f $script:cleanedByTool) -ForegroundColor Green
     }
     if ($script:warnCount -gt 0) {
         Write-Host (" 有 {0} 条警告，详见日志。" -f $script:warnCount) -ForegroundColor Yellow

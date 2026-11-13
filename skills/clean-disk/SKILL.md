@@ -147,6 +147,46 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/find-forgotten.p
 - **删完功能顺手清它的路径。** 改完代码 `grep` 一遍这个功能写过的目录/文件（见
   `AGENTS.md`「功能删掉时，它在盘上的产物也要删」）。
 
+### Rust 产物：先问 cargo，再自己删
+
+认出 `target` + 兄弟 `Cargo.toml` 之后的顺序是：
+`cargo clean --offline` → 还能量到东西才内核递归删 → 再不行才 robocopy 镜像。
+让 cargo 先动手不是形式主义：**只有它知道产物真正落在哪**（`CARGO_TARGET_DIR`、
+`.cargo/config.toml` 里的 `build.target-dir`），而按目录名扫只看得见 `./target` ——
+本仓库的 evolve 把构建放在 `.dev/target`，重定向到仓库外的也一样，这些在纯路径方案里是隐形的。
+
+每一项都报它实际走的路：
+
+```
+  [完成] Rust target      target - 释放 120.00 KB，方式=cargo-clean
+  共处理 1 个产物目录（根: …）
+ 其中 1 个产物目录由构建工具自己清掉（cargo clean）
+```
+
+`方式=` 的取值：`cargo-clean` / `cargo-clean-rc-<码>` / `cargo-missing` / `path`。
+后三种都会把原因写进 `blocked`，不会静默降级。Maven/Gradle/node_modules 仍然按路径删：
+它们的 clean 命令不改变落点，调它只多一层启动代价。
+
+一个已知边界：不在 `workspace.members` 里的嵌套包会让 cargo 直接报
+`current package believes it's in a workspace when it's not`（退出码 101），
+这时脚本退回路径删除，结果一样 —— 别把它当成 cargo 坏了。
+
+### 活跃仓库要时常 cargo clean：这是 monitor 的活，不是记名单
+
+活跃的仓库就是 `git worktree list` 出来的那批，今天在这明天就没。
+所以定期清理的正确形状不是背下一串路径，而是每次重新问一遍、只动冷的：
+
+1. **拿清单**：`git -C <repo> worktree list --porcelain`；对每个 worktree 的 `target/`
+   取大小与最后写入时间 —— `-DryRun -ProjectRoot <repo>\.worktrees` 会逐条打出来。
+2. **判冷热**：只清很久没写的。动正在编的那份，等于把别人打回全量重编。
+3. **用磁盘告警当触发器**：`crates/server/src/disk.rs` 的 disk kind 在每次工具调用后读卷，
+   低空间时写 `events(kind='disk_space')`。订阅这个事件，在事件里先跑 DryRun 拿清单，
+   再只对冷的 worktree 跑一次 `-ProjectRoot <那个 worktree>`。
+   订阅的命令形状按 SPEC.md 的 `subscribe(id, pattern, cmd, session)`；
+   **这条订阅链路我没有在本机实跑过**，写在这里是形状，不是验证过的配置。
+4. **红线**：别清正在被某个运行中的服务端使用的那份构建；别对 evolve 的 `.dev/target` 开刀，
+   那是 evolve 自己的循环。
+
 ## 清理边界（设计决策，不要擅自改）
 
 | 清（可重建） | 永不碰 |
