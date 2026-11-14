@@ -38,12 +38,12 @@ def _script(name, arguments):
 
 
 def _roots(project_root):
-    """The code roots to sweep inside, normalised: the script takes them comma separated."""
+    """The code roots one call names: a list, or the single path a string is."""
     if not project_root:
         return []
     if isinstance(project_root, str):
-        return [part.strip() for part in project_root.split(",") if part.strip()]
-    return list(project_root)
+        return [project_root.strip()] if project_root.strip() else []
+    return [str(root).strip() for root in project_root if str(root).strip()]
 
 
 def clean(dry_run: bool = False, no_elevate: bool = False, project_root=None,

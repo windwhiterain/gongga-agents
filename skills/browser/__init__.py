@@ -14,8 +14,8 @@ playwright; the entry that came before ran it as `uv run browse.py` so the
 dependency was resolved on demand, and this package keeps that contract rather
 than importing a library the harness's interpreter does not have. Life is the
 `lifecycle.sh` beside it: it starts, attaches to, and stops the browser, and
-records which port is whose. Both are one program invocation with a list of
-words -- no shell, and nothing a caller wrote is joined into a string.
+records which port is whose. Both are started as programs -- never through a
+shell -- because one needs its own interpreter and the other is a script.
 """
 
 import os
