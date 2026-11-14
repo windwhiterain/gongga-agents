@@ -1,27 +1,31 @@
 ---
 name: model_pool
 description: Pick the model a spawned agent should run on — one `<provider>/<model id>` string that `gongga-cli set_session --model` takes verbatim, or, when the spawn takes a whole config, SPEC's `ModelConfig` for that model; drawn inside the tier the work calls for (flash / pro / sota, named on every call), and only from models this machine can actually run right now: still in the roster, credentialed, with allowance above its floor, entitled on this account, and not marked out. Use it when a subagent has no model to name, when a spawn hit a quota wall and needs another, or when you are placing the work itself: flash for search / explore / investigate / implement, pro for hard implement and review, sota for plan and core review. Triggers - 挑模型 / 派子 agent 用哪个模型 / 有额度的模型 / model pool / flash pro sota 概率.
-metadata:
-  entry: model_pool
 ---
 
 # Draw a model, hand it to a spawn
 
 One command, one line, and that line is already the argument:
 
-```bash
-# This skill's own directory: the parent of the `SKILL.md: <path>` that `@skill:`
-# expands to (the `path` column of `skill`'s table names the same file).
-# In gongga, `gongga-cli skill <name> ...` runs the entry the frontmatter declares.
-SKILL_DIR=<the directory this SKILL.md is in>
-S="$SKILL_DIR/model_pool"
-$S pick --tier flash --provider deepseek-official   # -> deepseek-official/deepseek-flash
-$S pick_config --tier flash --provider deepseek-official   # -> the ModelConfig below
+```python
+run_skill(id="model_pool", cmd={"name": "pick", "args": {"tier": "flash", "provider": "deepseek-official"}})
+# -> deepseek-official/deepseek-flash
+run_skill(id="model_pool", cmd={"name": "pick_config",
+                                "args": {"tier": "flash", "provider": "deepseek-official"}})
+# -> the ModelConfig below, as one JSON object
 ```
 
-```bash
-gongga-cli set_session --name scout --model "$($S pick --provider deepseek-official --tier flash)"
-gongga-cli send_message --name scout --message "read the failing test and report"
+The function form is `pick(tier=None, provider=None, weights=None, seed=None,
+refresh=None, timeout=None, cached=False, probe_entitlement=False, as_json=False,
+explain=False, quiet=False, config=None, preference=None)`; `pick_config` takes the
+same arguments plus the three provider-defaulted fields (`thinking`, `ctx_limit`,
+`cache_tier`) and answers SPEC's `ModelConfig` as a mapping rather than printing it.
+
+```python
+model = run_skill(id="model_pool", cmd={"name": "pick",
+                                        "args": {"tier": "flash", "provider": "deepseek-official"}})
+# then hand that line to the spawn exactly as it came back:
+#   set_session(name="scout", model=model)
 ```
 
 The server resolves `<provider>/<model id>` exactly as this prints it, so the
@@ -35,9 +39,9 @@ session config -- SPEC's `SessionConfig.model_config` -- wants `pick_config`: th
 same draw, the same tier, the same gates, printed as SPEC's `ModelConfig` instead
 of one line.
 
-```bash
-$S pick_config --tier flash
-# {"model":{"provider":"deepseek-official","model":"deepseek-flash"},
+```json
+# pick_config(tier="flash") answers this object:
+{"model":{"provider":"deepseek-official","model":"deepseek-flash"},
 #  "thinking":null,"ctx_limit":null,"cache_tier":null}
 ```
 
@@ -88,7 +92,7 @@ provider or you already made, not a guess:
 |---|---|
 | The roster retired the id | another entry's `retired_ids` |
 | The provider says the allowance is spent, or at the floor | the quota script's `remaining` / `error` |
-| You marked the provider or the route | `model_pool mark` |
+| You marked the provider or the route | `mark(target, minutes, reason)` |
 | This machine holds no credential for it | no entry in `~/.agents/keys.toml`, and `key_env` in no environment variable |
 | The provider denies this model for this account | one cheap probe: 401 / 402 / 403 / 404, or a body that says access was denied |
 | Nothing could be reported on | no reading, a timeout, or a provider the roster publishes no quota for — **no allowance known counts as none** |
@@ -129,10 +133,10 @@ draw asks before it draws instead of after a spawn dies.
 `probe` asks, once, with the cheapest request a model answers — one word in, one
 token out:
 
-```bash
-$S probe                 # every route, verdict cached for probe_refresh (a day)
-$S probe --provider kimi-coding --force
-$S pick --tier flash --probe   # refresh the verdicts on the way to a draw
+```python
+probe()                                  # every route, verdict cached for a day
+probe(provider="kimi-coding", force=True)
+pick(tier="flash", probe_entitlement=True)   # refresh on the way to a draw
 ```
 
 Three verdicts, and only one of them excludes:
@@ -151,12 +155,12 @@ after adding keys, and again with `--force` after buying something.
 
 | Command | What it answers |
 |---|---|
-| `model_pool pick --tier TIER [--provider ID] [--json] [--explain] [--seed N]` | one draw inside that tier; `--json` for the decision, `--explain` for every candidate on stderr |
-| `model_pool pick_config --tier TIER [--provider ID] [--json] [--explain] [--seed N]` | the same draw as SPEC's `ModelConfig`, one JSON object on stdout; `--json` for the decision, with the config under `model_config` |
-| `model_pool status [--provider ID]` | every route: tier, usable or not, share, and the provider's own detail line |
-| `model_pool tiers` | the three tiers, their weights, and the models inside each |
-| `model_pool probe [--force] [--provider ID]` | ask each provider whether this account may run the model |
-| `model_pool mark <provider/model\|provider> [--minutes N] [--reason TEXT] [--clear]` | keep a route out of the draw, or release it |
+| `pick(tier=None, provider=None, as_json=False, explain=False, seed=None, ...)` | one draw inside that tier; `as_json=True` for the decision, `explain=True` for every candidate on stderr |
+| `pick_config(tier, provider=None, ...)` | the same draw as SPEC's `ModelConfig`, answered as a mapping; `as_json` is not needed for a caller that reads a structure |
+| `status(as_json=False, provider=None, tier=None, ...)` | every route: tier, usable or not, share, and the provider's own detail line |
+| `tiers()` | the three tiers, their weights, and the models inside each |
+| `probe(force=False, provider=None, tier=None, ...)` | ask each provider whether this account may run the model |
+| `mark(target, minutes=None, reason=None, clear=False)` | keep a route out of the draw, or release it |
 
 Flags on `pick`, `pick_config` and `status`: `--refresh S` (how long a cached reading
 answers, `0` asks again), `--cached` (never run a quota script), `--timeout S`,
@@ -169,9 +173,9 @@ between two probes, and a plan's window can empty mid-run. So the loop is draw,
 spawn, and — if the child dies — mark what killed it and draw again. The failure
 line in the child's transcript names the route.
 
-```bash
-$S mark kimi-coding/k3.1-pro --minutes 30 --reason "quota exhausted mid-run"
-$S pick --tier sota --provider kimi-coding   # same tier, another route of it
+```python
+mark("kimi-coding/k3.1-pro", minutes=30, reason="quota exhausted mid-run")
+pick(tier="sota", provider="kimi-coding")   # same tier, another route of it
 ```
 
 A mark is per machine, not per session, and lapses on its own after
@@ -313,8 +317,11 @@ test  = 0.00     # 默认 0：只在你点名 --tier test 时才抽得到
 
 `status` is the check that the draw is drawing from what you think:
 
-```bash
-$S status --provider minimax-cn
+```python
+status(provider="minimax-cn")
+```
+
+```
 flash minimax-cn/MiniMax-M3.1-Flash  usable  0.85  85 left (3s old)
       general current 100%, general weekly 85%
 pro   minimax-cn/MiniMax-M3          usable  0.85  85 left (3s old)
