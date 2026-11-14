@@ -1,25 +1,25 @@
 ---
 name: web-search
 description: 查实时网页、读某个 URL 的正文。当答案依赖训练截止之后的事实（版本号、发布日、当前价格、某项目现状）、或需要核对/引用一个具体网址时用它。走 DeepSeek 的 REST 接口，不花模型轮次，也不需要模型支持服务端搜索。别用记忆回答"最新是什么"。
-compatibility: 需要 bash 与 curl 或 python3；密钥见下（`~/.agents/keys.toml` 或 `DEEPSEEK_API_KEY`）
-metadata:
-  entry: web-search.sh
+compatibility: 需要 python3.11+（`tomllib`）；密钥见下（`~/.agents/keys.toml` 或 `DEEPSEEK_API_KEY`）
 ---
 
 # 联网搜索与取页
 
-一个 shell 脚本，两个动作。**它是 REST 调用，不是模型轮次**，所以任何会话、任何模型都能用。
+一个 Python 包，两个函数。**它是 REST 调用，不是模型轮次**，所以任何会话、任何模型都能用。
 
-```bash
-# 本 skill 的目录：`@skill:` 展开里 `SKILL.md: <path>` 的父目录（`index_skill` 的 path 列同源）。
-# gongga 里更短：`gongga-cli skill <name> …`，它跑 frontmatter 里声明的入口。
-SKILL_DIR=<本 SKILL.md 所在目录>
-S="$SKILL_DIR/web-search.sh"
-
-$S search "query" [count]      # 默认 6 条
-$S search "query" 3 --content  # 附带每条结果的页面正文
-$S fetch <url>                 # 一页正文转 markdown
+```python
+run_skill(id="web-search", cmd={"name": "search", "args": {"query": "…"}})
+#   search(query, count=6, content=False) -> str   # 排序后的来源，每条一块
+#   fetch(url)                            -> str   # 一页正文，转成 markdown
 ```
+
+| 函数 | 参数 | 返回 |
+|---|---|---|
+| `search` | `query: str`；`count: int = 6` 要几条来源；`content: bool = False` 是否附带每条结果的页面正文 | 排好序的来源清单，每条：标题、URL、站点名、日期（有时为空）、摘要；`content` 时追加正文前 40 行。没有命中时返回 `no results` |
+| `fetch` | `url: str` | 该页正文（markdown），知道标题时先给标题 |
+
+两个都是**返回字符串**，不是打印：调用方拿到的就是这段文字。要写给用户看就把它转述，别加解读。
 
 ## 什么时候该用
 
@@ -32,9 +32,9 @@ $S fetch <url>                 # 一页正文转 markdown
 ## 输出怎么读
 
 `search` 每条给：标题、URL、站点名、日期（有时为空）、摘要（截断的页面片段）。
-`--content` 追加正文前 40 行。
+`content=True` 追加正文前 40 行。
 
-摘要是**片段**，不是全文。要确认细节就 `fetch` 那个 URL，或加 `--content`。
+摘要是**片段**，不是全文。要确认细节就 `fetch` 那个 URL，或加 `content=True`。
 
 引用时给 URL，别只给标题。日期为空表示接口没给，不代表没有日期。
 
