@@ -433,24 +433,24 @@ def create_role(task, role, cwd, remote=None):
     return {"session": session, "model": model, "cwd": cwd, "remote": remote}
 
 
-def cmd_start(args):
-    task = checked_name(args.task, "task")
+def start(task, spec, goal, cwd=".", remote=None, home=None):
+    task = checked_name(task, "task")
     # A spec and a cwd name files on the machine the roles run on. With
     # `--remote` they are the peer's paths, and this machine's filesystem says
     # nothing about them: resolving or testing them here would check a
     # different checkout, or none at all.
-    if args.remote:
-        cwd, spec = args.cwd, args.spec
+    if remote:
+        cwd, spec = cwd, spec
         if not spec.strip():
             fail("spec must not be empty")
     else:
-        cwd = str(Path(args.cwd).expanduser().resolve())
-        spec = str(Path(args.spec).expanduser().resolve())
+        cwd = str(Path(cwd).expanduser().resolve())
+        spec = str(Path(spec).expanduser().resolve())
         if not Path(spec).is_file():
             fail(f"spec does not exist: {spec}")
-    if not args.goal.strip():
+    if not goal.strip():
         fail("goal must not be empty")
-    path = task_file(task, args.home)
+    path = task_file(task, home)
     if path.exists():
         fail(f"task already exists: {path}; use status to resume it")
     # The callback runs in the session that armed it: justice is whoever runs
@@ -460,7 +460,7 @@ def cmd_start(args):
         fail("run start from the justice session; GONGGA_SESSION is not set")
     roles = {}
     for role in ("advisor", "premier"):
-        roles[role] = create_role(task, role, cwd, args.remote)
+        roles[role] = create_role(task, role, cwd, remote)
     watches = []
     try:
         for role in ("advisor", "premier"):
@@ -487,10 +487,10 @@ def cmd_start(args):
         "id": task,
         "task": task,
         "created_at": now(),
-        "goal": args.goal,
+        "goal": goal,
         "spec": spec,
         "cwd": cwd,
-        "remote": args.remote,
+        "remote": remote,
         "roles": {"justice": {"session": justice}, **roles},
         "watch": watches,
         "state": "planning",
@@ -501,7 +501,7 @@ def cmd_start(args):
         for role in roles:
             brief = role_brief(task, role, record["spec"])
             if role == "advisor":
-                brief += f" The user's goal is: {args.goal}"
+                brief += f" The user's goal is: {goal}"
             cli("send_message", "--name", roles[role]["session"], "--message", brief)
             # What the role actually runs on, on the record: the task record holds
             # what `start` drew, and a later model swap otherwise leaves it lying.
@@ -510,14 +510,14 @@ def cmd_start(args):
                 {
                     "version": 1,
                     "kind": "session",
-                    "id": record_id(read_task(task, args.home)[1], "session"),
+                    "id": record_id(read_task(task, home)[1], "session"),
                     "task": task,
                     "created_at": now(),
                     "actor": "justice",
                     "role": role,
                     "session": roles[role]["session"],
                     "model": roles[role]["model"],
-                    "remote": args.remote,
+                    "remote": remote,
                     "cwd": cwd,
                     "note": "created by start",
                 },
@@ -540,49 +540,50 @@ def cmd_start(args):
     )
 
 
-def cmd_record(args):
-    task = checked_name(args.task, "task")
-    path = task_file(task, args.home)
+def record(kind, task, body, actor, id=None, home=None):
+    task = checked_name(task, "task")
+    path = task_file(task, home)
     with task_lock(path):
-        record_document(args, task, path)
+        record_document(kind=kind, task=task, body=body, actor=actor,
+                            id=id, home=home, path=path)
 
 
-def record_document(args, task, path):
-    _initial, records = read_task(task, args.home)
-    payload = load_json(args.json)
+def record_document(kind, task, body, actor, id, home, path):
+    _initial, records = read_task(task, home)
+    payload = load_json(body)
     reserved = {"version", "kind", "id", "task", "created_at", "actor"}
     if reserved.intersection(payload):
         fail("version, kind, id, task, created_at, and actor belong to the command")
-    normalize(args.kind, payload)
-    if args.kind == "plan" and args.actor != "advisor":
+    normalize(kind, payload)
+    if kind == "plan" and actor != "advisor":
         fail("only advisor can write a plan")
-    if args.kind == "proposal" and args.actor != "advisor":
+    if kind == "proposal" and actor != "advisor":
         fail("only advisor can write a proposal")
-    if args.kind == "report" and args.actor != "premier":
+    if kind == "report" and actor != "premier":
         fail("only premier can write a report")
-    if args.kind in ("judgement", "spec_amendment") and args.actor != "justice":
+    if kind in ("judgement", "spec_amendment") and actor != "justice":
         fail("only justice can record a judgement or the user's spec decision")
-    if args.kind == "requirement" and args.actor != "justice":
+    if kind == "requirement" and actor != "justice":
         fail("only justice records the user's requirements")
-    if args.kind == "requirement":
+    if kind == "requirement":
         # A reference to nothing is a claim nobody can check.
-        for field, kind in (
+        for field, record_kind in (
             ("proposals", "proposal"),
             ("plans", "plan"),
             ("reports", "report"),
         ):
             for identifier in payload.get(field, []):
-                find_record(records, kind, identifier)
+                find_record(records, record_kind, identifier)
         if payload.get("ref"):
             find_record(records, "requirement", payload["ref"])
-    if args.kind == "session" and args.actor not in ("justice", "advisor", "premier"):
+    if kind == "session" and actor not in ("justice", "advisor", "premier"):
         fail("a session record names its actor: justice, advisor, or premier")
-    identifier = record_id(records, args.kind, args.id)
-    if args.id is not None:
-        checked_name(args.id, "id")
-        if any(record.get("id") == args.id for record in records):
+    identifier = record_id(records, kind, id)
+    if id is not None:
+        checked_name(id, "id")
+        if any(record.get("id") == id for record in records):
             fail(f"record id already exists: {identifier}")
-    if args.kind == "judgement":
+    if kind == "judgement":
         subject = payload["subject"]
         match = re.fullmatch(r"(proposal|plan|report):(.+)", subject)
         if not match:
@@ -602,11 +603,11 @@ def record_document(args, task, path):
                         "a premise violation must go back to advisor, not approve a report"
                     )
                 string_list(payload, "spec_refs")
-    elif args.kind == "report":
+    elif kind == "report":
         required_strings(payload, ("plan",))
         plan = find_record(records, "plan", payload["plan"])
         approved_plan(records, plan["id"])
-    elif args.kind == "spec_amendment":
+    elif kind == "spec_amendment":
         proposal = find_record(records, "proposal", payload["ref_proposal"])
         judgement = find_record(records, "judgement", payload["ref_judgement"])
         if judgement.get("subject") != f"proposal:{proposal['id']}":
@@ -622,15 +623,15 @@ def record_document(args, task, path):
     # used by append. This keeps two role sessions from minting one id.
     record = {
         "version": 1,
-        "kind": args.kind,
+        "kind": kind,
         "id": identifier,
         "task": task,
         "created_at": now(),
-        "actor": args.actor,
+        "actor": actor,
         **payload,
     }
     write_record(path, record)
-    print(json.dumps({"task": task, "kind": args.kind, "id": identifier}, indent=2))
+    print(json.dumps({"task": task, "kind": kind, "id": identifier}, indent=2))
 
 
 def latest_judgement(records, subject):
@@ -665,13 +666,13 @@ def approved_plan(records, identifier):
     return judgement
 
 
-def cmd_dispatch(args):
-    task = checked_name(args.task, "task")
-    initial, records = read_task(task, args.home)
-    judgement = approved_plan(records, args.plan)
+def dispatch(task, plan, home=None):
+    task = checked_name(task, "task")
+    initial, records = read_task(task, home)
+    judgement = approved_plan(records, plan)
     session = initial["roles"]["premier"]["session"]
     message = (
-        f"Polity task {task}: implement plan {args.plan}. "
+        f"Polity task {task}: implement plan {plan}. "
         f"Justice approved it in judgement {judgement['id']}. "
         "Read the plan from the task records before dispatching subagents. "
         "Review all work and submit a report referencing this plan. "
@@ -683,12 +684,12 @@ def cmd_dispatch(args):
         "so another session's uncommitted work is never carried by your commit."
     )
     cli("send_message", "--name", session, "--message", message)
-    print(json.dumps({"task": task, "plan": args.plan, "premier": session}, indent=2))
+    print(json.dumps({"task": task, "plan": plan, "premier": session}, indent=2))
 
 
-def cmd_status(args):
-    task = checked_name(args.task, "task")
-    initial, records = read_task(task, args.home)
+def status(task, home=None):
+    task = checked_name(task, "task")
+    initial, records = read_task(task, home)
     documents = [record for record in records if record["kind"] in RECORDS]
     summary = {
         kind: [record["id"] for record in documents if record["kind"] == kind]
@@ -704,7 +705,7 @@ def cmd_status(args):
                 "records": summary,
                 "open_requirements": open_requirements(records),
                 "latest": documents[-1] if documents else None,
-                "file": str(task_file(task, args.home)),
+                "file": str(task_file(task, home)),
             },
             ensure_ascii=False,
             indent=2,
@@ -728,14 +729,14 @@ def build_parser():
         "--remote",
         help="Gongga remote whose machine holds the checkout; omit for this machine",
     )
-    start.set_defaults(handler=cmd_start)
 
     record = commands.add_parser("record", help="validate and append a record")
     record.add_argument("kind", choices=RECORDS)
     record.add_argument("--task", required=True)
     record.add_argument("--id")
     record.add_argument(
-        "--json", required=True, help="the record body as one JSON object"
+        "--json", dest="body", required=True,
+        help="the record body as one JSON object"
     )
     record.add_argument(
         "--actor",
@@ -743,29 +744,43 @@ def build_parser():
         choices=tuple(ROLES),
         help="role accepting responsibility",
     )
-    record.set_defaults(handler=cmd_record)
 
     dispatch = commands.add_parser(
         "dispatch", help="release an approved plan to premier"
     )
     dispatch.add_argument("--task", required=True)
     dispatch.add_argument("--plan", required=True)
-    dispatch.set_defaults(handler=cmd_dispatch)
 
     status = commands.add_parser("status", help="show task ownership and record ids")
     status.add_argument("--task", required=True)
-    status.set_defaults(handler=cmd_status)
     return parser
 
 
 def main():
     args = build_parser().parse_args()
     try:
-        args.handler(args)
+        named(args)
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         print(f"polity: {error}", file=sys.stderr)
         return 2
     return 0
+
+
+def named(args):
+    """The call one parsed command line names, over the fields it declared.
+
+    The four functions above are the API, and a caller inside Python names the
+    same fields as keyword arguments; nothing here passes a command line along.
+    """
+    if args.command == "start":
+        return start(task=args.task, spec=args.spec, goal=args.goal, cwd=args.cwd,
+                     remote=args.remote, home=args.home)
+    if args.command == "record":
+        return record(kind=args.kind, task=args.task, body=args.body, actor=args.actor,
+                      id=args.id, home=args.home)
+    if args.command == "dispatch":
+        return dispatch(task=args.task, plan=args.plan, home=args.home)
+    return status(task=args.task, home=args.home)
 
 
 if __name__ == "__main__":

@@ -5,7 +5,6 @@ import json
 import os
 from pathlib import Path
 import tempfile
-from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -39,15 +38,13 @@ class PolityTest(unittest.TestCase):
         for patcher in self.patchers:
             patcher.start()
         with contextlib.redirect_stdout(io.StringIO()):
-            polity.cmd_start(
-                SimpleNamespace(
-                    task="demo",
-                    spec=str(self.spec),
-                    goal="implement the feature",
-                    cwd=str(self.home),
-                    remote=None,
-                    home=str(self.home),
-                )
+            polity.start(
+                task="demo",
+                spec=str(self.spec),
+                goal="implement the feature",
+                cwd=str(self.home),
+                remote=None,
+                home=str(self.home),
             )
 
     def tearDown(self):
@@ -56,21 +53,18 @@ class PolityTest(unittest.TestCase):
         self.temporary.cleanup()
 
     def record(self, kind, actor, body):
-        args = SimpleNamespace(
-            task="demo",
-            kind=kind,
-            actor=actor,
-            id=None,
-            json=json.dumps(body),
-            home=str(self.home),
-        )
         with contextlib.redirect_stdout(io.StringIO()):
-            polity.cmd_record(args)
+            polity.record(
+                kind=kind,
+                task="demo",
+                body=json.dumps(body),
+                actor=actor,
+                id=None,
+                home=str(self.home),
+            )
 
     def dispatch(self):
-        polity.cmd_dispatch(
-            SimpleNamespace(task="demo", plan="plan-1", home=str(self.home))
-        )
+        polity.dispatch(task="demo", plan="plan-1", home=str(self.home))
 
     def test_a_judgement_must_show_what_justice_ran(self):
         self.record(
@@ -114,15 +108,13 @@ class PolityTest(unittest.TestCase):
         # this machine's checkout, or refuse a spec that exists over there.
         missing = self.home / "not-on-this-machine" / "SPEC.md"
         with contextlib.redirect_stdout(io.StringIO()):
-            polity.cmd_start(
-                SimpleNamespace(
-                    task="peer",
-                    spec="C:\\peer\\SPEC.md",
-                    goal="work where the code is",
-                    cwd="C:\\peer",
-                    remote="build",
-                    home=str(self.home),
-                )
+            polity.start(
+                task="peer",
+                spec="C:\\peer\\SPEC.md",
+                goal="work where the code is",
+                cwd="C:\\peer",
+                remote="build",
+                home=str(self.home),
             )
         sessions = [
             call

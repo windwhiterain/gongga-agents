@@ -1,4 +1,4 @@
-"""Separate judgement from execution: justice, advisor and premier as one record.
+"""Separate judgement from execution: justice, advisor and premier as roles.
 
     start(task, spec, goal, cwd=".", remote=None, home=None)
     record(kind, task, body, actor, id=None, home=None)
@@ -7,11 +7,11 @@
 
 Every role is an ordinary session; what ties them together is one append-only
 JSONL file per task (`<home>/polity/<task>.jsonl`). `body` is a mapping or the
-JSON text of one. The implementation is `polity.py` beside this file, whose
-command line still exists for a human at a shell.
+JSON text of one. The implementation is `polity.py` beside this file: each
+function here calls the function of that name there, with the arguments the
+caller named.
 """
 
-import argparse
 import json
 import os
 import subprocess
@@ -26,11 +26,10 @@ if HERE not in sys.path:
 import polity  # noqa: E402  -- the implementation beside this file
 
 
-def _run(handler, **fields):
-    """Run one command handler over the command line's own shape, and answer its exit code."""
-    args = argparse.Namespace(**{"home": None, **fields})
+def _run(call):
+    """Run one verb, answering its refusal as one line and exit code 2."""
     try:
-        handler(args)
+        call()
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         print("polity: %s" % error, file=sys.stderr)
         return 2
@@ -46,7 +45,8 @@ def start(task, spec, goal, cwd=".", remote=None, home=None):
     peer's paths and are passed through untouched, because this machine's
     filesystem says nothing about them.
     """
-    return _run(polity.cmd_start, task=task, spec=spec, goal=goal, cwd=cwd, remote=remote, home=home)
+    return _run(lambda: polity.start(task=task, spec=spec, goal=goal, cwd=cwd,
+                                     remote=remote, home=home))
 
 
 def record(kind, task, body, actor, id=None, home=None):
@@ -57,14 +57,15 @@ def record(kind, task, body, actor, id=None, home=None):
     `id` names the record; leave it out and the next free one is used.
     """
     payload = body if isinstance(body, str) else json.dumps(body, ensure_ascii=False)
-    return _run(polity.cmd_record, kind=kind, task=task, id=id, json=payload, actor=actor, home=home)
+    return _run(lambda: polity.record(kind=kind, task=task, body=payload, actor=actor,
+                                      id=id, home=home))
 
 
 def dispatch(task, plan, home=None):
     """Release an approved plan to premier, naming the judgement that approved it."""
-    return _run(polity.cmd_dispatch, task=task, plan=plan, home=home)
+    return _run(lambda: polity.dispatch(task=task, plan=plan, home=home))
 
 
 def status(task, home=None):
     """Roles, record ids, the open requirements, and the latest record."""
-    return _run(polity.cmd_status, task=task, home=home)
+    return _run(lambda: polity.status(task=task, home=home))
