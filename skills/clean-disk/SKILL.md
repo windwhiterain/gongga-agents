@@ -1,53 +1,56 @@
 ---
 name: clean-disk
-description: Windows 全量磁盘清理，一次清掉临时文件、浏览器/应用/编辑器缓存、崩溃转储、Windows 更新残留、DISM 组件、包管理器缓存和所有盘回收站；加 -ProjectRoot 可顺带清理指定代码根内的 target/node_modules 等构建产物。用户说"清理 C 盘/磁盘空间不足/系统垃圾/清理缓存/clean disk/释放磁盘空间"时使用。只删可自动重建的内容，不用于删除个人文件、聊天记录或卸载软件。
-metadata:
-  entry: clean-disk.ps1
+description: Windows 全量磁盘清理，一次清掉临时文件、浏览器/应用/编辑器缓存、崩溃转储、Windows 更新残留、DISM 组件、包管理器缓存和所有盘回收站；加 project_root 可顺带清理指定代码根内的 target/node_modules 等构建产物。用户说"清理 C 盘/磁盘空间不足/系统垃圾/清理缓存/clean disk/释放磁盘空间"时使用。只删可自动重建的内容，不用于删除个人文件、聊天记录或卸载软件。
 ---
 
 # Windows 全量磁盘清理
 
-给用户跑 `clean-disk.ps1`（与本文件同目录）。
+两个函数，各跑同目录下的一个脚本：`clean` 清缓存，`find_forgotten` 只读地找出
+「被遗忘的空间」。
+
+```python
+run_skill(id="clean-disk", cmd={"name": "clean", "args": {"dry_run": True}})
+```
+
+| 函数 | 参数 | 返回 |
+|---|---|---|
+| `clean` | `dry_run: bool = False` 预览：只统计、列计划，不删、不提权、不弹 UAC；`no_elevate: bool = False` 不请求 UAC，只跑用户级；`project_root: str` 或 `list[str] = None` **范围**参数，要扫构建产物的代码根（默认不扫）；`remove_upgrade_leftovers: bool = False` 连旧系统安装一起删（决定能否回退，默认不删） | 脚本的退出码：`0` 每一项都清完或本来就不存在，`1` 有失败/残留/被占用 |
+| `find_forgotten` | `min_mb: int = 300`；`top: int = 25`；`stale_days: int = 120` | 同上；**只读，永不删除** |
 
 脚本**没有清理项开关**——
-所有"删掉后会自动重建"的东西默认全清；`-DryRun` 是安全预览，不是开关。
-另外两个参数：`-ProjectRoot` 是**范围**参数（见下文「项目构建产物」），
-`-NoElevate` 跳过 UAC 提权（无人值守会话用，系统级项目标记跳过）。
+所有"删掉后会自动重建"的东西默认全清；`dry_run` 是安全预览，不是开关。
+另外两个参数：`project_root` 是**范围**参数（见下文「项目构建产物」），
+`no_elevate` 跳过 UAC 提权（无人值守会话用，系统级项目标记跳过）。
 
-```bash
-# 本 skill 的目录：`@skill:` 展开里 `SKILL.md: <path>` 的父目录（`index_skill` 的 path 列同源）。
-# 下面每条 `powershell … -File` 里的 $SKILL_DIR 是**这台 shell** 展开的，不是 PowerShell 变量；
-# gongga 里更短：`gongga-cli skill clean-disk <参数>`，路径拼法由它负责。
-SKILL_DIR=<本 SKILL.md 所在目录>
-```
+脚本的 stdout/stderr 就是这次调用的输出：汇总、`SUMMARY_JSON`、被跳过项都照原样看得见。
 
 ## 何时用 / 不要用来干什么
 
 - 用：C 盘/系统盘红了、Temp 几十万小文件、包管理器缓存膨胀、更新残留、想回收空间；
   用户明确给出代码根（如 `C:\resource`）并要求清 Rust `target`/`node_modules` 时，
-  走 `-ProjectRoot`。
+  走 `project_root`。
 - 不要用：删 Downloads 里的安装包、清微信/QQ/Telegram 聊天文件、卸载软件、
   清 Docker 卷。这些是用户数据或不可重建的东西，脚本刻意不碰。
 - **不要在没有用户明确给出代码根的情况下自作主张全盘扫项目产物**；更不要把
-  `C:\`、用户配置文件根传给 `-ProjectRoot`（会被安全闸拒绝）。
+  `C:\`、用户配置文件根传给 `project_root`（会被安全闸拒绝）。
 
 ## 执行流程（agent 照做）
 
 1. **先 DryRun**，把各项占用汇报给用户（不删除、不提权、不弹 UAC）：
 
-   ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/clean-disk.ps1" -DryRun
+   ```python
+   run_skill(id="clean-disk", cmd={"name": "clean", "args": {"dry_run": True}})
    ```
 
 2. 用户确认（或本来就直接要求清理）后实跑。实跑会自动弹**一次 UAC**：
    同意 → 用户级 + 系统级全清；取消 → 只清用户级，系统级项目打印跳过。
-   **无人值守会话**（agent 自己跑，没人点 UAC）要加 `-NoElevate`：它直接走用户级，
+   **无人值守会话**（agent 自己跑，没人点 UAC）要传 `no_elevate=True`：它直接走用户级，
    不会卡在 UAC 弹窗上，也不会留下带 `-NoExit` 的提权窗口。
 
-   ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/clean-disk.ps1"
+   ```python
+   run_skill(id="clean-disk", cmd={"name": "clean", "args": {}})
    # 无人值守：
-   powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/clean-disk.ps1" -NoElevate
+   run_skill(id="clean-disk", cmd={"name": "clean", "args": {"no_elevate": True}})
    ```
 
    提权后的窗口带 `-NoExit`，跑完留着给用户看汇总。DISM 组件清理可能要几分钟，
@@ -67,7 +70,7 @@ SKILL_DIR=<本 SKILL.md 所在目录>
 4. 浏览器/IDE/Teams/Slack/Discord/JetBrains **运行中时对应缓存自动跳过**。
    提示用户关掉后重跑即可，**不要强杀进程**。
 
-## 项目构建产物（-ProjectRoot）
+## 项目构建产物（project_root）
 
 默认不扫任何项目目录。用户明确给出一个或多个**代码根**时才启用，识别并删除：
 
@@ -87,11 +90,13 @@ SKILL_DIR=<本 SKILL.md 所在目录>
 刻意**不**碰：`dist`/`out`/`.next` 等可能被提交进仓库的产物、`venv`（无点号，
 名字太泛）、Unity 的 `Library`、全局 `~/.cargo`/`~/.gradle`（已在常规清理覆盖）。
 
-```powershell
-# 先 DryRun（项目产物清理不需要管理员，DryRun 同样不提权）
-powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/clean-disk.ps1" -DryRun -ProjectRoot C:\resource
-# 多个根用逗号分隔；实跑时 -ProjectRoot 会经 UAC 提权原样透传到新窗口
-...\clean-disk.ps1 -ProjectRoot C:\resource,D:\code
+```python
+# 先预览（项目产物清理不需要管理员，dry_run 同样不提权）
+run_skill(id="clean-disk", cmd={"name": "clean",
+                                 "args": {"dry_run": True, "project_root": ["C:/resource"]}})
+# 多个根写成列表；实跑时 project_root 会经 UAC 提权原样透传到新窗口
+run_skill(id="clean-disk", cmd={"name": "clean",
+                                 "args": {"project_root": ["C:/resource", "D:/code"]}})
 ```
 
 向用户说明代价：Rust/`.venv`/`node_modules` 删除后下次要重新编译或重新下载依赖。
@@ -117,9 +122,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/clean-disk.ps1" 
 用同目录的 `find-forgotten.ps1` 找它们（**只读，永不删除**）：
 
 ```bash
-powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/find-forgotten.ps1"
+run_skill(id="clean-disk", cmd={"name": "find_forgotten", "args": {}})
 # 只看更大的、要更多条目：
-powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/find-forgotten.ps1" -MinMB 500 -Top 40
+run_skill(id="clean-disk", cmd={"name": "find_forgotten", "args": {"min_mb": 500, "top": 40}})
 ```
 
 它走一遍全盘（本机 170 万文件约 2 分钟），输出七节：卷 → 最大文件 → 孤儿安装/备份目录 →
@@ -177,11 +182,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/find-forgotten.p
 所以定期清理的正确形状不是背下一串路径，而是每次重新问一遍、只动冷的：
 
 1. **拿清单**：`git -C <repo> worktree list --porcelain`；对每个 worktree 的 `target/`
-   取大小与最后写入时间 —— `-DryRun -ProjectRoot <repo>\.worktrees` 会逐条打出来。
+   取大小与最后写入时间 —— `clean(dry_run=True, project_root=[r"<repo>\.worktrees"])` 会逐条打出来。
 2. **判冷热**：只清很久没写的。动正在编的那份，等于把别人打回全量重编。
 3. **用磁盘告警当触发器**：`crates/server/src/disk.rs` 的 disk kind 在每次工具调用后读卷，
-   低空间时写 `events(kind='disk_space')`。订阅这个事件，在事件里先跑 DryRun 拿清单，
-   再只对冷的 worktree 跑一次 `-ProjectRoot <那个 worktree>`。
+   低空间时写 `events(kind='disk_space')`。订阅这个事件，在事件里先跑 `clean(dry_run=True, project_root=[...])` 拿清单，
+   再只对冷的 worktree 跑一次 `clean(project_root=[<那个 worktree>], no_elevate=True)`。
    订阅的命令形状按 SPEC.md 的 `subscribe(id, pattern, cmd, session)`；
    **这条订阅链路我没有在本机实跑过**，写在这里是形状，不是验证过的配置。
 4. **红线**：别清正在被某个运行中的服务端使用的那份构建；别对 evolve 的 `.dev/target` 开刀，
@@ -193,7 +198,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/find-forgotten.p
 | --- | --- |
 | Temp/TMP、Windows\Temp、Prefetch | Downloads/文档/桌面等个人文件 |
 | 浏览器缓存白名单（Cache/Code Cache/GPUCache/Shader/CacheStorage 等） | 浏览器 Preferences/密码/Cookies/History/Local Storage/扩展 |
-| 包管理器缓存（npm/pnpm/yarn/bun/uv/pip/NuGet/go/conda/composer/pub/cargo/gradle/maven/deno/poetry） | 项目内 `target`/`node_modules`/`.gradle`（**默认不扫**；仅当用户显式传 `-ProjectRoot` 时在指定根内按标记删除） |
+| 包管理器缓存（npm/pnpm/yarn/bun/uv/pip/NuGet/go/conda/composer/pub/cargo/gradle/maven/deno/poetry） | 项目内 `target`/`node_modules`/`.gradle`（**默认不扫**；仅当用户显式传 `project_root` 时在指定根内按标记删除） |
 | Windows 更新下载缓存、Delivery Optimization、DISM StartComponentCleanup | `Windows\Installer`、`ProgramData\Package Cache`（删了无法修复/卸载软件） |
 | 内存/小型转储、WER、CBS/WindowsUpdate/DISM 日志 | 事件日志（有诊断/审计价值） |
 | `$WINDOWS.~BT/~WS`、`Windows.old` | 系统还原点/卷影副本（回退能力） |
@@ -218,6 +223,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/find-forgotten.p
   FontCache（停服务后清）、升级残留目录、DISM StartComponentCleanup、全固定盘回收站。
 
 ## 实现上几个不显然的地方
+
+本节说的是**脚本自己的开关**（`-DryRun` / `-NoElevate` / `-ProjectRoot` /
+`-RemoveUpgradeLeftovers`）；包里的函数只是把它们换成下划线参数，行为一字不改。
 
 改脚本前先读。
 
