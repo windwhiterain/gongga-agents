@@ -14,8 +14,9 @@ The core half talks to a running mihomo through its API:
     connect(controller, secret=None, save=False)
 
 The implementation is the modules beside this file -- `proxy.py` for routing,
-`corectl.py` for owning a core, `mihomo.py` for driving one. The command line of
-`proxy.py` still exists for a human at a shell.
+`corectl.py` for owning a core, `mihomo.py` for driving one. Every function here
+names the fields of one of their functions, so no call of this skill is spelled
+as a command line.
 """
 
 import os
@@ -27,31 +28,25 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
+import corectl  # noqa: E402  -- the half that owns the core process
 import mihomo  # noqa: E402  -- the core-driving half, beside this file
 import proxy  # noqa: E402  -- the routing half, beside this file
 
 
-def _core(*words):
-    """Hand a lifecycle verb to the half that owns it: `corectl`.
-
-    The words that reach it are ones this package made: a port number, a version,
-    a path. Nothing a caller wrote is joined into a string.
-    """
-    return proxy.run_core([word for word in words if word is not None])
+def _funnel(call):
+    """Run one call of the core's half, with mihomo's error funnel: a `CoreError`
+    becomes one line and exit 1, not a traceback."""
+    return mihomo.funnel(call)
 
 
 def up(key=None, replace: bool = False, mixed_port: int = None, controller_port: int = None):
     """Install the core if needed, take a subscription link, and start it.
 
-    No `key` reuses the subscription already saved; `replace` fetches the link
-    again even when one is stored.
+    No `key` reuses the subscription already saved; `replace` takes the core over
+    even when another one is already answering.
     """
-    return _core(
-        "up", key,
-        "--replace" if replace else None,
-        "--mixed-port", None if mixed_port is None else str(mixed_port),
-        "--controller-port", None if controller_port is None else str(controller_port),
-    )
+    return proxy.up(key=key, replace=replace, mixed_port=mixed_port,
+                    controller_port=controller_port)
 
 
 def down():
@@ -106,41 +101,36 @@ def upstream(action="list", name=None, address=None, kind="http", auth=None):
 
 def core_install(version=None, source=None):
     """Place the mihomo binary (and the geo database) under this skill's home."""
-    return _core("install", "--version", version, "--from", source)
+    return _funnel(lambda: corectl.install(version=version, source=source))
 
 
 def core_subscribe(url=None, source=None):
     """Fetch a subscription into this skill's own directory, from a url or a file."""
-    return _core("subscribe", url, "--from", source)
+    return _funnel(lambda: corectl.subscribe(url=url, source=source))
 
 
 def core_render(mixed_port: int = None, controller_port: int = None):
     """Write the configuration the core starts from, and say what it chose."""
-    return _core(
-        "render",
-        "--mixed-port", None if mixed_port is None else str(mixed_port),
-        "--controller-port", None if controller_port is None else str(controller_port),
+    return _funnel(
+        lambda: corectl.render_config(mixed_port=mixed_port, controller_port=controller_port)
     )
 
 
 def core_start(mixed_port: int = None, controller_port: int = None, core=None):
     """Render if needed, verify the config, and start the core detached."""
-    return _core(
-        "start",
-        "--mixed-port", None if mixed_port is None else str(mixed_port),
-        "--controller-port", None if controller_port is None else str(controller_port),
-        "--core", core,
+    return _funnel(
+        lambda: corectl.start(mixed_port=mixed_port, controller_port=controller_port, core=core)
     )
 
 
 def core_stop():
     """Stop the core this tool started, and nothing else."""
-    return _core("stop")
+    return _funnel(corectl.stop)
 
 
 def core_state():
     """What is running, from which files, on which ports."""
-    return _core("status")
+    return _funnel(corectl.status)
 
 
 def _drive(handler):
@@ -150,7 +140,7 @@ def _drive(handler):
     if not discovered:
         raise RuntimeError("no controller found; call connect(controller), or set MIHOMO_CONTROLLER")
     core = mihomo.connect_from(discovered)
-    return mihomo.funnel(lambda _words: handler(core), [])
+    return mihomo.funnel(lambda: handler(core))
 
 
 def core_status():
@@ -203,7 +193,7 @@ def connect(controller, secret=None, save: bool = False):
     discovered = {
         "origin": mihomo.origin_from_controller(controller),
         "secret": secret or "",
-        "source": "explicit --controller",
+        "source": "explicit connect",
         "config": None,
     }
     mihomo.Core(discovered["origin"], discovered["secret"]).version()

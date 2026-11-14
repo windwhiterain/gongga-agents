@@ -731,18 +731,19 @@ def reader_went_away(error):
 
 def run(argv):
     """The one place that turns a failure into an exit code for the API half."""
-    return funnel(main, argv)
+    return funnel(lambda: main(argv))
 
 
-def funnel(handler, argv):
+def funnel(handler):
     """The one place that turns a failure into an exit code.
 
-    Every `proxy core …` verb comes through here, the lifecycle verbs included: an error
-    handler that only exists in one of the entry points is an error handler that does not
-    run.
+    Every verb that drives the core comes through here, the lifecycle verbs included: an
+    error handler that only exists in one of the entry points is an error handler that
+    does not run. `handler` is a call of no arguments, so nothing here reads a command
+    line.
     """
     try:
-        return handler(argv)
+        return handler()
     except CoreError as error:
         print("proxy core: %s" % error, file=sys.stderr)
         return 1

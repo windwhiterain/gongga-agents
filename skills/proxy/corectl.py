@@ -571,31 +571,33 @@ def stop():
 # --- commands -------------------------------------------------------------------
 
 
-def cmd_subscribe(args):
-    if args.from_path:
-        text = validate_subscription(read_text(args.from_path))
-        source = args.from_path
-    elif args.url:
-        text = fetch_subscription(args.url)
-        source = args.url.split("?")[0]
+def subscribe(url=None, source=None):
+    if source:
+        text = validate_subscription(read_text(source))
+        source = source
+    elif url:
+        text = fetch_subscription(url)
+        source = url.split("?")[0]
     else:
-        raise CoreError("pass a subscription URL, or --from FILE")
+        raise CoreError("give a subscription URL, or the file to read it from")
     write_private(SUBSCRIPTION_PATH, text)
     nodes = sum(1 for line in text.split("\n") if TOP_LEVEL.match(line) is None and line.strip().startswith("- name:"))
     out("subscription      %s" % SUBSCRIPTION_PATH)
     out("from              %s" % source)
     out("nodes             %d" % nodes)
-    out("next              proxy core render, then proxy core start")
+    out("next              render_config, then start")
     return 0
 
 
-def cmd_render(args):
+def render_config(mixed_port=None, controller_port=None):
+    mixed_port = DEFAULT_MIXED_PORT if mixed_port is None else mixed_port
+    controller_port = DEFAULT_CONTROLLER_PORT if controller_port is None else controller_port
     if not os.path.exists(SUBSCRIPTION_PATH):
         if os.path.exists(CONFIG_PATH):
             out("configuration     %s (no subscription to render from; kept)" % CONFIG_PATH)
             return 0
-        raise CoreError("no subscription at %s; run `proxy core subscribe URL`" % SUBSCRIPTION_PATH)
-    result = render(read_text(SUBSCRIPTION_PATH), args.controller_port, args.mixed_port)
+        raise CoreError("no subscription at %s; subscribe to one first" % SUBSCRIPTION_PATH)
+    result = render(read_text(SUBSCRIPTION_PATH), controller_port, mixed_port)
     out("configuration     %s" % result["path"])
     out("controller        %s" % result["controller"])
     out("secret            set (kept in %s)" % SECRET_PATH)
@@ -604,12 +606,9 @@ def cmd_render(args):
     return 0
 
 
-def cmd_install(args):
-    install(args.version, args.from_path)
-    return 0
-
-
-def cmd_start(args):
+def start(mixed_port=None, controller_port=None, core=None):
+    mixed_port = DEFAULT_MIXED_PORT if mixed_port is None else mixed_port
+    controller_port = DEFAULT_CONTROLLER_PORT if controller_port is None else controller_port
     pid = running_pid()
     if pid:
         discovered = mihomo.discover()
@@ -618,20 +617,20 @@ def cmd_start(args):
             out("controller        %s" % discovered["origin"])
         return 0
 
-    binary = find_binary(args.core)
+    binary = find_binary(core)
     if os.path.exists(SUBSCRIPTION_PATH) and subscription_is_newer():
-        result = render(read_text(SUBSCRIPTION_PATH), args.controller_port, args.mixed_port)
+        result = render(read_text(SUBSCRIPTION_PATH), controller_port, mixed_port)
     elif os.path.exists(CONFIG_PATH):
         secret = secret_for_core()
-        result = {"path": CONFIG_PATH, "controller": "127.0.0.1:%d" % args.controller_port,
+        result = {"path": CONFIG_PATH, "controller": "127.0.0.1:%d" % controller_port,
                   "secret": secret, "mixed_port": None, "rules": "as configured"}
     else:
-        raise CoreError("nothing to start from; run `proxy core subscribe URL` first")
+        raise CoreError("nothing to start from; subscribe to a core first")
 
     ensure_geo_database()
     verify(binary, result["path"])
     process = spawn(binary, result["path"])
-    origin = mihomo.origin_from_controller(result["controller"]) or "http://127.0.0.1:%d" % args.controller_port
+    origin = mihomo.origin_from_controller(result["controller"]) or "http://127.0.0.1:%d" % controller_port
     try:
         wait_for_controller(origin, result["secret"], process)
     except CoreError:
@@ -644,11 +643,11 @@ def cmd_start(args):
     out("controller        %s" % origin)
     out("mixed port        %s" % (result["mixed_port"] or "see the configuration"))
     out("saved             %s" % mihomo.CACHE_PATH)
-    out("next              proxy core doctor, proxy core groups")
+    out("next              core_status, then groups")
     return 0
 
 
-def cmd_status(args):
+def status():
     pid = running_pid()
     discovered = mihomo.discover()
     out("core              %s" % ("pid %d (%s)" % (pid, process_image(pid)) if pid else "not running"))
@@ -695,19 +694,21 @@ def core_answering_elsewhere():
     return discovered
 
 
-def cmd_up(args):
+def up(key=None, replace=False, mixed_port=None, controller_port=None):
+    mixed_port = DEFAULT_MIXED_PORT if mixed_port is None else mixed_port
+    controller_port = DEFAULT_CONTROLLER_PORT if controller_port is None else controller_port
     """`cli + key`: everything else is derived -- the core, its ports, its secret."""
     elsewhere = core_answering_elsewhere()
-    if elsewhere and not args.replace:
+    if elsewhere and not replace:
         out("core              already answering at %s (%s)" % (elsewhere["origin"], elsewhere["source"]))
         out("")
         out("nothing to start: that core is already usable -- `proxy core doctor`, `proxy core groups`.")
-        out("to make this tool own the core instead, run again with --replace.")
+        out("to make this tool own the core instead, call up again with replace=True.")
         return 1
 
     binary = ensure_core()
-    if args.key:
-        text = fetch_subscription(args.key)
+    if key:
+        text = fetch_subscription(key)
         write_private(SUBSCRIPTION_PATH, text)
         source = "subscription link"
     elif os.path.exists(SUBSCRIPTION_PATH):
@@ -717,14 +718,14 @@ def cmd_up(args):
         text = None
         source = CONFIG_PATH
     else:
-        raise CoreError("give the subscription link: proxy up <link>")
+        raise CoreError("give the subscription link")
 
     was_running = running_pid()
     if was_running:
         stop()
 
-    mixed_port = free_port(args.mixed_port)
-    controller_port = free_port(args.controller_port)
+    mixed_port = free_port(mixed_port)
+    controller_port = free_port(controller_port)
     if text is None:
         result = {"path": CONFIG_PATH, "controller": "127.0.0.1:%d" % controller_port,
                   "secret": secret_for_core(), "mixed_port": None, "rules": "as configured"}
@@ -755,7 +756,7 @@ def cmd_up(args):
     if groups:
         out("policy groups     %d" % groups)
     out("")
-    out("next              proxy core groups | proxy core use GROUP NODE | proxy core bench | proxy down")
+    out("next              groups, then use_node or bench")
     return 0
 
 
@@ -803,17 +804,20 @@ def main(argv):
     if not args.cmd:
         parser.print_help()
         return 0
-    handler = {
-        "up": cmd_up,
-        "down": lambda _args: stop(),
-        "subscribe": cmd_subscribe,
-        "render": cmd_render,
-        "install": cmd_install,
-        "start": cmd_start,
-        "stop": lambda _args: stop(),
-        "status": cmd_status,
-    }[args.cmd]
-    return handler(args)
+    if args.cmd == "up":
+        return up(key=args.key, replace=args.replace,
+                  mixed_port=args.mixed_port, controller_port=args.controller_port)
+    if args.cmd in ("down", "stop"):
+        return stop()
+    if args.cmd == "subscribe":
+        return subscribe(url=args.url, source=args.from_path)
+    if args.cmd == "render":
+        return render_config(mixed_port=args.mixed_port, controller_port=args.controller_port)
+    if args.cmd == "install":
+        return install(version=args.version, source=args.from_path)
+    if args.cmd == "start":
+        return start(mixed_port=args.mixed_port, controller_port=args.controller_port, core=args.core)
+    return status()
 
 
 def run(argv):

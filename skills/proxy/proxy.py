@@ -800,14 +800,23 @@ def run_core(argv):
     return module.run(argv)
 
 
-def up(key=None):
-    """Install the core if needed, take a subscription link, and start it."""
-    return run_core(["up"] + ([key] if key else []))
+def up(key=None, replace=False, mixed_port=None, controller_port=None):
+    """Install the core if needed, take a subscription link, and start it.
+
+    The core's own half owns that process, so this hands it the same fields by
+    name; the funnel there turns a `CoreError` into one line and exit 1.
+    """
+    core = load_sibling("corectl")
+    return load_sibling("mihomo").funnel(
+        lambda: core.up(key=key, replace=replace, mixed_port=mixed_port,
+                        controller_port=controller_port)
+    )
 
 
 def down():
     """Stop the core this tool started."""
-    return run_core(["down"])
+    core = load_sibling("corectl")
+    return load_sibling("mihomo").funnel(core.stop)
 
 
 def serve():
