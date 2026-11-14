@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # A browser this skill drives, reached one of two ways.
 #
-#   browse start                  # start a browser of ours, and remember it
-#   browse attach [port]          # drive the browser the user already runs
-#   browse stop                   # stop ours; an attached one is left alone
-#   browse status                 # is it up, on which port, and whose
-#   browse doctor                 # can this machine drive a browser at all
+#   start                  # start a browser of ours, and remember it
+#   attach [port]          # drive the browser the user already runs
+#   stop                   # stop ours; an attached one is left alone
+#   status                 # is it up, on which port, and whose
+#   doctor                 # can this machine drive a browser at all
 #
 # `start` keeps one long-lived Edge with its own profile. A second
 # --remote-debugging-port against a profile that is already open does not listen:
@@ -166,7 +166,7 @@ do_start() {
   if [[ -n "$(our_pid)" ]]; then
     say "the browser is running but its debugging port never opened."
     say "if that profile is one a person uses, Chromium 136+ ignores the port flag there:"
-    say "  enable edge://inspect/#remote-debugging in that browser, then 'browse attach'"
+    say "  enable edge://inspect/#remote-debugging in that browser, then 'attach'"
   fi
   return 1
 }
@@ -227,7 +227,7 @@ do_attach() {
     say "nothing answers on port $port."
     say "In the browser you want driven, open edge://inspect/#remote-debugging and tick"
     say "  \"Allow remote debugging for this browser instance\","
-    say "then run 'browse attach' again and answer Allow on the prompt."
+    say "then run 'attach' again and answer Allow on the prompt."
     say "Chromium 136+ ignores --remote-debugging-port on a real user profile, so this"
     say "switch -- not a restart with a flag -- is the door."
     return 1
@@ -376,14 +376,14 @@ do_doctor() {
   if [[ -f "$PORT_FILE" ]] && port_open "$(cat "$PORT_FILE")"; then
     say "ok   running: $(browser_version "$(cat "$PORT_FILE")")"
   else
-    say "note not running; 'browse start' brings it up"
+    say "note not running; 'start' brings it up"
   fi
   # A browser the user runs is reachable only through its own consent switch, so
   # whether that switch is on is part of "can this machine be driven at all".
   if port_open "${BROWSER_ATTACH_PORT:-9222}"; then
     say "ok   attachable: something listens on ${BROWSER_ATTACH_PORT:-9222} (edge://inspect/#remote-debugging)"
   else
-    say "note nothing on ${BROWSER_ATTACH_PORT:-9222}; for your own browser tick edge://inspect/#remote-debugging, then 'browse attach'"
+    say "note nothing on ${BROWSER_ATTACH_PORT:-9222}; for your own browser tick edge://inspect/#remote-debugging, then 'attach'"
   fi
   return 0
 }
@@ -396,7 +396,7 @@ case "${1:-}" in
   status) do_status ;;
   doctor) do_doctor ;;
   "")
-    say "usage: browse {start|attach [port]|close [profile]|stop|status|doctor}"
+    say "usage: lifecycle.sh {start|attach [port]|close [profile]|stop|status|doctor}"
     say "       browse <action> ...   # open text html click type press shot cookies tabs find"
     exit 2
     ;;
