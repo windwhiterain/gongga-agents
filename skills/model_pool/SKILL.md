@@ -30,7 +30,7 @@ model = run_skill(id="model_pool", cmd={"name": "pick",
 
 The server resolves `<provider>/<model id>` exactly as this prints it, so the
 value needs no trimming, quoting or mapping. Everything that is *not* the model
-goes to stderr: warnings, `--explain`, nothing to strip on the way in.
+goes to stderr: warnings, `explain=true`'s table, nothing to strip on the way in.
 
 ## The same draw, as the config a session is created with
 
@@ -49,8 +49,8 @@ of one line.
 and a config there cannot hand out two different models. What differs is only
 what stdout carries: one `<provider>/<model id>` for `pick`, one JSON document
 for `pick_config` -- still exactly one thing to parse, with warnings and
-`--explain` on stderr as before. `--json` is `pick --json`'s decision, with the
-config under `model_config`.
+`explain=true` on stderr as before. `pick`'s `as_json=true` is that same decision,
+with the config under `model_config`.
 
 The three fields SPEC defaults are `null`, which is SPEC's `provider_default()`:
 this skill decides *which model*, and how that model is asked -- thinking effort,
@@ -68,10 +68,10 @@ Three decisions, and only the last two are the engine's.
    zero and is not drawn. The tier you name narrows the candidates to that tier; it
    does not lift the whitelist. The one exception is a tier the file itself gives no
    weight — `test`, whose models are deliberately unencouraged.
-2. **The tier is yours: `--tier flash|pro|sota|test`, on every call.** Which tier a
+2. **The tier is yours: `tier="flash"|"pro"|"sota"|"test"`, on every call.** Which tier a
    piece of work belongs to is a judgement about the work, and the caller is the only
    one holding it — the roster says what a model *is*, never what you are *doing*.
-   So no call of this skill leaves it out. A `pick` without `--tier` is not a way to
+   So no call of this skill leaves it out. A `pick` without `tier` is not a way to
    choose work: it is a lottery over `[tier]` in `preference.toml`
    (`0.60 / 0.35 / 0.05 / 0.00` on a stock checkout), which is exactly how a
    read-three-files errand ends up buying `pro`. Those weights survive for a hand-run
@@ -149,7 +149,7 @@ Three verdicts, and only one of them excludes:
 
 `pick` never probes on its own — it is on the spawn path and has to stay fast —
 so a fresh machine draws from allowances it has not verified. Run `probe` once
-after adding keys, and again with `--force` after buying something.
+after adding keys, and again with `force=true` after buying something.
 
 ## The commands
 
@@ -162,9 +162,9 @@ after adding keys, and again with `--force` after buying something.
 | `probe(force=False, provider=None, tier=None, ...)` | ask each provider whether this account may run the model |
 | `mark(target, minutes=None, reason=None, clear=False)` | keep a route out of the draw, or release it |
 
-Flags on `pick`, `pick_config` and `status`: `--refresh S` (how long a cached reading
-answers, `0` asks again), `--cached` (never run a quota script), `--timeout S`,
-`--probe` (also refresh the entitlement verdicts).
+Arguments on `pick`, `pick_config` and `status`: `refresh=<seconds>` (how long a cached reading
+answers, `0` asks again), `cached=true` (never run a quota script), `timeout=<seconds>`,
+`probe_entitlement=true` (also refresh the entitlement verdicts).
 
 ## When a spawn hits the wall
 
@@ -188,11 +188,11 @@ Two files, two jobs.
 
 **`preference.toml`** (beside this script) is the judgement: tier weights and
 the whitelist of models worth drawing. Edit it and the next `pick` reads it —
-`--preference` or `MODEL_POOL_PREFERENCE` points at another one. See
+`preference=<path>` or `MODEL_POOL_PREFERENCE` points at another one. See
 "倍率：这台机器鼓励用哪些" below for the shape.
 
 **`~/.agents/model_pool.toml`** is the plumbing — how the allowance is read and
-what counts as usable (`--config`, `MODEL_POOL_CONFIG` to point elsewhere). Its
+what counts as usable (`config=<path>`, `MODEL_POOL_CONFIG` to point elsewhere). Its
 defaults live in `pool.py`:
 
 ```toml
@@ -236,7 +236,7 @@ roster, below.
 没有 `tier` 的模型不会被抽，`tiers` 会把它们列成"roster 没写档"——那是缺口，不是默认值。
 
 这是**价格档，不是能力档**：这台机器上 V4.1-Flash 的智能指数（45）比 V4-Pro（36）还高，
-所以 `--tier flash` 也可能抽到最聪明的那个；`--tier sota` 买的是贵的前沿，不是"最划算的答案"。
+所以 `tier="flash"` 也可能抽到最聪明的那个；`tier="sota"` 买的是贵的前沿，不是"最划算的答案"。
 `[provider.model.params]` 里的规模（总/激活参数，十亿）只是参考：1.6T/49B 不比 552B/16B
 更省钱地想事情——激活参数、价格、厂商的后训练是三个不同轴。
 
@@ -245,11 +245,11 @@ roster, below.
 `preference.toml` 就在这个 skill 目录里，两个表：
 
 ```toml
-[tier]           # 引擎兜底：只有不点 --tier 的 pick 才读它，本 skill 的调用一律点档
+[tier]           # 引擎兜底：只有不写 tier 的 pick 才读它，本 skill 的调用一律点档
 flash = 0.60
 pro   = 0.35
 sota  = 0.05
-test  = 0.00     # 默认 0：只在你点名 --tier test 时才抽得到
+test  = 0.00     # 默认 0：只在你点名 tier="test" 时才抽得到
 
 [model]
 "deepseek-official/deepseek-flash" = 1.0    # 正常候选
@@ -270,11 +270,11 @@ test  = 0.00     # 默认 0：只在你点名 --tier test 时才抽得到
 
 **档是呼叫方给的，`pool.py` 不替你猜。** 不点档时它按 `[tier]` 的权重自己抽一档
 （`0.60 / 0.35 / 0.05 / 0.00`），抽到哪一档与活无关——"读三个文件的侦察买到 pro"就是
-这条路径。`--tier` 也不会绕过白名单；例外只有权重为 0 的 `test`：点名 `--tier test` 才抽得到它。
+这条路径。`tier` 也不会绕过白名单；例外只有权重为 0 的 `test`：点名 `tier="test"` 才抽得到它。
 `tiers` 会把被关掉的模型标成 `off`，"为什么它从来不出现"一眼可答。
 
 键可以写 `<provider>/<model>`，也可以只写 model id（对所有提供它的 provider 生效）。
-改这个文件不用重启任何东西：下一次 `pick` 就读到；`--preference` 或
+改这个文件不用重启任何东西：下一次 `pick` 就读到；`preference=<path>` 或
 `MODEL_POOL_PREFERENCE` 可以指到别处。
 
 ## What it reads

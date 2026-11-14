@@ -20,10 +20,12 @@ gongga-agents/
 `skills/<name>/` 只要有 `__init__.py` 就是一个技能：**公开函数就是它的 API**，
 调用一律走 `run_skill(id="<name>", cmd={"name": "<函数>", "args": {...}})`，没有第二条命令行入口。
 
-- 参数就是函数的参数：JSON 的键名与形参同名，默认值写在签名里；`int` / `float` / `bool` / `dict` / `list`
-  的注解会被转换。
-- 实现可以留在旁边的脚本里（`clean-disk.ps1`、`browse.py`、`pool.py`…），包只负责给动作命名与传参；
-  不再有 `metadata.entry`，也不再有 shell / cmd / ps1 形式的入口。
+- 参数就是函数的参数：JSON 的键名与形参同名，默认值写在签名里。**值原样交给函数**：对象还是对象、
+  列表还是列表、`true` 还是 `bool`；注解不转换任何值，它只是说明。少一个必填参数是 Python 自己的
+  `TypeError`，多一个不存在的名字在这里就被拒绝。
+- 实现可以留在旁边的脚本里（`clean-disk.ps1`、`browse.py`），包只负责给动作命名与传参——那个脚本
+  有自己的命令行，函数把它**当程序**起，不把调用拼成一句话再解析回来。Python 的实现（`pool.py`、
+  `latency.py`…）没有这层：包按名字调用它的函数。不再有 `metadata.entry`。
 - `SKILL.md` 写清每个函数的名字、参数与返回值；它是读者的唯一说明，不再转述一条命令行。
 
 `quota_query.script` 里的路径**相对 `providers.toml` 自己所在的目录** —— 社区条目的

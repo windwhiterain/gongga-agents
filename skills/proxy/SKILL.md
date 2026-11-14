@@ -111,9 +111,9 @@ core_status()
 
 `doctor` 按这个顺序找，并且**打印它用的是哪一条**：
 
-1. `--controller` / `--secret`
+1. `connect(controller=..., secret=...)` 记下的那条
 2. `MIHOMO_CONTROLLER` / `MIHOMO_SECRET`
-3. `~/.proxy/mihomo.json`（`core connect … --save` 或 `core start` 写下的）
+3. `~/.proxy/mihomo.json`（`connect(save=true)` 或 `core_start()` 写下的）
 4. core 自己的 config.yaml：`$PROXY_HOME/core/config.yaml`（本 skill 自己起的那个）、
    `~/.config/mihomo/`、`~/mihomo/`、`/etc/mihomo/`
 5. 探 9090 / 9091 / 9097 / 6170
@@ -184,11 +184,11 @@ bench("漏网之鱼", throughput=True, seconds=8, limit=5)
 测试 URL 很可能命中一条直连规则，于是测出来的是**本机自己那条线**的速度，而标签上写着节点名。
 这正是"换节点救不了下载慢"这类结论的来源之一——那个数字可能压根没经过节点。
 
-所以 `--throughput` 先把 core 切到 `global` 模式（规则不再参与决定），再逐节点跑固定窗口的
+所以 `bench(throughput=true)` 先把 core 切到 `global` 模式（规则不再参与决定），再逐节点跑固定窗口的
 传输，最后在 `finally` 里把模式和原来的选择一起还原。bench 把整台机器留在 global 模式是
 不能接受的，被中断也一样要还原。
 
-`--limit` 不是贴心功能：81 个节点 × 8 秒是 11 分钟。
+`limit` 不是贴心功能：81 个节点 × 8 秒是 11 分钟。
 
 ## 模式与热重载
 
