@@ -1,8 +1,6 @@
 ---
 name: polity
 description: Separate understanding, planning, implementation, and approval across justice, advisor, and premier sessions. Use for multi-stage work that needs SPEC-based approval or a SPEC amendment; do not start the full workflow for a simple direct task.
-metadata:
-  entry: polity
 ---
 
 # Polity: separate judgement from execution
@@ -72,22 +70,25 @@ does not watch sessions. On a `Context notice`, every role immediately follows t
 
 ## Start
 
-```bash
-# This skill's own directory: the parent of the `SKILL.md: <path>` that `@skill:`
-# expands to (the `path` column of the `skill` tool's table names the same file).
-# In gongga, `gongga-cli skill <name> ...` runs the entry the frontmatter declares.
-SKILL_DIR=<the directory this SKILL.md is in>
-P="$SKILL_DIR/polity"
-$P start --task <task_id> --spec /absolute/path/to/SPEC.md \
-  --goal '<user goal and constraints>' --cwd /absolute/path/to/project
+```python
+run_skill(id="polity", cmd={"name": "start", "args": {
+    "task": "<task_id>",
+    "spec": "/absolute/path/to/SPEC.md",
+    "goal": "<user goal and constraints>",
+    "cwd": "/absolute/path/to/project",
+}})
 ```
 
-`--cwd` and `--spec` name files on the machine the roles run on, and `--remote
-<name>` makes that a Gongga remote's machine (`set_session --remote`), not this one.
-With `--remote`, both paths are the peer's and are passed through untouched: this
+The functions are `start(task, spec, goal, cwd=".", remote=None, home=None)`,
+`record(kind, task, body, actor, id=None, home=None)`,
+`dispatch(task, plan, home=None)` and `status(task, home=None)`; `body` is a mapping
+or the JSON text of one (`record` also takes `id` for a revision of a record).
+
+`cwd` and `spec` name files on the machine the roles run on, and `remote="<name>"` makes that a Gongga remote's machine (`set_session --remote`), not this one.
+With `remote`, both paths are the peer's and are passed through untouched: this
 machine's filesystem says nothing about them, so `start` neither resolves them nor
 tests that the spec exists -- a local test would approve a different checkout. Omit
-`--remote` and the roles work on this machine's files, and `start` resolves both and
+`remote` and the roles work on this machine's files, and `start` resolves both and
 refuses a spec that is not there.
 
 A task ID contains only letters, digits, dots, underscores, and dashes. Run `start`
@@ -117,8 +118,8 @@ Adding a role to a task means extending the group, not adding a watcher.
 
 Each task has one append-only JSONL file: `$GONGGA_HOME/polity/<task_id>.jsonl`.
 It records the workflow; it does not replace the SPEC, git, or transcripts as their
-source of truth. `--home` overrides the home for an isolated environment.
-`status --task <task_id>` lists roles, the watch, record IDs, and the latest record.
+source of truth. `home=` overrides the home for an isolated environment.
+`status(task="<task_id>")` lists roles, the watch, record IDs, and the latest record.
 After a restart, resume from these records rather than repeating approvals.
 
 ## Records and handoffs
@@ -133,12 +134,12 @@ Before a plan exists, the user's own requirements are written down. SPEC names t
 record `requirement{proposals, plans, reports, solved}`: the sentence the user would
 recognise as theirs, the records that answer it, and whether it is done.
 
-```bash
-$P record requirement --task <task_id> --actor justice --json '{
+```python
+record("requirement", task="<task_id>", actor="justice", body="""{
   "text": "All runs use flash",
   "source": "user, in the session that started this task",
   "plans": ["plan-1"]
-}'
+}""")
 ```
 
 Only justice writes one, because only justice talks to the user. `proposals`,
@@ -150,12 +151,12 @@ A requirement stays open until a later requirement record names it in `"ref"` an
 says `"solved": true`. `status` prints the open set, which is the list of sentences still owed an
 answer. Recording the solved form again is the closure:
 
-```bash
-$P record requirement --task <task_id> --actor justice --json '{
+```python
+record("requirement", task="<task_id>", actor="justice", body="""{
   "text": "All runs use flash -- satisfied by plan-1 and report-5",
   "reports": ["report-5"],
   "solved": true
-}'
+}""")
 ```
 
 That says what closed it, so the next reader does not have to reconstruct the link.
@@ -164,12 +165,12 @@ the reasoning, not the record's answer -- `solved` is.
 
 ### 2. Advisor writes a plan
 
-```bash
-$P record plan --task <task_id> --actor advisor --json '{
+```python
+record("plan", task="<task_id>", actor="advisor", body="""{
   "spec_refs": ["SPEC.md: Skill: Polity"],
   "steps": ["Ordered implementation steps"],
   "acceptance": ["Observable and verifiable acceptance criteria"]
-}'
+}""")
 ```
 
 End the turn with the plan ID and a short summary as the answer: the callback lands
@@ -179,27 +180,27 @@ turn's `answer`. Justice reads the original record and the SPEC, not just the
 summary. If the SPEC must change, advisor writes a proposal with exactly the five
 fields required by the SPEC:
 
-```bash
-$P record proposal --task <task_id> --actor advisor --json '{
+```python
+record("proposal", task="<task_id>", actor="advisor", body="""{
   "example": "A concrete triggering example",
   "expected": "Expected behavior",
   "actual": "Current behavior",
   "actual_spec": "Current clause and its location",
   "expected_spec": "Proposed clause"
-}'
+}""")
 ```
 
 ### 3. Justice records a judgement
 
-```bash
-$P record judgement --task <task_id> --actor justice --json '{
+```python
+record("judgement", task="<task_id>", actor="justice", body="""{
   "subject": "plan:plan-1",
   "verdict": "approve",
   "spec_violation": "none",
   "spec_refs": ["SPEC.md: relevant clause"],
   "reason": "Why the subject conforms or does not conform",
   "verification": ["the command justice ran", "what it printed"]
-}'
+}""")
 ```
 
 The subject is `proposal:<id>`, `plan:<id>`, or `report:<id>`. A judgement on a
@@ -221,15 +222,15 @@ A role's session is a fact that changes: a provider refuses a model, a session i
 moved, a tier is raised. Record it when it changes, rather than leaving the task
 record to say what `start` drew:
 
-```bash
-$P record session --task <task_id> --actor justice --json '{
+```python
+record("session", task="<task_id>", actor="justice", body="""{
   "role": "advisor",
   "session": "polity-<task_id>-advisor",
   "model": "provider/model",
   "remote": "build",
   "cwd": "/home/build/project",
   "note": "why it moved"
-}'
+}""")
 ```
 
 `role` is `justice`, `advisor`, or `premier`; `remote` and `cwd` may be `null`, which
@@ -242,8 +243,8 @@ ambiguity, or refusal never authorizes a SPEC edit.
 
 ### 4. Dispatch only an approved plan
 
-```bash
-$P dispatch --task <task_id> --plan plan-1
+```python
+dispatch(task="<task_id>", plan="plan-1")
 ```
 
 The helper requires the plan's latest judgement to be `approve + none`, then sends the
@@ -262,14 +263,14 @@ Premier's first message at `start` only says to stand by: a role that is told to
 needs one line, not a turn spent reading a plan that does not exist yet.
 After integration, premier writes:
 
-```bash
-$P record report --task <task_id> --actor premier --json '{
+```python
+record("report", task="<task_id>", actor="premier", body="""{
   "plan": "plan-1",
   "changes": ["Actual changes, files, and commits"],
   "verification": ["Checks actually run and their results"],
   "deviations": [],
   "remaining": []
-}'
+}""")
 ```
 
 Justice must approve the report before delivery. A `direct` violation or scope deviation
@@ -278,14 +279,14 @@ new report against the same approved plan.
 
 ### 5. Record the user's SPEC decision
 
-```bash
-$P record spec_amendment --task <task_id> --actor justice --json '{
+```python
+record("spec_amendment", task="<task_id>", actor="justice", body="""{
   "ref_proposal": "proposal-1",
   "ref_judgement": "judgement-1",
   "user_approved": true,
   "user_decision": "The user decision, quoted or accurately summarized",
   "change": "The clause actually written to the SPEC"
-}'
+}""")
 ```
 
 Only `user_approved: true` authorizes implementing the amendment. The referenced
