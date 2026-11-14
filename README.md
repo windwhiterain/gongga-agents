@@ -15,6 +15,17 @@ gongga-agents/
   scripts/         # publish.sh：把主检出里还没提交的改动做成一次公开提交
 ```
 
+### 技能是 Python 包
+
+`skills/<name>/` 只要有 `__init__.py` 就是一个技能：**公开函数就是它的 API**，
+调用一律走 `run_skill(id="<name>", cmd={"name": "<函数>", "args": {...}})`，没有第二条命令行入口。
+
+- 参数就是函数的参数：JSON 的键名与形参同名，默认值写在签名里；`int` / `float` / `bool` / `dict` / `list`
+  的注解会被转换。
+- 实现可以留在旁边的脚本里（`clean-disk.ps1`、`browse.py`、`pool.py`…），包只负责给动作命名与传参；
+  不再有 `metadata.entry`，也不再有 shell / cmd / ps1 形式的入口。
+- `SKILL.md` 写清每个函数的名字、参数与返回值；它是读者的唯一说明，不再转述一条命令行。
+
 `quota_query.script` 里的路径**相对 `providers.toml` 自己所在的目录** —— 社区条目的
 `providers/deepseek.py` 指向这个仓库里的脚本，私有条目的同名路径指向
 `~/.agents/providers/deepseek.py`。
