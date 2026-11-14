@@ -1,8 +1,6 @@
 ---
 name: theme-cli
 description: 切换 Windows 系统暗色/亮色主题，可以手动切换，也可以设置每天定时自动切换。任何"怎么让 Windows 定时换主题""暗色模式怎么自动开""把系统改成亮色/暗色""theme-cli 怎么用""theme-cli --help"的问题用它。Windows 已实测；macOS/Linux 未实现。
-metadata:
-  entry: theme-cli
 ---
 
 # 定时切换 Windows 明暗主题
@@ -10,32 +8,30 @@ metadata:
 Windows 11 **没有**内置的定时换主题功能。设置 > 个性化 > 颜色只有浅色/深色/自定义三档，
 没有时间表；唯一自带时间表的是「夜间光照」，但它只调色温暖色，**不切换任务栏和应用的明暗**。
 
-这个 skill 提供一个全局 CLI，两种用法：手动切，或者挂每日定时任务。
+这个 skill 是一个 Python 包，五个函数，两种用法：手动切，或者挂每日定时任务。
 
-```bash
-theme-cli light                              # 立刻切成亮色
-theme-cli toggle                             # 明暗互切
-theme-cli schedule --light 08:00 --dark 20:00  # 每天 08:00 亮、20:00 暗
-theme-cli status                             # 看当前主题和排程状态
+```python
+run_skill(id="theme-cli", cmd={"name": "light", "args": {}})   # 立刻切成亮色
+run_skill(id="theme-cli", cmd={"name": "toggle", "args": {}})  # 明暗互切
+run_skill(id="theme-cli", cmd={"name": "schedule", "args": {"light": "08:00", "dark": "20:00"}})
+run_skill(id="theme-cli", cmd={"name": "status", "args": {}})  # 看当前主题和排程状态
 ```
 
-## 帮助
+## 函数
 
-```bash
-theme-cli --help              # 总览：命令表 + 选项表 + 示例
-theme-cli -h                  # 同上
-theme-cli /?                  # 同上（cmd 和 PowerShell 都行）
-theme-cli help schedule       # 单个命令的详细说明
-theme-cli schedule --help     # 同上，更贴近习惯的写法
-theme-cli status --help
-theme-cli --version           # theme-cli 1.0.0
-```
+| 函数 | 参数 | 返回 |
+|---|---|---|
+| `light()` | — | 脚本退出码；外壳和已打开应用立刻重绘 |
+| `dark()` | — | 同上 |
+| `toggle()` | — | 同上，按当前状态翻转 |
+| `status(as_json=False)` | `as_json: bool = False` 给程序读时用一个 JSON 对象 | 同上；打印当前主题与两个排程任务的状态 |
+| `schedule(light=None, dark=None, show=False, remove=False)` | `light` / `dark` 是 `HH:mm`；`show=True` 只看已装的排程；`remove=True` 删掉两个任务 | 同上 |
 
-`schedule` 和 `status` 有各自的分命令帮助；`light` / `dark` / `toggle` 没有专属帮助，
-带 `--help` 时回落到总览。
+返回值是**脚本的退出码**（`0` 成功，`1` 失败），输出就是脚本的 stdout/stderr。
+`schedule` 里没给的那一半保留原时间，所以可以一次只改一半。
 
-`-?` 也能用，但它由 PowerShell 自己的 `Get-Help` 机制渲染脚本的 comment-based help，
-版式和上面那套不同（见下面「实现上几个不显然的地方」）。
+参数不对时（比如写了 `schedule(light="08:00")` 却从没装过暗色排程）脚本会以退出码 1
+报一行 `theme-cli: ...`，照那行改就行。
 
 ## 为什么用注册表 + WM_SETTINGCHANGE
 
@@ -59,28 +55,28 @@ theme-cli --version           # theme-cli 1.0.0
 
 ## 手动切换
 
-```bash
-theme-cli light     # 系统 + 应用都切成亮色
-theme-cli dark      # 系统 + 应用都切成暗色
-theme-cli toggle    # 按当前状态翻转
+```python
+run_skill(id="theme-cli", cmd={"name": "light", "args": {}})   # 系统 + 应用都切成亮色
+run_skill(id="theme-cli", cmd={"name": "dark", "args": {}})    # 系统 + 应用都切成暗色
+run_skill(id="theme-cli", cmd={"name": "toggle", "args": {}})  # 按当前状态翻转
 ```
 
 切换是即时的，会立刻改变任务栏和已打开应用的外观。
 
 ## 定时切换
 
-```bash
-theme-cli schedule --light 08:00 --dark 20:00
+```python
+run_skill(id="theme-cli", cmd={"name": "schedule", "args": {"light": "08:00", "dark": "20:00"}})
 ```
 
 装两个每日任务：`WindowsTheme-Light` 和 `WindowsTheme-Dark`。
 
 改时间、只看其中一个、或者全删：
 
-```bash
-theme-cli schedule --light 07:30            # 只改亮色时间，暗色时间保持不变
-theme-cli schedule --show                   # 看已装的排程
-theme-cli schedule --remove                 # 删掉两个任务
+```python
+run_skill(id="theme-cli", cmd={"name": "schedule", "args": {"light": "07:30"}})  # 只改亮色时间
+run_skill(id="theme-cli", cmd={"name": "schedule", "args": {"show": True}})      # 看已装的排程
+run_skill(id="theme-cli", cmd={"name": "schedule", "args": {"remove": True}})    # 删掉两个任务
 ```
 
 排程任务用 **Interactive 登录类型**（`RunLevel Limited`），这是刻意的：主题注册表在 `HKCU`
@@ -91,8 +87,8 @@ theme-cli schedule --remove                 # 删掉两个任务
 
 ## 看状态
 
-```bash
-theme-cli status
+```python
+run_skill(id="theme-cli", cmd={"name": "status", "args": {}})
 ```
 
 ```
@@ -105,10 +101,10 @@ Schedule:
 
 `last result 0` 表示上次执行成功。其他值说明那次运行有问题。
 
-给程序读的话加 `--json`：
+给程序读的话传 `as_json=True`：
 
-```bash
-theme-cli status --json
+```python
+run_skill(id="theme-cli", cmd={"name": "status", "args": {"as_json": True}})
 ```
 
 输出 `system` / `apps` / `combined` 和 `schedule` 数组，含 `installed`、`time`、`nextRun`、
@@ -155,12 +151,6 @@ $removed = @(Remove-ThemeSchedule)
 而不是 `$removed = Remove-ThemeSchedule`。同理，`Get-ScheduleState` 的返回值也统一
 用 `@()` 包一次，避免单条结果被当成对象。
 
-### cmd wrapper 里不能用 `call`
-
-全局入口 `~/.local/bin/theme-cli.cmd` **不能**用 `call` 转发参数。cmd.exe 的 `call` 内建会
-**把 `/?` 当成自己的开关**，打印 CALL 的帮助然后退出 1，而不是把参数转发下去。去掉 `call`
-直接调用即可——它是脚本最后一行，调用完本来也不需要返回。
-
 ### 计划任务要按位置传模式，不能用 `-Command`
 
 计划任务的 action 是：
@@ -179,12 +169,12 @@ powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "<th
 所以回归测试里「计划任务真实触发后主题确实变了」这一项不能省——任务装上了、`LastTaskResult`
 看着也像那么回事，都不等于它真的会切。
 
-### `-?` 会被 PowerShell 截走
+### 脚本自带的手写帮助仍然可用
 
-脚本带 comment-based help 时，`-?` 由 PowerShell 的 `Get-Help` 机制在脚本体执行**之前**处理，
-渲染的是注释里的帮助文本（SYNOPSIS / DESCRIPTION / EXAMPLES）。内容有效，但版式和
-`theme-cli --help` 那套手写帮助不同。强行统一要拿掉 comment-based help，代价大于收益，
-所以保留这个例外。
+包里的函数是入口，但脚本自己的手写帮助没拆掉：直接
+`powershell -File <本 skill 目录>/theme-cli.ps1 --help` 仍然给出命令表与示例。
+脚本带 comment-based help，所以 `-?` 由 PowerShell 的 `Get-Help` 在脚本体执行**之前**处理，
+渲染注释里的 SYNOPSIS / DESCRIPTION / EXAMPLES，版式与手写帮助不同；两者都保留。
 
 ### 错误走 stderr，一行说完
 
@@ -213,19 +203,13 @@ theme-cli: Invalid time '25:99'. Use HH:mm in 24-hour format, for example 08:00.
 
 ## 装在哪
 
-本文件与三个入口在同一个目录里，下文用 `$SKILL_DIR` 指它（`@skill:` 展开里
-`SKILL.md: <path>` 的父目录；gongga 里 `gongga-cli skill theme-cli …` 直接跑入口）。
-
 | 路径 | 作用 |
 |---|---|
-| `$SKILL_DIR/theme-cli.ps1` | 核心实现 |
-| `$SKILL_DIR/theme-cli` | bash 入口 |
-| `$SKILL_DIR/theme-cli.cmd` | cmd 入口 |
-| `~/.local/bin/theme-cli` | bash 全局入口（`~/.local/bin` 已在 PATH 里） |
-| `~/.local/bin/theme-cli.cmd` | cmd 全局入口 |
+| `<本 skill 目录>/__init__.py` | 入口：`light` / `dark` / `toggle` / `status` / `schedule` |
+| `<本 skill 目录>/theme-cli.ps1` | 实现：注册表、广播、计划任务 |
 
-`~/.local/bin` 已在用户的 PATH 中，所以 `theme-cli` 在任何终端直接可用。PowerShell 5.1 和
-PowerShell 7（`pwsh`）都能跑，不需要管理员权限，不需要装任何第三方依赖。
+不需要管理员权限，不需要装任何第三方依赖。PowerShell 5.1 和 PowerShell 7（`pwsh`）都能跑；
+包装函数优先用 `pwsh`（在这里它启动更快），没有则退回 `powershell`。
 
 ## 几个已知限制
 
@@ -239,9 +223,8 @@ PowerShell 7（`pwsh`）都能跑，不需要管理员权限，不需要装任�
 
 ## 卸载
 
-```bash
-theme-cli schedule --remove
+```python
+run_skill(id="theme-cli", cmd={"name": "schedule", "args": {"remove": True}})
 ```
 
-然后删掉本 skill 的目录（`$SKILL_DIR`）和 `~/.local/bin/theme-cli{,.cmd}`。当前主题不受影响，
-可以继续在 设置 > 个性化 > 颜色 里手动改。
+然后删掉本 skill 的目录。当前主题不受影响，可以继续在 设置 > 个性化 > 颜色 里手动改。
