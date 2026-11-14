@@ -1,26 +1,38 @@
 ---
 name: computer_use
 description: 用鼠标和键盘真的操作桌面——截图看屏、按控件树定位、点击/打字/按键，然后截图确认；也能新建/切换虚拟桌面、把窗口搬过去，把自己的活和用户隔开（虚拟桌面仅 Windows）。任何只能通过图形界面完成的事（原生应用、装不了 CLI 的软件、拖拽、菜单）用它。Windows 已验证，macOS/Linux 后端已写但未实测。
-metadata:
-  entry: cu
 ---
 
 # 操作桌面
 
-`$SKILL_DIR/cu` 是一条命令，三个平台：`shot`、`tree`、`click`、
-`type`、`key`、`focus`、`windows`、`doctor` 在哪儿都叫这个名字，只有后端换掉。
+一个 Python 包，八个函数，三个平台：`shot`、`tree`、`click`、`type_text`、`key`、
+`focus`、`windows`、`doctor` 在哪儿都叫这个名字，只有后端换掉。
 
-```bash
-# 本 skill 的目录：`@skill:` 展开里 `SKILL.md: <path>` 的父目录（`index_skill` 的 path 列同源）。
-# gongga 里更短：`gongga-cli skill <name> …`，它跑 frontmatter 里声明的入口。
-SKILL_DIR=<本 SKILL.md 所在目录>
-"$SKILL_DIR/cu" doctor      # 先确认这台机器能用
+```python
+run_skill(id="computer_use", cmd={"name": "doctor", "args": {}})   # 先确认这台机器能用
 ```
 
-`cu` 优先跑 `cu.py`（uv 解析内联依赖，不需要你先装任何东西），没有 uv 就用
-`python3` / `python` / `py` 里第一个 3.9+ 的。**跨平台的是 `cu.py` + 每个平台一个后端**，
-没有第二份 PowerShell 实现：两套调同一件事的代码会各漂一半，这个仓库的 UIA 树遍历
-就那么在两边各坏过一次。
+下文为了短，写的是 `doctor()` 这样的函数名；每次调用其实是
+`run_skill(id="computer_use", cmd={"name": "doctor", "args": {}})`，参数就是同名 JSON 键。
+
+| 函数 | 参数 | 返回 |
+|---|---|---|
+| `doctor()` | — | 退出码；DPI、控件树、INPUT 结构、截图四项自检 |
+| `windows()` | — | 退出码；顶层窗口：id、pid、矩形、标题（`*` 是前台） |
+| `shot(window=None, scale=1.0, out_path=None)` | `window` 只截一个窗口；`scale` 缩放；`out_path` 不给就自己造一个 | 退出码；打印 `@image(<路径>)`，harness 自动把图交给模型 |
+| `tree(window=None, depth=5, limit=150)` | 控件树深度与条数上限 | 退出码；控件类型、名字、屏幕矩形 |
+| `click(x, y, double=False, right=False, window=None)` | 屏幕像素坐标 | 退出码 |
+| `type_text(text, window=None)` | `text` 一次性输入（Unicode，中文正常） | 退出码 |
+| `key(combo, window=None)` | `combo` 形如 `ctrl+l` | 退出码 |
+| `focus(window)` | 窗口 id 或标题的一部分 | 退出码 |
+
+**实现就在同目录的 `cu.py` + 每个平台一个后端**，没有第二份 PowerShell 实现：两套调同一件事
+的代码会各漂一半，这个仓库的 UIA 树遍历就那么在两边各坏过一次。包装只是把命令行换成函数，
+`cu.py` 的命令行仍然可用（人对着终端时）。
+
+**一处依赖要注意**：`tree` 需要 `comtypes`（UIA 客户端由它的 typelib 生成）。旧入口是
+`uv run` 起的，会顺手把它装上；包是被 in-process import 的，装不了，缺了会一行说明而不是
+抛栈。缺就 `uv pip install comtypes`，或者只用 `shot` + `click`。
 
 ## 先看它能承诺什么
 
@@ -40,12 +52,12 @@ Linux 还有一层分裂：X11 下这些工具直接驱动会话；**Wayland 按
 
 ## 主循环：看 → 定位 → 动 → 再看
 
-```bash
-cu shot --scale 0.5          # 打印 `@image(C:\...png)`，harness 自动把图交给模型
-cu tree --depth 5            # 控件名 + 屏幕矩形
-cu click 1719 851 --window 47974752
-cu type --window 47974752 "你好"
-cu shot --window 47974752 --scale 0.5     # 确认真的发生了
+```python
+shot(scale=0.5)                        # 打印 `@image(C:\...png)`
+tree(depth=5)                          # 控件名 + 屏幕矩形
+click(1719, 851, window="47974752")
+type_text("你好", window="47974752")
+shot(window="47974752", scale=0.5)     # 确认真的发生了
 ```
 
 `tree` 是关键：截图告诉你要点什么，控件树告诉你在哪个像素。
@@ -90,7 +102,7 @@ captured 577x352 src=1922x1173@467,144 scale=0.3
 
 实测确认过：把随机码画进图、再看图读出来，与封存答案一致。
 
-## 给输入的每个命令都带 --window
+## 给每个要输入的函数都带 window
 
 `type` / `key` / `click` 会先把指定窗口拿到前台，**拿不到就报错拒绝**：
 
@@ -102,7 +114,7 @@ could not focus 198124 "SPEC.md - gongga"; refusing to send input blind
 打到用户正在看的窗口。实测踩过：以为在给记事本打字，字进了 VS Code。现在用
 `AttachThreadInput` 绕过限制，然后**验证** `GetForegroundWindow()` 真换了才继续。
 
-不带 `--window` 时先打印当前前台是谁：`target: foreground hwnd=... "..."`。
+不带 `window` 时先打印当前前台是谁：`target: foreground hwnd=... "..."`。
 
 ## 浏览器：读一页正文
 
@@ -110,20 +122,24 @@ could not focus 198124 "SPEC.md - gongga"; refusing to send input blind
 里面的链接、段落、按钮都不是可点的对象。所以读网页靠**快捷键导航 + 剪贴板落地**，
 而不是 `tree` 定位：
 
+```python
+windows()                                   # 找到浏览器的 id 和标题
+W = "47974752"
+key("ctrl+l", window=W)                     # 焦点进地址栏
+type_text("https://example.com/article", window=W)
+key("enter", window=W)
+# 等 3 秒，让页面画完再截
+shot(window=W, scale=0.5)                   # 页面真的换了吗
+click(1280, 700, window=W)                  # 点正文：不是链接、不是地址栏、不是标签栏
+key("ctrl+a", window=W)
+shot(window=W, scale=0.5)                   # 整页变蓝才算选中了正文
+key("ctrl+c", window=W)
+```
+
 ```bash
-cu windows                                # 找到浏览器的 hwnd 和标题
-cu key --window $W ctrl+l                 # 焦点进地址栏
-cu type --window $W "https://example.com/article"
-cu key --window $W enter
-sleep 3
-cu shot --window $W --scale 0.5           # 页面真的换了吗
-cu click 1280 700 --window $W             # 点正文：不是链接、不是地址栏、不是标签栏
-cu key --window $W ctrl+a
-cu shot --window $W --scale 0.5           # 整页变蓝才算选中了正文
-cu key --window $W ctrl+c
 powershell -NoProfile -Command "Set-Clipboard -Value ''"              # 先清空
 sleep 1
-powershell -NoProfile -Command "Get-Clipboard -Raw | Out-File -Encoding utf8 C:\\path\\page.txt"
+powershell -NoProfile -Command "Get-Clipboard -Raw | Out-File -Encoding utf8 C:\path\page.txt"
 ```
 
 然后 `read_file` 读那个文件（或 `bash head -40`）。**别让正文回到 bash 的 stdout**：
@@ -144,7 +160,7 @@ powershell -NoProfile -Command "Get-Clipboard -Raw | Out-File -Encoding utf8 C:\
 - 关闭自己开的东西，别留垃圾窗口。
 - 破坏性操作（删除、覆盖保存、安装）先截图确认按钮是什么。
 - **截图会把屏幕上的秘密一起带上**：编辑器里的 API key、密码框、私信。截到的图会上传
-  并进入对话记录，之后收不回。范围尽量用 `--window` 收窄，别整屏；图里有密钥就先切走。
+  并进入对话记录，之后收不回。范围尽量用 `window` 收窄，别整屏；图里有密钥就先切走。
 - **想不打扰人，别指望虚拟桌面**：它只是同一登录会话的多块桌面，同一输入队列、同一
   前台窗口，而且同一时刻只有一块在屏上——切过去就是把用户的屏换掉。真隔离要么不起
   窗口（离屏渲染截图），要么开另一个登录会话/另一台机器。
@@ -153,14 +169,14 @@ powershell -NoProfile -Command "Get-Clipboard -Raw | Out-File -Encoding utf8 C:\
 
 | 命令 | 作用 |
 |---|---|
-| `cu doctor` | 自检：DPI、控件树、INPUT 结构、截图 |
-| `cu windows` | 本桌面的顶层窗口：hwnd、pid、矩形、标题（`*` 是前台） |
-| `cu shot [--window W] [--scale F] [--out P]` | 截图，打印 `@image(<路径>)` |
-| `cu tree [--window W] [--depth N] [--max N]` | 控件树：类型、名字、屏幕矩形 |
-| `cu click X Y [--double] [--right] [--window W]` | 点击 |
-| `cu type [--window W] <文本>` | 输入文本（Unicode，中文正常） |
-| `cu key [--window W] ctrl+s` | 组合键 |
-| `cu focus W` | 把窗口拿到前台 |
+| `doctor()` | 自检：DPI、控件树、INPUT 结构、截图 |
+| `windows()` | 本桌面的顶层窗口：id、pid、矩形、标题（`*` 是前台） |
+| `shot(window=None, scale=1.0, out_path=None)` | 截图，打印 `@image(<路径>)` |
+| `tree(window=None, depth=5, limit=150)` | 控件树：类型、名字、屏幕矩形 |
+| `click(x, y, double=False, right=False, window=None)` | 点击 |
+| `type_text(text, window=None)` | 输入文本（Unicode，中文正常） |
+| `key(combo, window=None)` | 组合键，`ctrl+s` |
+| `focus(window)` | 把窗口拿到前台 |
 
 `W` 可写 hwnd（`47974752`）或标题片段（`"Notepad"`）；片段匹配多个时报错列候选。
 `key` 支持 `ctrl` `shift` `alt` `win` `f1`–`f24` `enter` `tab` `esc` `space`
@@ -180,20 +196,21 @@ powershell -NoProfile -Command "Get-Clipboard -Raw | Out-File -Encoding utf8 C:\
 | Windows 上多出「Windows 输入体验」之类幽灵窗口 | UWP 隐藏窗口，`EnumWindows` 看得见但点不着 | 用 `DwmGetWindowAttribute(DWMWA_CLOAKED)` 过滤 |
 | `--window` 被 PowerShell 当自己的参数 | PS 参数解析套在脚本参数上 | PS 回落版走 `CU_ARGV` 环境变量（`\x1f` 分隔） |
 | `ctrl+a` 复制回一串 URL | 焦点还在地址栏（`ctrl+l` 之后没点进正文，或点击落空） | `ctrl+a` 之后截图：整页变蓝才是正文；落地后看第一行是不是 `http` |
-| 点击把页面切到别的标签、或别的应用 | 坐标从上一帧算的，或落在了标签栏/窗口外；`--window` 只保证把窗口拉前台，不保证坐标在它里面 | 坐标从最近一张 `shot` 算，点击前后各一张图 |
+| 点击把页面切到别的标签、或别的应用 | 坐标从上一帧算的，或落在了标签栏/窗口外；`window` 只保证把窗口拉前台，不保证坐标在它里面 | 坐标从最近一张 `shot` 算，点击前后各一张图 |
 | `Get-Clipboard -Raw` 拿回上一轮的旧文本 | `ctrl+c` 没生效，剪贴板没变 | 复制前先 `Set-Clipboard -Value ''`，落地后确认文件非空 |
 | 选中的正文缺头少尾 | 慢页面 / 单页应用还没渲染完 | 截图看到正文出现再选；必要时隔一秒连拍两张 |
 | 这版 PowerShell 缺 `[ushort]`/`[uint]` 别名 | PS 5.1 的行为 | PS 回落版用全限定 `[System.UInt16]` |
 
 ## 一个完整例子
 
-```bash
-cu windows                        # 找到目标 hwnd
-cu tree --window 12345 --depth 4  # 读 Edit 框和 Button 的矩形
-cu click 700 400 --window 12345   # 点进输入框
-cu type --window 12345 "fix: 折叠上下文"
-cu click 1780 851 --window 12345  # 坐标来自 tree
-cu shot --window 12345 --scale 0.5
+```python
+windows()                                   # 找到目标窗口
+T = "12345"
+tree(window=T, depth=4)                     # 读 Edit 框和 Button 的矩形
+click(700, 400, window=T)                   # 点进输入框
+type_text("fix: 折叠上下文", window=T)
+click(1780, 851, window=T)                  # 坐标来自 tree
+shot(window=T, scale=0.5)
 ```
 
 ## 先问一句：真的需要点界面吗

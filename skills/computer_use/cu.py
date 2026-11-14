@@ -80,11 +80,128 @@ def default_shot_path():
     return os.path.join(tempfile.gettempdir(), "cu-%s-%d.png" % (stamp, os.getpid() % 1000))
 
 
+def doctor():
+    """Can this skill drive this desktop at all, and on which backend."""
+    backend, name = load_backend()
+    checks, ok = backend.doctor()
+    out("backend: %s (%s)" % (name, backend.__name__))
+    for text, good in checks:
+        out("  %s %s" % ("ok  " if good else "FAIL", text))
+    stated = getattr(backend, "VERIFIED", None)
+    if stated:
+        out("  note %s" % stated)
+    out("verdict: %s" % ("usable" if ok else "NOT usable, see above"))
+    return 0 if ok else 1
+
+
+def windows():
+    """Every top-level window: id, pid, position, size, title; `*` is the foreground."""
+    backend, _name = load_backend()
+    current = backend.foreground()["hwnd"]
+    for w in backend.list_windows():
+        mark = "*" if w["hwnd"] == current else " "
+        title = w["title"]
+        if len(title) > 55:
+            title = title[:52] + "..."
+        # The backend decides how an id looks: Windows hwnds are decimal,
+        # X11 ids are conventionally hexadecimal.
+        shown = backend.format_id(w["hwnd"]) if hasattr(backend, "format_id") else str(w["hwnd"])
+        out("%s%9s %7d @%d,%d %dx%d  %s"
+            % (mark, shown, w["pid"], w["x"], w["y"], w["w"], w["h"], title))
+    return 0
+
+
+def shot(window=None, scale=1.0, out_path=None):
+    """A screenshot of the screen, or of `window`, printed as `@image(<path>)`.
+
+    The path is made up when none is given. The line on stderr is the mapping
+    from image pixels to screen pixels, which is what a click computed from a
+    window capture needs.
+    """
+    backend, _name = load_backend()
+    win = backend.resolve_window(window) if window else None
+    path = out_path or default_shot_path()
+    info = backend.capture(path, window=win, scale=scale)
+    sw, sh = info["src"][2], info["src"][3]
+    # This line is the mapping from image pixels to screen pixels, and the only
+    # cheap source of it. Without the origin, a click computed from a window
+    # capture lands a whole control away. stderr is merged into what the model
+    # reads, so it costs tokens and has to earn them.
+    note("captured %dx%d src=%dx%d@%d,%d scale=%g"
+         % (info["w"], info["h"], sw, sh, info["src"][0], info["src"][1], scale))
+    if any(c.isspace() for c in path):
+        note("!! %r contains a space; the @ reference cannot be parsed -- "
+             "capture somewhere else" % path)
+    if ")" in path:
+        note("!! %r contains ')'; that closes the @image(...) reference, so the "
+             "server reads a shorter path -- capture somewhere else" % path)
+    # The spelling the server parses: `@image(<path>)`, the same meta the SPEC
+    # defines. A bare `@<path>` and the older `@image: <path>` are both read as
+    # prose now -- no prefix, no attachment, and nothing warns about it.
+    out("@image(%s)" % path)
+    return 0
+
+
+def tree(window=None, depth=5, limit=150):
+    """The control tree of a window: what can be clicked, and what it is called."""
+    backend, _name = load_backend()
+    header, lines = backend.tree(window, depth=depth, limit=limit)
+    out(header)
+    for line in lines:
+        out(line)
+    return 0
+
+
+def click(x, y, double=False, right=False, window=None):
+    """Click screen pixels, in the same space the control tree reports."""
+    backend, _name = load_backend()
+    claim_target(backend, window)
+    backend.click(x, y, double=double, right=right)
+    out("clicked %d,%d" % (x, y))
+    return 0
+
+
+def type_text(text, window=None):
+    """Type into `window`, or into whatever holds the focus."""
+    backend, _name = load_backend()
+    claim_target(backend, window)
+    want = len(text) * 2
+    sent = backend.type_text(text)
+    out("typed %d chars (delivered %d/%d events)" % (len(text), sent, want))
+    if sent != want:
+        raise SystemExit("SendInput dropped events (delivered %d of %d)" % (sent, want))
+    return 0
+
+
+def key(combo, window=None):
+    """Send one key combination, spelled `ctrl+l`."""
+    backend, _name = load_backend()
+    claim_target(backend, window)
+    sent = backend.send_keys(combo)
+    events = (len(combo.split("+")) * 2)
+    out("sent %s (delivered %d/%d events)" % (combo, sent, events))
+    if sent != events:
+        raise SystemExit("SendInput dropped events (delivered %d of %d)" % (sent, events))
+    return 0
+
+
+def focus(window):
+    """Bring a window to the front."""
+    backend, _name = load_backend()
+    win = backend.resolve_window(window)
+    if not backend.force_foreground(win["hwnd"]):
+        raise SystemExit("could not bring %s %r to the front"
+                         % (shown_id(backend, win), win["title"]))
+    out("focused %s %r" % (shown_id(backend, win), win["title"]))
+    return 0
+
+
 def main(argv):
+    """The command line, kept for a human at a shell: the same calls, by name."""
     parser = argparse.ArgumentParser(prog="cu", description="drive the desktop")
     sub = parser.add_subparsers(dest="cmd")
     sub.add_parser("doctor", help="check that this skill can work here")
-    p = sub.add_parser("windows", help="list top-level windows")
+    sub.add_parser("windows", help="list top-level windows")
     p = sub.add_parser("shot", help="capture the screen or one window")
     p.add_argument("--window")
     p.add_argument("--scale", type=float, default=1.0)
@@ -113,95 +230,22 @@ def main(argv):
         parser.print_help()
         return 0
 
-    backend, name = load_backend()
-
     if args.cmd == "doctor":
-        checks, ok = backend.doctor()
-        out("backend: %s (%s)" % (name, backend.__name__))
-        for text, good in checks:
-            out("  %s %s" % ("ok  " if good else "FAIL", text))
-        stated = getattr(backend, "VERIFIED", None)
-        if stated:
-            out("  note %s" % stated)
-        out("verdict: %s" % ("usable" if ok else "NOT usable, see above"))
-        return 0 if ok else 1
-
+        return doctor()
     if args.cmd == "windows":
-        current = backend.foreground()["hwnd"]
-        for w in backend.list_windows():
-            mark = "*" if w["hwnd"] == current else " "
-            title = w["title"]
-            if len(title) > 55:
-                title = title[:52] + "..."
-            # The backend decides how an id looks: Windows hwnds are decimal,
-            # X11 ids are conventionally hexadecimal.
-            shown = backend.format_id(w["hwnd"]) if hasattr(backend, "format_id") else str(w["hwnd"])
-            out("%s%9s %7d @%d,%d %dx%d  %s"
-                % (mark, shown, w["pid"], w["x"], w["y"], w["w"], w["h"], title))
-        return 0
-
+        return windows()
     if args.cmd == "shot":
-        win = backend.resolve_window(args.window) if args.window else None
-        path = args.out or default_shot_path()
-        info = backend.capture(path, window=win, scale=args.scale)
-        sw, sh = info["src"][2], info["src"][3]
-        # This line is the mapping from image pixels to screen pixels, and the only
-        # cheap source of it. Without the origin, a click computed from a window
-        # capture lands a whole control away. stderr is merged into what the model
-        # reads, so it costs tokens and has to earn them.
-        note("captured %dx%d src=%dx%d@%d,%d scale=%g"
-             % (info["w"], info["h"], sw, sh, info["src"][0], info["src"][1], args.scale))
-        if any(c.isspace() for c in path):
-            note("!! %r contains a space; the @ reference cannot be parsed -- "
-                 "capture somewhere else" % path)
-        if ")" in path:
-            note("!! %r contains ')'; that closes the @image(...) reference, so the "
-                 "server reads a shorter path -- capture somewhere else" % path)
-        # The spelling the server parses: `@image(<path>)`, the same meta the SPEC
-        # defines. A bare `@<path>` and the older `@image: <path>` are both read as
-        # prose now -- no prefix, no attachment, and nothing warns about it.
-        out("@image(%s)" % path)
-        return 0
-
+        return shot(args.window, args.scale, args.out)
     if args.cmd == "tree":
-        header, lines = backend.tree(args.window, depth=args.depth, limit=args.limit)
-        out(header)
-        for line in lines:
-            out(line)
-        return 0
-
+        return tree(args.window, args.depth, args.limit)
     if args.cmd == "click":
-        claim_target(backend, args.window)
-        backend.click(args.x, args.y, double=args.double, right=args.right)
-        out("clicked %d,%d" % (args.x, args.y))
-        return 0
-
+        return click(args.x, args.y, args.double, args.right, args.window)
     if args.cmd == "type":
-        text = " ".join(args.text)
-        claim_target(backend, args.window)
-        want = len(text) * 2
-        sent = backend.type_text(text)
-        out("typed %d chars (delivered %d/%d events)" % (len(text), sent, want))
-        if sent != want:
-            raise SystemExit("SendInput dropped events (delivered %d of %d)" % (sent, want))
-        return 0
-
+        return type_text(" ".join(args.text), args.window)
     if args.cmd == "key":
-        claim_target(backend, args.window)
-        sent = backend.send_keys(args.combo)
-        events = (len(args.combo.split("+")) * 2)
-        out("sent %s (delivered %d/%d events)" % (args.combo, sent, events))
-        if sent != events:
-            raise SystemExit("SendInput dropped events (delivered %d of %d)" % (sent, events))
-        return 0
-
+        return key(args.combo, args.window)
     if args.cmd == "focus":
-        win = backend.resolve_window(args.window)
-        if not backend.force_foreground(win["hwnd"]):
-            raise SystemExit("could not bring %s %r to the front"
-                             % (shown_id(backend, win), win["title"]))
-        out("focused %s %r" % (shown_id(backend, win), win["title"]))
-        return 0
+        return focus(args.window)
 
     parser.print_help()
     return 2
