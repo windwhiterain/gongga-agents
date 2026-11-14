@@ -423,21 +423,36 @@ def collect(catalog, config, preference, provider_id, tier_id):
     return routes
 
 
-def prepared(args, config, preference, catalog):
+def _loaded(config=None, preference=None):
+    """The settings, the opinion and the roster that one call reads.
+
+    A caller names the two files it wants read (or nothing, for this machine's
+    own), and every entry point below starts here.
+    """
+    settings, _config_path, _config_exists = load_config(config)
+    opinion, _preference_path = load_preference(preference)
+    catalog = roster.load()
+    if catalog is None:
+        raise SystemExit(f"no roster at {roster.catalog_path()}")
+    return settings, opinion, catalog
+
+
+def prepared(provider, tier, refresh, timeout, cached, probe_entitlement,
+             config, preference, catalog):
     """The filtered routes, read and evaluated: `(routes, state)`."""
-    routes = collect(catalog, config, preference, args.provider, args.tier)
+    routes = collect(catalog, config, preference, provider, tier)
     if not routes:
-        raise SystemExit(explain_empty(catalog, config, preference, args.provider, args.tier))
+        raise SystemExit(explain_empty(catalog, config, preference, provider, tier))
     pool = config["pool"]
     state = quota.load_state()
     providers = {route.provider["id"]: route.provider for route in routes}.values()
     readings_of(
         catalog, providers, config, state,
-        float(args.refresh if args.refresh is not None else pool["refresh"]),
-        float(args.timeout if args.timeout is not None else pool["timeout"]),
-        args.cached,
+        float(refresh if refresh is not None else pool["refresh"]),
+        float(timeout if timeout is not None else pool["timeout"]),
+        cached,
     )
-    if getattr(args, "probe", False):
+    if probe_entitlement:
         probes = state.setdefault("probes", {})
         timeout = float(config["pool"]["probe_timeout"])
         for route in probe_stale(state, routes, config):
@@ -455,7 +470,8 @@ def prepared(args, config, preference, catalog):
     return routes, state
 
 
-def drawn(args, config, preference, catalog):
+def drawn(tier, provider, weights, seed, refresh, timeout, cached, probe_entitlement,
+          config, preference, catalog):
     """One draw over the evaluated candidates: `(route, how, order, weights, routes)`.
 
     # Invariant
@@ -468,22 +484,24 @@ def drawn(args, config, preference, catalog):
     `route` is `None` only when the draw itself found nothing; an empty candidate
     set is a refusal (`prepared`), not an empty draw.
     """
-    order, weights = weights_of(preference, getattr(args, "weights", None))
-    routes, _state = prepared(args, config, preference, catalog)
-    rng = random.Random(args.seed) if args.seed is not None else random.Random()
+    order, weights = weights_of(preference, weights)
+    routes, _state = prepared(provider=provider, tier=tier, refresh=refresh, timeout=timeout,
+                  cached=cached, probe_entitlement=probe_entitlement,
+                  config=config, preference=preference, catalog=catalog)
+    rng = random.Random(seed) if seed is not None else random.Random()
     route, how = draw(routes, order, weights, rng)
     return route, how, order, weights, routes
 
 
-def explain(args, routes, how):
+def explain_routes(quiet, routes, how):
     """Every candidate and the draw that picked one, on stderr: what `--explain` adds."""
-    note(f"draw: {how}", args.quiet)
+    note(f"draw: {how}", quiet)
     for row in routes:
         share = "-" if row.share is None else f"{row.share:.2f}"
         note(
             f"  {row.tier:<5} {row.key:<44} {row.usable!s:<5} {share:<5} "
             f"x{row.multiplier:<4g} ={row.weight:<6.2f} {row.why}",
-            args.quiet,
+            quiet,
         )
 
 
@@ -508,7 +526,7 @@ def model_config_of(route, thinking=None, ctx_limit=None, cache_tier=None):
 
 
 def pick_config(tier, provider=None, weights=None, seed=None, refresh=None, timeout=None,
-                cached=False, probe=False, config=None, preference=None,
+                cached=False, probe_entitlement=False, config=None, preference=None,
                 thinking=None, ctx_limit=None, cache_tier=None):
     """One model inside `tier`, answered as SPEC's `ModelConfig`.
 
@@ -526,34 +544,34 @@ def pick_config(tier, provider=None, weights=None, seed=None, refresh=None, time
     sentence the command line would print, so a caller that cannot draw learns why
     rather than drawing from nothing.
     """
-    settings, _config_path, _config_exists = load_config(config)
-    opinion, _preference_path = load_preference(preference)
-    catalog = roster.load()
-    if catalog is None:
-        raise SystemExit(f"no roster at {roster.catalog_path()}")
-    # The draw's own reading of its arguments, built the way the command line
-    # builds it, so both faces of this skill run `prepared` over one shape.
-    args = argparse.Namespace(
-        provider=provider, tier=tier, weights=weights, seed=seed, refresh=refresh,
-        timeout=timeout, cached=cached, probe=probe,
+    config, preference, catalog = _loaded(config, preference)
+    route, how, _order, _weights, _routes = drawn(
+        tier=tier, provider=provider, weights=weights, seed=seed, refresh=refresh,
+        timeout=timeout, cached=cached, probe_entitlement=probe_entitlement,
+        config=config, preference=preference, catalog=catalog,
     )
-    route, how, _order, _weights, _routes = drawn(args, settings, opinion, catalog)
     if route is None:
         raise SystemExit(f"nothing to draw: {how}")
     return model_config_of(route, thinking, ctx_limit, cache_tier)
 
 
-def cmd_pick(args, config, preference, catalog):
-    route, how, order, weights, routes = drawn(args, config, preference, catalog)
+def pick(tier=None, provider=None, weights=None, seed=None, refresh=None, timeout=None,
+         cached=False, probe_entitlement=False, as_json=False, explain=False,
+         quiet=False, config=None, preference=None):
+    config, preference, catalog = _loaded(config, preference)
+    route, how, order, weights, routes = drawn(tier=tier, provider=provider, weights=weights, seed=seed,
+          refresh=refresh, timeout=timeout, cached=cached,
+          probe_entitlement=probe_entitlement, config=config,
+          preference=preference, catalog=catalog)
     if route is None:
         raise SystemExit(f"nothing to draw: {how}")
     if not route.usable:
         # A spawn has to run somewhere, so the draw answers even when nothing is
         # left; saying so on stderr keeps the model on stdout exactly one line.
-        note(f"model_pool: nothing is usable, drawn anyway: {how}", args.quiet)
-    if args.explain:
-        explain(args, routes, how)
-    if args.json:
+        note(f"model_pool: nothing is usable, drawn anyway: {how}", quiet)
+    if explain:
+        explain_routes(quiet, routes, how)
+    if json:
         print(json.dumps({
             "model": route.key,
             "provider": route.provider["id"],
@@ -569,7 +587,9 @@ def cmd_pick(args, config, preference, catalog):
     print(route.key)
 
 
-def cmd_pick_config(args, config, preference, catalog):
+def print_pick_config(tier, provider=None, weights=None, seed=None, refresh=None,
+                      timeout=None, cached=False, probe_entitlement=False, as_json=False,
+                      explain=False, quiet=False, config=None, preference=None):
     """The draw `pick` makes, printed as the `ModelConfig` a session is created with.
 
     # Invariant
@@ -579,17 +599,21 @@ def cmd_pick_config(args, config, preference, catalog):
     and reads its warnings on stderr. A warning folded into the object would be an
     answer that does not parse.
     """
-    route, how, order, weights, routes = drawn(args, config, preference, catalog)
+    config, preference, catalog = _loaded(config, preference)
+    route, how, order, weights, routes = drawn(tier=tier, provider=provider, weights=weights, seed=seed,
+          refresh=refresh, timeout=timeout, cached=cached,
+          probe_entitlement=probe_entitlement, config=config,
+          preference=preference, catalog=catalog)
     if route is None:
         raise SystemExit(f"nothing to draw: {how}")
     if not route.usable:
         # The same promise `pick` makes: a spawn has to run somewhere, and the
         # reason it is a bad model belongs on stderr, not inside the answer.
-        note(f"model_pool: nothing is usable, drawn anyway: {how}", args.quiet)
-    if args.explain:
-        explain(args, routes, how)
+        note(f"model_pool: nothing is usable, drawn anyway: {how}", quiet)
+    if explain:
+        explain_routes(quiet, routes, how)
     config_out = model_config_of(route)
-    if args.json:
+    if json:
         print(json.dumps({
             "model_config": config_out,
             "model": route.key,
@@ -606,8 +630,12 @@ def cmd_pick_config(args, config, preference, catalog):
     print(json.dumps(config_out, ensure_ascii=False, separators=(",", ":")))
 
 
-def cmd_status(args, config, preference, catalog):
-    routes, state = prepared(args, config, preference, catalog)
+def status(as_json=False, tier=None, provider=None, weights=None, refresh=None,
+           timeout=None, cached=False, probe_entitlement=False, config=None, preference=None):
+    config, preference, catalog = _loaded(config, preference)
+    routes, state = prepared(provider=provider, tier=tier, refresh=refresh, timeout=timeout,
+                  cached=cached, probe_entitlement=probe_entitlement,
+                  config=config, preference=preference, catalog=catalog)
     payload = []
     for route in sorted(routes, key=lambda item: (item.provider["id"], item.model["id"])):
         cached = (state.get("readings") or {}).get(route.provider["id"]) or {}
@@ -623,7 +651,7 @@ def cmd_status(args, config, preference, catalog):
             "read_at": cached.get("at"),
             "unit": route.unit,
         })
-    if args.json:
+    if json:
         print(json.dumps({"routes": payload}, ensure_ascii=False, indent=1))
         return
     for row in payload:
@@ -643,17 +671,21 @@ def cmd_status(args, config, preference, catalog):
             print(f"      {row['detail']}")
 
 
-def cmd_probe(args, config, preference, catalog):
+def probe(force=False, tier=None, provider=None, weights=None, refresh=None, timeout=None,
+          cached=False, probe_entitlement=False, config=None, preference=None):
+    config, preference, catalog = _loaded(config, preference)
     """Ask every live route whether this account may run it, and remember the answer."""
-    routes, state = prepared(args, config, preference, catalog)
+    routes, state = prepared(provider=provider, tier=tier, refresh=refresh, timeout=timeout,
+                  cached=cached, probe_entitlement=probe_entitlement,
+                  config=config, preference=preference, catalog=catalog)
     probes = state.setdefault("probes", {})
-    timeout = float(args.timeout if args.timeout is not None else config["pool"]["probe_timeout"])
+    timeout = float(timeout if timeout is not None else config["pool"]["probe_timeout"])
     for route in routes:
         credential = catalog.credential(route.provider)
         if not credential:
             print(f"{route.key:<44} skipped  no credential")
             continue
-        if not args.force:
+        if not force:
             cached = probes.get(route.key) or {}
             refresh = float(config["pool"].get("probe_refresh") or 0)
             if cached.get("at") is not None and refresh > 0 and time.time() - float(cached["at"]) <= refresh:
@@ -682,21 +714,23 @@ def probe_stale(state, routes, config):
     return stale
 
 
-def cmd_tiers(args, config, preference, catalog):
+def print_tiers(tier=None, provider=None, weights=None, refresh=None, timeout=None,
+                cached=False, probe_entitlement=False, config=None, preference=None):
     """Every tier, its weight, and every model the roster places in it.
 
     Disabled models are listed too, with `off`: "why is this never drawn" is the
     question this command exists to answer, and leaving them out would make the
     answer look like the model is missing from the roster.
     """
-    order, weights = weights_of(preference, args.weights)
+    config, preference, catalog = _loaded(config, preference)
+    order, weights = weights_of(preference, weights)
     placed = []
     excluded = set(config["pool"].get("exclude") or [])
-    for provider, model in catalog.models(args.provider):
+    for holder, model in catalog.models(provider):
         tier, evidence = tiers.tier_of(catalog, model)
-        if tier is None or tier not in order or provider["id"] in excluded:
+        if tier is None or tier not in order or holder["id"] in excluded:
             continue
-        placed.append((tier, Route(provider, model, tier), evidence))
+        placed.append((tier, Route(holder, model, tier), evidence))
     for tier in order:
         rows = [row for row in placed if row[0] == tier]
         print(f"{tier:<5} weight {weights[tier]:g}  {len(rows)} model(s)  —  {tiers.MEANING[tier]}")
@@ -708,10 +742,11 @@ def cmd_tiers(args, config, preference, catalog):
             )
 
 
-def cmd_mark(args, config, preference, catalog):
+def mark(target, minutes=None, reason=None, clear=False, config=None):
+    config, _preference, catalog = _loaded(config)
     state = quota.load_state()
-    minutes = float(args.minutes if args.minutes is not None else config["pool"]["cooldown"] / 60)
-    key = args.target
+    minutes = float(minutes if minutes is not None else config["pool"]["cooldown"] / 60)
+    key = target
     if "/" in key:
         provider_id, model_id = key.split("/", 1)
         if provider_id not in catalog.by_id:
@@ -720,14 +755,14 @@ def cmd_mark(args, config, preference, catalog):
             raise SystemExit(f"provider {provider_id} has no model {model_id!r}")
     elif key not in catalog.by_id:
         raise SystemExit(f"no provider {key!r} in the roster")
-    if args.clear:
+    if clear:
         state.setdefault("marks", {}).pop(key, None)
         quota.save_state(state)
         print(f"cleared {key}")
         return
     until = time.time() + max(0.0, minutes) * 60
     state.setdefault("marks", {})[key] = {
-        "until": until, "reason": args.reason or "marked by hand", "at": time.time(),
+        "until": until, "reason": reason or "marked by hand", "at": time.time(),
     }
     quota.save_state(state)
     print(f"marked {key} out for {minutes:g} min (until {time.strftime('%Y-%m-%d %H:%M', time.localtime(until))})")
@@ -745,50 +780,50 @@ def build_parser():
     common.add_argument("--refresh", type=float, help="seconds a cached reading answers for (0 = ask again)")
     common.add_argument("--timeout", type=float, help="seconds one quota script may take")
     common.add_argument("--cached", action="store_true", help="answer from cached readings only, never run a script")
-    common.add_argument("--probe", action="store_true",
+    common.add_argument("--probe", dest="probe_entitlement", action="store_true",
                         help="also ask the providers this account is allowed to run (one cheap request per route)")
     common.add_argument("--config", help=f"pool settings, default {CONFIG_PATH}")
     common.add_argument("--preference", help=f"tier weights and multipliers, default {PREFERENCE_PATH}")
     sub = parser.add_subparsers(dest="command")
 
-    pick = sub.add_parser("pick", parents=[common], help="draw one model and print it (default)")
-    pick.add_argument("--json", action="store_true", help="print one JSON object instead of the bare model")
-    pick.add_argument("--explain", action="store_true", help="print the candidates and why on stderr")
-    pick.add_argument("--quiet", action="store_true", help="no explanation at all")
-    pick.add_argument("--seed", type=int, help="draw with this seed, for a repeatable answer")
-    pick.set_defaults(handler=cmd_pick)
+    pick_parser = sub.add_parser("pick", parents=[common], help="draw one model and print it (default)")
+    pick_parser.add_argument("--json", dest="as_json", action="store_true", help="print one JSON object instead of the bare model")
+    pick_parser.add_argument("--explain", action="store_true", help="print the candidates and why on stderr")
+    pick_parser.add_argument("--quiet", action="store_true", help="no explanation at all")
+    pick_parser.add_argument("--seed", type=int, help="draw with this seed, for a repeatable answer")
+    pick_parser.set_defaults(handler=pick)
 
     picked = sub.add_parser(
         "pick_config", parents=[common],
         help="draw one model and print SPEC's ModelConfig for it",
     )
     picked.add_argument(
-        "--json", action="store_true",
+        "--json", dest="as_json", action="store_true",
         help="print the draw's decision instead, with the config under `model_config`",
     )
     picked.add_argument("--explain", action="store_true", help="print the candidates and why on stderr")
     picked.add_argument("--quiet", action="store_true", help="no explanation at all")
     picked.add_argument("--seed", type=int, help="draw with this seed, for a repeatable answer")
-    picked.set_defaults(handler=cmd_pick_config)
+    picked.set_defaults(handler=print_pick_config)
 
-    status = sub.add_parser("status", parents=[common], help="every route, its tier, and whether it is drawable")
-    status.add_argument("--json", action="store_true")
-    status.set_defaults(handler=cmd_status)
+    status_parser = sub.add_parser("status", parents=[common], help="every route, its tier, and whether it is drawable")
+    status_parser.add_argument("--json", dest="as_json", action="store_true")
+    status_parser.set_defaults(handler=status)
 
-    probe = sub.add_parser("probe", parents=[common], help="ask each provider whether this account may run the model")
-    probe.add_argument("--force", action="store_true", help="ask again even when a verdict is still fresh")
-    probe.set_defaults(handler=cmd_probe)
+    probe_parser = sub.add_parser("probe", parents=[common], help="ask each provider whether this account may run the model")
+    probe_parser.add_argument("--force", action="store_true", help="ask again even when a verdict is still fresh")
+    probe_parser.set_defaults(handler=probe)
 
-    tiers = sub.add_parser("tiers", parents=[common], help="the tiers, their weights, and the models in each")
-    tiers.set_defaults(handler=cmd_tiers)
+    tiers_parser = sub.add_parser("tiers", parents=[common], help="the tiers, their weights, and the models in each")
+    tiers_parser.set_defaults(handler=print_tiers)
 
-    mark = sub.add_parser("mark", help="keep a provider or a route out of the draw for a while")
-    mark.add_argument("target", help="<provider>/<model id>, or a provider id")
-    mark.add_argument("--minutes", type=float, help="how long, default the pool's cooldown")
-    mark.add_argument("--reason", help="why it is out")
-    mark.add_argument("--clear", action="store_true", help="release the mark instead of setting one")
-    mark.add_argument("--config", help=f"pool settings, default {CONFIG_PATH}")
-    mark.set_defaults(handler=cmd_mark)
+    mark_parser = sub.add_parser("mark", help="keep a provider or a route out of the draw for a while")
+    mark_parser.add_argument("target", help="<provider>/<model id>, or a provider id")
+    mark_parser.add_argument("--minutes", type=float, help="how long, default the pool's cooldown")
+    mark_parser.add_argument("--reason", help="why it is out")
+    mark_parser.add_argument("--clear", action="store_true", help="release the mark instead of setting one")
+    mark_parser.add_argument("--config", help=f"pool settings, default {CONFIG_PATH}")
+    mark_parser.set_defaults(handler=mark)
     return parser
 
 
@@ -799,12 +834,11 @@ def main(argv):
     elif argv[0].startswith("-") and argv[0] not in ("-h", "--help"):
         argv = ["pick", *argv]
     args = parser.parse_args(argv)
-    config, _path, _exists = load_config(getattr(args, "config", None))
-    preference, _pref_path = load_preference(getattr(args, "preference", None))
-    catalog = roster.load()
-    if catalog is None:
-        raise SystemExit(f"no roster at {roster.catalog_path()}")
-    args.handler(args, config, preference, catalog)
+    handler = args.handler
+    # The fields one subcommand declared, by name: the handler takes exactly those.
+    named = {name: value for name, value in vars(args).items()
+             if name not in ("handler", "command")}
+    handler(**named)
 
 
 if __name__ == "__main__":
