@@ -1,8 +1,6 @@
 ---
 name: latency
 description: 定位延迟到底丢在哪一层，再在瓶颈之前把它整形掉——判断是不是代理/TUN 接管了流量、逐跳找出从哪一跳开始尖峰、同机同钟采集出流量与 RTT 并报分布、读 mihomo /connections 找出谁在吃上行、Windows QoS 限速与 DSCP 优先级。任何"游戏/API 延迟高、是不是代理的锅、谁占了带宽、怎么给某台机器限速"的问题用它。Windows 已实测；Linux 的 tc/HTB 未实现。
-metadata:
-  entry: latency
 ---
 
 # 先定位到哪一层，再整形
@@ -10,13 +8,21 @@ metadata:
 用户给的假设通常不是原因。有人问"延迟高是不是代理"，实测常常是**完全无关**的问题
 （别人的机器把上行打满）。所以这里的顺序是固定的：**先证明是哪一层，再动任何开关。**
 
-```bash
-# 本 skill 的目录：`@skill:` 展开里 `SKILL.md: <path>` 的父目录（`index_skill` 的 path 列同源）。
-# gongga 里更短：`gongga-cli skill <name> …`，它跑 frontmatter 里声明的入口。
-SKILL_DIR=<本 SKILL.md 所在目录>
-"$SKILL_DIR/latency" doctor --app Overwatch.exe   # 是代理吗？
-"$SKILL_DIR/latency" hops --dest 223.5.5.5       # 从哪一跳开始炸？
+```python
+run_skill(id="latency", cmd={"name": "doctor", "args": {"app": "Overwatch.exe"}})   # 是代理吗？
+run_skill(id="latency", cmd={"name": "hops", "args": {"dest": "223.5.5.5"}})       # 从哪一跳开始炸？
 ```
+
+下文的 `fn(...)` 都是 `run_skill(id="latency", cmd={"name": fn, "args": {...}})` 的简写。
+
+| 函数 | 参数 |
+|---|---|
+| `doctor(app=None)` | `app` 要看的进程名 |
+| `hops(dest, count=20, timeout=1200, max_ttl=12, peer=None)` | `peer` 换一台记得的机器测 |
+| `top(peer=None, seconds=20, limit=12)` | 读 mihomo 的 /connections |
+| `probe(peer=None, target="223.5.5.5", seconds=60, interval=150, timeout=1200)` | 同一个钟、同一台机器 |
+| `cap(action, rate=None, peer=None, verify=20)` | `action` 是 on/off/status，`rate` 单位 Mbps |
+| `prio(action, app=None, peer=None)` | `app` 逗号分隔的 exe 名 |
 
 ## 判断链
 
@@ -24,11 +30,11 @@ SKILL_DIR=<本 SKILL.md 所在目录>
 
 | 步骤 | 命令 | 它回答什么 | 典型结论 |
 |---|---|---|---|
-| 1 | `doctor --app X` | 有 TUN 接管吗？目标进程连到哪？ | "TUN 没接管，游戏直连" |
-| 2 | `hops --dest X` | 第几跳开始出现 >100ms | "前两跳干净，第 3 跳炸" |
-| 3 | `probe --peer Y` | 那台机器忙的时候 RTT 怎样 | "空闲最大 11ms，饱和时 62% 超 100ms" |
-| 4 | `top --peer Y` | 谁在吃上行 | "api.minimaxi.com 占 70%" |
-| 5 | `cap --peer Y on 8` | 整形后是否真的不排队 | "最大 25ms，零尖峰" |
+| 1 | `doctor(app="X")` | 有 TUN 接管吗？目标进程连到哪？ | "TUN 没接管，游戏直连" |
+| 2 | `hops("X")` | 第几跳开始出现 >100ms | "前两跳干净，第 3 跳炸" |
+| 3 | `probe(peer="Y")` | 那台机器忙的时候 RTT 怎样 | "空闲最大 11ms，饱和时 62% 超 100ms" |
+| 4 | `top(peer="Y")` | 谁在吃上行 | "api.minimaxi.com 占 70%" |
+| 5 | `cap("on", rate=8, peer="Y")` | 整形后是否真的不排队 | "最大 25ms，零尖峰" |
 
 **第 2 步是分水岭**：如果前两跳（自己的路由）干净、第 3 跳（ISP 网关）开始炸，
 那就是**上行队列（bufferbloat）**，不是自己的路由器，也不是 Wi-Fi。这个判断一次就能
@@ -36,8 +42,8 @@ SKILL_DIR=<本 SKILL.md 所在目录>
 
 ## doctor：先排除代理
 
-```bash
-latency doctor --app Overwatch.exe
+```python
+doctor(app="Overwatch.exe")
 ```
 
 它看四件事，并给出结论：
@@ -53,9 +59,9 @@ latency doctor --app Overwatch.exe
 
 ## hops：从哪一跳开始
 
-```bash
-latency hops --dest 223.5.5.5 --count 20
-latency hops --dest 121.41.35.233 --peer awin   # 从另一台机器看
+```python
+hops("223.5.5.5", count=20)
+hops("121.41.35.233", peer="awin")   # 从另一台机器看
 ```
 
 用**递增 TTL 的结构化 Ping** 探测路径，不解析 `tracert` 的文本——那份输出会随系统
@@ -66,8 +72,8 @@ latency hops --dest 121.41.35.233 --peer awin   # 从另一台机器看
 
 ## probe：为什么忙的时候卡
 
-```bash
-latency probe --peer awin --target 223.5.5.5 --seconds 60
+```python
+probe(peer="awin", target="223.5.5.5", seconds=60)
 ```
 
 在**同一台机器上**、**同一个时钟下**采两样东西：网卡出字节数、到目标的 RTT。
@@ -107,8 +113,8 @@ latency probe --peer awin --target 223.5.5.5 --seconds 60
 
 ## top：谁在吃上行
 
-```bash
-latency top --peer awin --seconds 20
+```python
+top(peer="awin", seconds=20)
 ```
 
 读 mihomo 的 `/connections`，多次采样算每个连接的**增量**，按 host 汇总上报速率。
@@ -128,10 +134,10 @@ latency top --peer awin --seconds 20
 
 ## cap：在瓶颈之前整形
 
-```bash
-latency cap --peer awin status
-latency cap --peer awin on 8      # Mbps，整机
-latency cap --peer awin off
+```python
+cap("status", peer="awin")
+cap("on", rate=8, peer="awin")     # Mbps，整机
+cap("off", peer="awin")
 ```
 
 `on` 会建策略、注册开机任务，然后**采样本机出流量验证峰值是否真的被压住**，最后给结论。
@@ -155,10 +161,10 @@ latency cap --peer awin off
 
 ## prio：Wi-Fi 空口优先
 
-```bash
-latency prio --app Overwatch.exe on     # DSCP 46 (EF)，需要提权
-latency prio status
-latency prio off
+```python
+prio("on", app="Overwatch.exe")     # DSCP 46 (EF)，需要提权
+prio("status")
+prio("off")
 ```
 
 效果要在两层分开看，别混为一谈：
@@ -175,18 +181,18 @@ latency prio off
 命令并返回 2。UAC 弹窗在独立安全桌面上，**任何程序都无法替你点**——不要试图绕过，
 把命令交给用户。
 
-## 命令
+## 函数
 
-| 命令 | 作用 |
+| 函数 | 作用 |
 |---|---|
-| `doctor [--app X]` | 默认路由、隧道网卡、本地代理、目标进程连接去向 + 结论 |
-| `hops --dest X [--count N] [--peer Y]` | 逐跳 RTT 分布，指出第一处尖峰 |
-| `probe [--peer Y] [--target X] [--seconds N] [--interval MS]` | 同机同钟采出流量与 RTT，按负载分组报分布 |
-| `top [--peer Y] [--seconds N] [--limit N]` | 按 host 报经 mihomo 的上行速率 |
-| `cap on RATE\|off\|status [--peer Y] [--verify N]` | 上行限速（整机，ActiveStore，带自检） |
-| `prio on\|off\|status --app X[,...] [--peer Y]` | DSCP 46 标记 |
+| `doctor(app=None)` | 默认路由、隧道网卡、本地代理、目标进程连接去向 + 结论 |
+| `hops(dest, count=20, timeout=1200, max_ttl=12, peer=None)` | 逐跳 RTT 分布，指出第一处尖峰 |
+| `probe(peer=None, target="223.5.5.5", seconds=60, interval=150, timeout=1200)` | 同机同钟采出流量与 RTT，按负载分组报分布 |
+| `top(peer=None, seconds=20, limit=12)` | 按 host 报经 mihomo 的上行速率 |
+| `cap(action, rate=None, peer=None, verify=20)` | 上行限速（整机，ActiveStore，带自检） |
+| `prio(action, app=None, peer=None)` | DSCP 46 标记 |
 
-`--peer` 用的是 `remote` skill 记住的目标名（`~/.remote/targets.json`）。没有记住的
+`peer` 用的是 `remote` skill 记住的目标名（`~/.remote/targets.json`）。没有记住的
 目标时退化为直接 `ssh NAME`。
 
 ## 实现上几个不显然的决定
