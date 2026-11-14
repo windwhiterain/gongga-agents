@@ -40,7 +40,7 @@ def _core(*words):
     return proxy.run_core([word for word in words if word is not None])
 
 
-def up(key=None, replace=False, mixed_port=None, controller_port=None):
+def up(key=None, replace: bool = False, mixed_port: int = None, controller_port: int = None):
     """Install the core if needed, take a subscription link, and start it.
 
     No `key` reuses the subscription already saved; `replace` fetches the link
@@ -114,7 +114,7 @@ def core_subscribe(url=None, source=None):
     return _core("subscribe", url, "--from", source)
 
 
-def core_render(mixed_port=None, controller_port=None):
+def core_render(mixed_port: int = None, controller_port: int = None):
     """Write the configuration the core starts from, and say what it chose."""
     return _core(
         "render",
@@ -123,7 +123,7 @@ def core_render(mixed_port=None, controller_port=None):
     )
 
 
-def core_start(mixed_port=None, controller_port=None, core=None):
+def core_start(mixed_port: int = None, controller_port: int = None, core=None):
     """Render if needed, verify the config, and start the core detached."""
     return _core(
         "start",
@@ -173,7 +173,8 @@ def use_node(group, node):
     return _drive(lambda core: mihomo.cmd_use(core, group, node))
 
 
-def bench(group=None, throughput=False, seconds=8, url=None, concurrency=4, limit=None):
+def bench(group=None, throughput: bool = False, seconds: int = 8, url=None,
+          concurrency: int = 4, limit: int = None):
     """Latency of every node in a group, or with `throughput` their sustained bandwidth.
 
     No group means the largest one, and that fact is said in the output.
@@ -197,7 +198,7 @@ def reload(path=None):
     return _drive(lambda core: mihomo.cmd_reload(core, mihomo.discover(None, None), path))
 
 
-def connect(controller, secret=None, save=False):
+def connect(controller, secret=None, save: bool = False):
     """Remember a controller address (and secret) after proving it answers."""
     discovered = {
         "origin": mihomo.origin_from_controller(controller),

@@ -111,7 +111,7 @@ def windows():
     return 0
 
 
-def shot(window=None, scale=1.0, out_path=None):
+def shot(window=None, scale: float = 1.0, out_path=None):
     """A screenshot of the screen, or of `window`, printed as `@image(<path>)`.
 
     The path is made up when none is given. The line on stderr is the mapping
@@ -142,7 +142,7 @@ def shot(window=None, scale=1.0, out_path=None):
     return 0
 
 
-def tree(window=None, depth=5, limit=150):
+def tree(window=None, depth: int = 5, limit: int = 150):
     """The control tree of a window: what can be clicked, and what it is called."""
     backend, _name = load_backend()
     header, lines = backend.tree(window, depth=depth, limit=limit)
@@ -152,7 +152,7 @@ def tree(window=None, depth=5, limit=150):
     return 0
 
 
-def click(x, y, double=False, right=False, window=None):
+def click(x: int, y: int, double: bool = False, right: bool = False, window=None):
     """Click screen pixels, in the same space the control tree reports."""
     backend, _name = load_backend()
     claim_target(backend, window)

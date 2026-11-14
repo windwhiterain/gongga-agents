@@ -128,7 +128,7 @@ def press(key):
     return _uv("browse.py", ["press", key])
 
 
-def shot(scale=1.0):
+def shot(scale: float = 1.0):
     """A screenshot of the tab, printed as `@image(<path>)`."""
     return _uv("browse.py", ["shot", "--scale", str(scale)])
 

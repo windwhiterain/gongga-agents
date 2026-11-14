@@ -75,7 +75,7 @@ def _post(path, body):
     return decoded
 
 
-def search(query, count=6, content=False):
+def search(query: str, count: int = 6, content: bool = False):
     """The ranked sources for a query, one block each.
 
     `count` is how many sources to ask for; `content` also asks for each page's
@@ -112,7 +112,7 @@ def search(query, count=6, content=False):
     return "\n".join(lines)
 
 
-def fetch(url):
+def fetch(url: str):
     """One page as markdown, titled when the endpoint knows the title."""
     if not url.strip():
         raise ValueError("fetch needs a url")

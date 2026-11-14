@@ -64,7 +64,7 @@ def doctor(app=None):
     return _run(latency.cmd_doctor, app=app)
 
 
-def hops(dest, count=20, timeout=1200, max_ttl=12, peer=None):
+def hops(dest, count: int = 20, timeout: int = 1200, max_ttl: int = 12, peer=None):
     """Trace toward `dest` and measure every hop: which one starts spiking.
 
     `peer` asks a remembered machine to measure instead of this one, which is the
@@ -73,12 +73,13 @@ def hops(dest, count=20, timeout=1200, max_ttl=12, peer=None):
     return _run(latency.cmd_hops, dest=dest, count=count, timeout=timeout, max_ttl=max_ttl, peer=peer)
 
 
-def top(peer=None, seconds=20, limit=12):
+def top(peer=None, seconds: int = 20, limit: int = 12):
     """Which host is eating the uplink, read from the local (or `peer`'s) mihomo."""
     return _run(latency.cmd_top, peer=peer, seconds=seconds, limit=limit)
 
 
-def probe(peer=None, target="223.5.5.5", seconds=60, interval=150, timeout=1200):
+def probe(peer=None, target: str = "223.5.5.5", seconds: int = 60, interval: int = 150,
+          timeout: int = 1200):
     """Egress and RTT sampled on one clock, on one machine: the distribution, not a mean."""
     return _run(
         latency.cmd_probe,
@@ -86,12 +87,14 @@ def probe(peer=None, target="223.5.5.5", seconds=60, interval=150, timeout=1200)
     )
 
 
-def cap(action, rate=None, peer=None, verify=20):
+def cap(action, rate=None, peer=None, verify: int = 20):
     """Windows QoS uplink cap for the whole machine: `on` needs `rate` in Mbps, or `off`/`status`.
 
     `verify` is how many seconds to spend proving the cap actually held.
     """
-    return _run(latency.cmd_cap, action=action, rate=rate, peer=peer, verify=verify)
+    # The rate is read as text (`8`, `8M`, `800k`), so a JSON number is spelled first.
+    return _run(latency.cmd_cap, action=action, rate=None if rate is None else str(rate),
+                peer=peer, verify=verify)
 
 
 def prio(action, app=None, peer=None):

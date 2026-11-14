@@ -61,8 +61,9 @@ def _run(handler, **fields):
     return handler(args, config, preference, catalog) or 0
 
 
-def pick(tier=None, provider=None, weights=None, seed=None, refresh=None, timeout=None,
-         cached=False, probe_entitlement=False, as_json=False, explain=False, quiet=False,
+def pick(tier=None, provider=None, weights=None, seed: int = None, refresh: float = None,
+         timeout: float = None, cached: bool = False, probe_entitlement: bool = False,
+         as_json: bool = False, explain: bool = False, quiet: bool = False,
          config=None, preference=None):
     """One `<provider>/<model id>`, drawn inside `tier`.
 
@@ -80,9 +81,9 @@ def pick(tier=None, provider=None, weights=None, seed=None, refresh=None, timeou
     )
 
 
-def pick_config(tier, provider=None, weights=None, seed=None, refresh=None, timeout=None,
-                cached=False, probe_entitlement=False, thinking=None, ctx_limit=None,
-                cache_tier=None, config=None, preference=None):
+def pick_config(tier, provider=None, weights=None, seed: int = None, refresh: float = None,
+                timeout: float = None, cached: bool = False, probe_entitlement: bool = False,
+                thinking=None, ctx_limit=None, cache_tier=None, config=None, preference=None):
     """SPEC's `ModelConfig` for the model `pick` would draw, as a mapping.
 
     The three provider-defaulted fields are left `None` unless named, so the
@@ -95,8 +96,8 @@ def pick_config(tier, provider=None, weights=None, seed=None, refresh=None, time
     )
 
 
-def status(as_json=False, tier=None, provider=None, weights=None, cached=False,
-           probe_entitlement=False, config=None, preference=None):
+def status(as_json: bool = False, tier=None, provider=None, weights=None, cached: bool = False,
+           probe_entitlement: bool = False, config=None, preference=None):
     """Every route the roster holds, its tier, and whether it is drawable right now."""
     return _run(
         pool.cmd_status, as_json=as_json, json=as_json, tier=tier, provider=provider,
@@ -105,7 +106,8 @@ def status(as_json=False, tier=None, provider=None, weights=None, cached=False,
     )
 
 
-def probe(force=False, tier=None, provider=None, timeout=None, config=None, preference=None):
+def probe(force: bool = False, tier=None, provider=None, timeout: float = None,
+          config=None, preference=None):
     """Ask each provider whether this account may run the route, and remember the answer.
 
     `force` asks again even when a verdict is still fresh.
@@ -122,7 +124,7 @@ def tiers(tier=None, provider=None, weights=None, config=None, preference=None):
                 config=config, preference=preference)
 
 
-def mark(target, minutes=None, reason=None, clear=False, config=None):
+def mark(target, minutes: float = None, reason=None, clear: bool = False, config=None):
     """Keep one route or one provider out of the draw for `minutes`.
 
     `target` is `<provider>/<model id>` or a provider id; `clear` releases the

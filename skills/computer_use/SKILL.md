@@ -91,7 +91,7 @@ captured 577x352 src=1922x1173@467,144 scale=0.3
 
 `shot` 打印一行 `@image(C:\...\cu-xxxx.png)`。harness 扫描**每个工具**的输出，
 认出 `@image(` 就：读文件 → 上传 Files API → 请求里作为 `input_image{file_id}` 发出。
-**不是 base64**，同一文件一轮只传一���。
+**不是 base64**，同一文件一轮只传一次。
 
 - **必须是 `@image(<path>)` 这个形式** —— 它就是 SPEC 里的 meta。这不是"前缀"，是
   一个有开有合的括号：服务端 `Reference::of_prefix` 要求 `@image(`，`meta::mentions`

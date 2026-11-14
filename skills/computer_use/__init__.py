@@ -31,7 +31,7 @@ windows = cu.windows
 shot = cu.shot
 
 
-def tree(window=None, depth=5, limit=150):
+def tree(window=None, depth: int = 5, limit: int = 150):
     """The control tree of a window: what can be clicked, and what it is called.
 
     This is the one call that needs `comtypes` (the UIA client is built from the

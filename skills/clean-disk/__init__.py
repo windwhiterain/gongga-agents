@@ -46,7 +46,8 @@ def _roots(project_root):
     return list(project_root)
 
 
-def clean(dry_run=False, no_elevate=False, project_root=None, remove_upgrade_leftovers=False):
+def clean(dry_run: bool = False, no_elevate: bool = False, project_root=None,
+          remove_upgrade_leftovers: bool = False):
     """Clean everything on this machine that is rebuilt by itself.
 
     `dry_run` measures and plans and deletes nothing, and asks for no elevation.
@@ -70,7 +71,7 @@ def clean(dry_run=False, no_elevate=False, project_root=None, remove_upgrade_lef
     return _script("clean-disk.ps1", arguments)
 
 
-def find_forgotten(min_mb=300, top=25, stale_days=120):
+def find_forgotten(min_mb: int = 300, top: int = 25, stale_days: int = 120):
     """Look for what holds space and is nobody's cache: read-only, deletes nothing.
 
     Every line ends with a verdict -- delete / ask first / do not delete / needs

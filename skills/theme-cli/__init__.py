@@ -51,7 +51,7 @@ def toggle():
     return _run(["toggle"])
 
 
-def status(as_json=False):
+def status(as_json: bool = False):
     """The current theme and the two scheduled tasks, if any are installed.
 
     `as_json=True` answers the same state as one JSON object, for a caller that
@@ -60,7 +60,7 @@ def status(as_json=False):
     return _run(["status"] + (["--json"] if as_json else []))
 
 
-def schedule(light=None, dark=None, show=False, remove=False):
+def schedule(light=None, dark=None, show: bool = False, remove: bool = False):
     """Install, show or remove the two daily tasks that switch the theme.
 
     `light` and `dark` are `HH:mm` times of day; a side left out keeps the time

@@ -56,23 +56,23 @@ def _run(command, paths=None, action=None, limit=None):
     return subprocess.run(argv).returncode
 
 
-def doctor(paths=None, limit=20):
+def doctor(paths=None, limit: int = 20):
     """All four checks in one read-only report. Changes nothing."""
     return _run("doctor", paths, limit=limit)
 
 
-def eol(paths=None, action="scan", limit=20):
+def eol(paths=None, action: str = "scan", limit: int = 20):
     """Line endings: `scan` reports, `fix` rewrites in place, `guard` writes the
     two config files that make git and the editors agree."""
     return _run("eol", paths, action=action, limit=limit)
 
 
-def encoding(paths=None, action="scan", limit=20):
+def encoding(paths=None, action: str = "scan", limit: int = 20):
     """Encoding: `scan` reports, `fix` drops a BOM and converts GBK/UTF-16 to UTF-8."""
     return _run("encoding", paths, action=action, limit=limit)
 
 
-def path_scan(paths=None, limit=20):
+def path_scan(paths=None, limit: int = 20):
     """Paths: too long, reserved device names, case collisions, trailing space or dot.
 
     Read-only by design: there is no safe automatic repair for a path.
