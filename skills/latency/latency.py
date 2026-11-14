@@ -265,14 +265,14 @@ $result | ConvertTo-Json -Depth 6 -Compress
 """
 
 
-def cmd_doctor(args):
+def doctor(app=None):
     """Answer one question: is a proxy or tunnel sitting in this flow's path?"""
     # The app name is injected into the script text: passing it through the
     # environment would need run() to forward env, which it does not.
     script = DOCTOR_SCRIPT
-    if args.app:
+    if app:
         script = script.replace("if ($env:LATENCY_APP) {",
-                                "if ($true) {").replace("$env:LATENCY_APP", '"%s"' % args.app.replace('"', '`"'))
+                                "if ($true) {").replace("$env:LATENCY_APP", '"%s"' % app.replace('"', '`"'))
     else:
         script = script.replace("if ($env:LATENCY_APP) {", "if ($false) {")
     path = to_powershell(script)
@@ -430,17 +430,17 @@ def distribution(values, threshold):
     }
 
 
-def cmd_hops(args):
+def hops(dest, count=20, timeout=1200, max_ttl=12, peer=None):
     script = (HOPS_SCRIPT
               .replace("__PING_HELPER__", PING_HELPER)
-              .replace("__TARGET__", args.dest)
-              .replace("__MAXTTL__", str(args.max_ttl))
-              .replace("__COUNT__", str(args.count))
-              .replace("__TIMEOUT__", str(args.timeout)))
-    if args.peer:
-        out = peer_powershell(args.peer, script)
+              .replace("__TARGET__", dest)
+              .replace("__MAXTTL__", str(max_ttl))
+              .replace("__COUNT__", str(count))
+              .replace("__TIMEOUT__", str(timeout)))
+    if peer:
+        out = peer_powershell(peer, script)
     else:
-        code, out, err = local_powershell(script, timeout=60 + args.count * args.max_ttl * 2)
+        code, out, err = local_powershell(script, timeout=60 + count * max_ttl * 2)
     rows = None
     for line in reversed(out.strip().splitlines()):
         if line.strip().startswith("["):
@@ -452,7 +452,7 @@ def cmd_hops(args):
     if rows is None:
         raise Failure("hops produced no data: %s" % out.strip()[:300])
 
-    print("path to %s  (%d probes per hop)" % (args.dest, args.count))
+    print("path to %s  (%d probes per hop)" % (dest, count))
     print("")
     rows = as_list(rows)
     print("  hop  address            ok/n   min   avg   p95   max   >100ms")
@@ -548,11 +548,11 @@ $rows = $rows | Sort-Object @{Expression = 'rate_kb'; Descending = $true}
 """
 
 
-def cmd_top(args):
+def top(peer=None, seconds=20, limit=12):
     script = (TOP_SCRIPT
               .replace("__MIHOMO_HELPER__", MIHOMO_CONNECTIONS)
-              .replace("__SECONDS__", str(args.seconds)))
-    out = peer_powershell(args.peer, script, timeout=args.seconds + 120) if args.peer else local_powershell(script)[1]
+              .replace("__SECONDS__", str(seconds)))
+    out = peer_powershell(peer, script, timeout=seconds + 120) if peer else local_powershell(script)[1]
     rows = None
     for line in reversed(out.strip().splitlines()):
         if line.strip().startswith("["):
@@ -565,15 +565,15 @@ def cmd_top(args):
         raise Failure("top produced no data (is mihomo running there?): %s" % out.strip()[:300])
     rows = as_list(rows)
     if not rows:
-        print("no upstream traffic through the core in the last %ds." % args.seconds)
+        print("no upstream traffic through the core in the last %ds." % seconds)
         return 0
 
     print("upstream through mihomo over %ds  (peak, not average, is what saturates a link)"
-          % args.seconds)
+          % seconds)
     print("")
     print("  %-32s %10s %10s  %s" % ("host", "KB/s", "total MB", "process"))
     print("  %-32s %10s %10s  %s" % ("-" * 32, "-" * 10, "-" * 10, "-" * 10))
-    for row in rows[:args.limit]:
+    for row in rows[:limit]:
         print("  %-32s %10.1f %10.2f  %s"
               % (row.get("host", "-")[:32], row.get("rate_kb", 0), row.get("total_mb", 0),
                  (row.get("process") or "-")[:24]))
@@ -616,15 +616,15 @@ while ($clock.Elapsed.TotalSeconds -lt $seconds) {
 """
 
 
-def cmd_probe(args):
+def probe(peer=None, target="223.5.5.5", seconds=60, interval=150, timeout=1200):
     script = (PROBE_SCRIPT
               .replace("__PING_HELPER__", PING_HELPER)
               .replace("__UPLINK_HELPER__", UPLINK_HELPER)
-              .replace("__TARGET__", args.target)
-              .replace("__SECONDS__", str(args.seconds))
-              .replace("__INTERVAL__", str(args.interval))
-              .replace("__TIMEOUT__", str(args.timeout)))
-    out = peer_powershell(args.peer, script, timeout=args.seconds + 120) if args.peer else local_powershell(script)[1]
+              .replace("__TARGET__", target)
+              .replace("__SECONDS__", str(seconds))
+              .replace("__INTERVAL__", str(interval))
+              .replace("__TIMEOUT__", str(timeout)))
+    out = peer_powershell(peer, script, timeout=seconds + 120) if peer else local_powershell(script)[1]
     data = None
     for line in reversed(out.strip().splitlines()):
         if line.strip().startswith("{"):
@@ -661,10 +661,10 @@ def cmd_probe(args):
 
     gaps = [r[2] for r in rates]
     print("probe on %s: %s -> %s, %d samples over %ds"
-          % (("peer " + args.peer) if args.peer else "this machine",
-             data.get("nic"), data.get("target"), len(rates), args.seconds))
+          % (("peer " + peer) if peer else "this machine",
+             data.get("nic"), data.get("target"), len(rates), seconds))
     print("  real sample gap: %.2f .. %.2f s (nominal %d ms)"
-          % (min(gaps), max(gaps), args.interval))
+          % (min(gaps), max(gaps), interval))
 
     # A per-sample window is too short to trust: one TCP burst can fill the
     # adapter's staging buffer and read faster than the WAN link ever runs.
@@ -688,7 +688,7 @@ def cmd_probe(args):
           % (sorted(up)[len(up) // 2], peak, peak * 8 / 1024.0))
     if raw_peak > peak * 1.5:
         print("  (single %dms samples peaked at %.0f KB/s; that is buffer burst, not link rate)"
-              % (args.interval, raw_peak))
+              % (interval, raw_peak))
 
     # The useful comparison is the distribution of RTT while the link is idle
     # versus busy. An average would hide exactly the spikes being hunted.
@@ -955,10 +955,17 @@ def where_to_run(peer):
     return (lambda script, timeout=240: local_powershell(script, timeout=timeout)[1]), "this machine"
 
 
-def parse_rate(text):
-    match = re.match(r"^\s*([0-9]+(?:\.[0-9]+)?)\s*([mM])?(?:bps)?\s*$", text or "")
+def parse_rate(value):
+    """Mbps from `8`, `8M`, `8Mbps` -- or from a number, which is already Mbps.
+
+    A caller that names the rate in JSON names a number; one at a shell types the
+    unit. Both reach this one function, and both are refused the same way.
+    """
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    match = re.match(r"^\s*([0-9]+(?:\.[0-9]+)?)\s*([mM])?(?:bps)?\s*$", value or "")
     if not match:
-        raise Failure("rate must look like 8 or 8Mbps, got %r" % text)
+        raise Failure("rate must be a number of Mbps, or text like 8 or 8Mbps, got %r" % value)
     return float(match.group(1))
 
 
@@ -975,16 +982,19 @@ def is_admin(runner):
 
 
 def elevation_hint(kind, app=None):
-    hint = os.path.join(SKILLS, "latency", "latency")
+    """The same call, from a shell that Windows will run as administrator."""
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "latency.py")
     if kind == "prio":
-        return "powershell -Command \"Start-Process powershell -Verb RunAs -ArgumentList '-NoExit','-Command','& \\\"%s\\\" prio --app %s on'\"" % (hint, app)
-    return "powershell -Command \"Start-Process powershell -Verb RunAs -ArgumentList '-NoExit','-Command','& \\\"%s\\\" cap on %s'\"" % (hint, "8")
+        call = "python \"%s\" prio on --app %s" % (script, app)
+    else:
+        call = "python \"%s\" cap on 8" % script
+    return "powershell -Command \"Start-Process powershell -Verb RunAs -ArgumentList '-NoExit','-Command','%s'\"" % call
 
 
-def cmd_cap(args):
-    runner, where = where_to_run(args.peer)
+def cap(action, rate=None, peer=None, verify=20):
+    runner, where = where_to_run(peer)
 
-    if args.action == "status":
+    if action == "status":
         out = runner(CAP_STATUS_SCRIPT.replace("__ADMIN__", "$true"))
         data = json_from(out)
         admin = is_admin(runner)
@@ -1007,10 +1017,10 @@ def cmd_cap(args):
         print("shaping needs administrator rights on %s." % where)
         print("")
         print("run this in an elevated PowerShell there:")
-        print("  & \"%s\" cap on 8" % os.path.join(SKILLS, "latency", "latency"))
+        print("  %s" % elevation_hint("cap"))
         return 2
 
-    if args.action == "off":
+    if action == "off":
         data = json_from(runner(CAP_OFF_SCRIPT))
         if data.get("removed"):
             print("shaping removed on %s (policy and startup task cleared)." % where)
@@ -1021,12 +1031,13 @@ def cmd_cap(args):
         return 0
 
     # on
-    rate = parse_rate(args.rate or "8")
+    # No rate named means 8 Mbps, the number this cap has always defaulted to.
+    mbps = parse_rate(8 if rate is None else rate)
     script = (CAP_ON_SCRIPT
-              .replace("__MBPS__", ("%g" % rate))
+              .replace("__MBPS__", ("%g" % mbps))
               .replace("__UPLINK_HELPER__", UPLINK_HELPER)
-              .replace("__VERIFY__", str(args.verify)))
-    out = runner(script, timeout=args.verify + 180)
+              .replace("__VERIFY__", str(verify)))
+    out = runner(script, timeout=verify + 180)
     data = json_from(out)
     print("shaping enabled on %s" % where)
     print("  policy : %.2f Mbps, whole machine, ActiveStore" % data.get("rate_mbps", 0))
@@ -1042,14 +1053,14 @@ def cmd_cap(args):
     print("")
     print("  a cap only helps if it sits below the real uplink. If the uplink is")
     print("  faster than this number, agents simply get slower. Measure first:")
-    print("    latency probe --peer %s --target 1.1.1.1 --seconds 30" % (args.peer or "<peer>"))
+    print("    probe(peer=%s, target=\"1.1.1.1\", seconds=30)" % ("\"%s\"" % peer if peer else "None"))
     return 0
 
 
-def cmd_prio(args):
-    runner, where = where_to_run(args.peer)
+def prio(action, app=None, peer=None):
+    runner, where = where_to_run(peer)
 
-    if args.action == "status":
+    if action == "status":
         data = json_from(runner(PRIO_STATUS_SCRIPT.replace("__ADMIN__", "$true")))
         print("game priority on %s" % where)
         if not is_admin(runner):
@@ -1069,15 +1080,15 @@ def cmd_prio(args):
         print("marking priority needs administrator rights on %s." % where)
         print("")
         print("run this in an elevated PowerShell there:")
-        print("  & \"%s\" prio --app %s on" % (os.path.join(SKILLS, "latency", "latency"), args.app))
+        print("  %s" % elevation_hint("prio", app))
         return 2
 
-    if args.action == "off":
+    if action == "off":
         data = json_from(runner(PRIO_OFF_SCRIPT))
         print("priority cleared on %s." % where if data.get("removed") else "nothing to clear on %s." % where)
         return 0
 
-    apps = [a.strip() for a in (args.app or "").split(",") if a.strip()]
+    apps = [a.strip() for a in (app or "").split(",") if a.strip()]
     if not apps:
         raise Failure("--app is required, e.g. --app Overwatch.exe or --app a.exe,b.exe")
     quoted = ",".join("'%s'" % a.replace("'", "''") for a in apps)
@@ -1100,7 +1111,6 @@ def main(argv):
 
     doctor = sub.add_parser("doctor", help="is a proxy or tunnel in this flow's path?")
     doctor.add_argument("--app", help="process name to inspect, e.g. Overwatch.exe")
-    doctor.set_defaults(func=cmd_doctor)
 
     hops = sub.add_parser("hops", help="which hop starts spiking?")
     hops.add_argument("--dest", required=True, help="host or IP to trace and measure")
@@ -1108,13 +1118,11 @@ def main(argv):
     hops.add_argument("--timeout", type=int, default=1200, help="per-probe timeout ms")
     hops.add_argument("--max-ttl", type=int, default=12, help="stop after this many hops")
     hops.add_argument("--peer", help="measure from another remembered machine")
-    hops.set_defaults(func=cmd_hops)
 
     top = sub.add_parser("top", help="which host is eating the uplink?")
     top.add_argument("--peer", help="machine whose mihomo to read")
     top.add_argument("--seconds", type=int, default=20)
     top.add_argument("--limit", type=int, default=12)
-    top.set_defaults(func=cmd_top)
 
     probe = sub.add_parser("probe", help="egress and RTT on one clock, one machine")
     probe.add_argument("--peer", help="sample this machine instead of the local one")
@@ -1122,30 +1130,48 @@ def main(argv):
     probe.add_argument("--seconds", type=int, default=60)
     probe.add_argument("--interval", type=int, default=150, help="ms between samples")
     probe.add_argument("--timeout", type=int, default=1200, help="ping timeout ms")
-    probe.set_defaults(func=cmd_probe)
 
     cap = sub.add_parser("cap", help="Windows QoS uplink cap (whole machine)")
     cap.add_argument("action", choices=["on", "off", "status"])
     cap.add_argument("rate", nargs="?", help="Mbps when turning on, e.g. 8")
     cap.add_argument("--peer", help="machine to shape")
     cap.add_argument("--verify", type=int, default=20, help="verification seconds")
-    cap.set_defaults(func=cmd_cap)
 
     prio = sub.add_parser("prio", help="DSCP 46 for a game's packets")
     prio.add_argument("action", choices=["on", "off", "status"])
     prio.add_argument("--app", help="comma separated exe names")
     prio.add_argument("--peer", help="machine to mark on")
-    prio.set_defaults(func=cmd_prio)
 
     args = parser.parse_args(argv)
     if not getattr(args, "command", None):
         parser.print_help()
         return 1
     try:
-        return args.func(args)
+        return named(args)
     except Failure as error:
         print("latency: %s" % error, file=sys.stderr)
         return 1
+
+
+def named(args):
+    """The call one parsed command line names, over the fields it declared.
+
+    The functions above are the API: a caller inside Python names the same fields
+    as keyword arguments, so no call ever passes through a command line.
+    """
+    if args.command == "doctor":
+        return doctor(app=args.app)
+    if args.command == "hops":
+        return hops(dest=args.dest, count=args.count, timeout=args.timeout,
+                    max_ttl=args.max_ttl, peer=args.peer)
+    if args.command == "top":
+        return top(peer=args.peer, seconds=args.seconds, limit=args.limit)
+    if args.command == "probe":
+        return probe(peer=args.peer, target=args.target, seconds=args.seconds,
+                     interval=args.interval, timeout=args.timeout)
+    if args.command == "cap":
+        return cap(action=args.action, rate=args.rate, peer=args.peer, verify=args.verify)
+    return prio(action=args.action, app=args.app, peer=args.peer)
 
 
 if __name__ == "__main__":
