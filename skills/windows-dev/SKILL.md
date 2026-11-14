@@ -1,20 +1,26 @@
 ---
 name: windows-dev
 description: Windows 上 agentic 开发的四类环境坑的诊断与治理——行尾符（CRLF/LF）、字符编码（GBK/UTF-8/BOM）、文件路径（260 长路径/保留设备名/大小写冲突）、系统环境（执行策略/长路径开关/Git autocrlf/fscache）。当 agent 在 Windows 上批量写文件或跑脚本后出错、shell 脚本报 `\r: command not found`、git diff 出现满屏假变更、git status 报了一堆 M 但 git diff 是空的、中文变成乱码、或读写某个路径失败时使用。默认 doctor 只做只读体检；eol 与 encoding 可按要求改写文件；文件清单由 git 给出，不漏文件也不扫生成物。也讲 python 为什么默认写 CRLF，以及怎么用 sitecustomize 把这个默认改掉。
-metadata:
-  entry: windows-dev.ps1
 ---
 
 # Windows agentic 开发环境体检与治理
 
-给 agent 用的 Windows 环境诊断工具，跑 `windows-dev.ps1`（与本文件同目录）。
+给 agent 用的 Windows 环境诊断，一个 Python 包，五个函数：
 
-```bash
-# 本 skill 的目录：`@skill:` 展开里 `SKILL.md: <path>` 的父目录（`index_skill` 的 path 列同源）。
-# 下面每条 `powershell … -File` 里的 $SKILL_DIR 是**这台 shell** 展开的，不是 PowerShell 变量；
-# gongga 里更短：`gongga-cli skill windows-dev <参数>`，路径拼法由它负责。
-SKILL_DIR=<本 SKILL.md 所在目录>
+```python
+run_skill(id="windows-dev", cmd={"name": "doctor", "args": {"paths": ["C:/repo"]}})
 ```
+
+| 函数 | 参数 | 返回 |
+|---|---|---|
+| `doctor(paths=None, limit=20)` | 一个或一组扫描根，缺省是当前目录 | 脚本退出码；四类检查的只读汇总 |
+| `eol(paths=None, action="scan", limit=20)` | `action`：`scan` 只读 / `fix` 直接覆盖 / `guard` 写 `.gitattributes` 与 `.editorconfig` | 同上 |
+| `encoding(paths=None, action="scan", limit=20)` | `action`：`scan` / `fix`（去 BOM、GBK/UTF-16 转 UTF-8，直接覆盖） | 同上 |
+| `path_scan(paths=None, limit=20)` | 同上；**永远只读** | 同上 |
+| `env()` | — | 同上；**永远只读**，只打印修复命令 |
+
+`limit` 是报告里最多列多少个问题文件。`action` 传错会当场报错，不会悄悄按 `scan` 跑。
+返回值是**脚本的退出码**（`0` 正常），输出就是脚本的 stdout/stderr。
 
 Windows 上 agent 写脚本时遇到的"莫名其妙的错误"，绝大多数来自四类问题，它们的
 共同特点是**不报错，或者报一个跟原因毫无关系的错**：
@@ -39,8 +45,8 @@ Windows 上 agent 写脚本时遇到的"莫名其妙的错误"，绝大多数来
 
 1. **先 doctor**（只读，不改任何文件）：
 
-   ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File "$SKILL_DIR/windows-dev.ps1" doctor <目录>
+   ```python
+   run_skill(id="windows-dev", cmd={"name": "doctor", "args": {"paths": ["<目录>"]}})
    ```
 
    四个维度全扫一遍，出一份汇总报告，末尾给出对应的修复命令。
@@ -49,17 +55,17 @@ Windows 上 agent 写脚本时遇到的"莫名其妙的错误"，绝大多数来
    - 有 git 的目录：**fix 前确保工作区干净**，出错靠 git 兜底；
    - 没有 git 的目录：先自己复制一份，或者先 `scan` 看清涉及哪些文件再决定。
 
-   ```powershell
+   ```python
    # 行尾符
-   ...\windows-dev.ps1 eol <目录> -Action fix
+   run_skill(id="windows-dev", cmd={"name": "eol", "args": {"paths": ["<目录>"], "action": "fix"}})
    # 编码
-   ...\windows-dev.ps1 encoding <目录> -Action fix
+   run_skill(id="windows-dev", cmd={"name": "encoding", "args": {"paths": ["<目录>"], "action": "fix"}})
    ```
 
 3. **新项目先 guard 再动手**，这样之后所有文件一出生就合规：
 
-   ```powershell
-   ...\windows-dev.ps1 eol <目录> -Action guard
+   ```python
+   run_skill(id="windows-dev", cmd={"name": "eol", "args": {"paths": ["<目录>"], "action": "guard"}})
    ```
 
    **幂等的「确保」动作，不是「生成」动作**：文件不存在就创建（`.vscode/`、
@@ -78,9 +84,8 @@ Windows 上 agent 写脚本时遇到的"莫名其妙的错误"，绝大多数来
    | `.vscode/settings.json` | 编辑器自己的保存行为 | VS Code / Cursor / Trae / Windsurf / CodeBuddy |
    | `.zed/settings.json` | 同上 | Zed |
 
-4. 参数形式：`windows-dev.ps1 <命令> [一个或多个目录] [-Action scan|fix|guard] [-Limit N]`。
-   命令是 `doctor`（默认）/`eol`/`encoding`/`path`/`env`。目录是位置参数，可以传多个。
-   **`path` 与 `env` 永远只读**，传 `-Action fix` 会被忽略并提示。
+4. 参数就是函数签名：`paths` 可以传多个目录，`action` 是 `scan`/`fix`/`guard`，`limit` 是列多少条。
+   **`path_scan` 与 `env` 永远只读**：脚本接受 `-Action fix` 也不会照做，只提示一句。
 
 ## 覆盖范围
 
