@@ -1,19 +1,16 @@
 ---
 name: proxy
 description: 让某台机器的某个 host 走指定的上游（HTTP/SOCKS5/直连），并证明它真的走了；同时把一个订阅装成能跑的 mihomo/clash core，并驱动它——列策略组、换节点、测延迟和吞吐、切模式、热重载。任何"这个 API 连不上/到底有没有走代理/怎么只让某个域名走代理/换哪个节点/哪个节点快"的问题用它。
-metadata:
-  entry: proxy
 ---
 
 # 按 host 路由，并证明它真的走了
 
-`$SKILL_DIR/proxy` 是一个**自己实现的路由代理**：纯 Python 标准库，按规则把
+这个 skill 的 `proxy.py` 是一个**自己实现的路由代理**：纯 Python 标准库，按规则把
 每个连接送到指定上游，并把每条决定记下来。没有第三方包，不需要装任何东西。
 
-```bash
-# 本 skill 的目录：`@skill:` 展开里 `SKILL.md: <path>` 的父目录（`index_skill` 的 path 列同源）。
-SKILL_DIR=<本 SKILL.md 所在目录>
-"$SKILL_DIR/proxy" doctor      # 先看这条链每一环
+```python
+# 下文的 fn(...) 都是 run_skill(id="proxy", cmd={"name": fn, "args": {...}}) 的简写。
+doctor()      # 先看这条链每一环
 ```
 
 ## 为什么不是「配个代理」
@@ -30,39 +27,39 @@ SKILL_DIR=<本 SKILL.md 所在目录>
 
 ## 接一个上游（用户提供任何 API）
 
-```bash
+```python
 # HTTP 代理（最常见）
-"$SKILL_DIR/proxy" upstream add corp 127.0.0.1:8080 --kind http
-"$SKILL_DIR/proxy" upstream add corp 127.0.0.1:8080 --kind http --auth user:pass
+upstream("add", "corp", "127.0.0.1:8080", "http")
+upstream("add", "corp", "127.0.0.1:8080", "http", auth="user:pass")
 
 # SOCKS5
-"$SKILL_DIR/proxy" upstream add tun 127.0.0.1:1080 --kind socks5
+upstream("add", "tun", "127.0.0.1:1080", "socks5")
 
 # 另一个按流量计费的服务，一个上游一个名字即可，规则里按名字选
-"$SKILL_DIR/proxy" upstream add premium api.example.com:3128 --kind http
+upstream("add", "premium", "api.example.com:3128", "http")
 ```
 
 然后决定谁走它：
 
-```bash
-"$SKILL_DIR/proxy" add github.com       --via corp          # 后缀匹配（含子域）
-"$SKILL_DIR/proxy" add api.openai.com   --via premium --type exact
-"$SKILL_DIR/proxy" add 10.0.0.0/8       --via direct  --type cidr
+```python
+add("github.com", "corp")                    # 后缀匹配（含子域）
+add("api.openai.com", "premium", "exact")
+add("10.0.0.0/8", "direct", "cidr")
 ```
 
 ## 三条命令的主线
 
-```bash
+```python
 # 1. 改配置后重启，规则在启动时读入
-"$SKILL_DIR/proxy" serve                 # 前台；要常驻用 detached bash
+serve()                                 # 前台；要常驻用 detached bash
 
 # 2. 让客户端指向它
-"$SKILL_DIR/proxy" env                   # 打印 export，含 git 那行
-export HTTPS_PROXY=http://127.0.0.1:7899
-export NO_PROXY=localhost,127.0.0.1,::1
+env()                                   # 打印 export，含 git 那行
+# export HTTPS_PROXY=http://127.0.0.1:7899
+# export NO_PROXY=localhost,127.0.0.1,::1
 
 # 3. 证明这个 host 真的走了你指定的上游
-"$SKILL_DIR/proxy" check github.com
+check("github.com")
 ```
 
 `check` 的输出形如：
@@ -92,8 +89,8 @@ verdict           ROUTED VIA relay
 
 | 层 | 谁决定 | 改它用什么 |
 |---|---|---|
-| 分流：这个 host 走不走代理 | `proxy.py` 的规则，或 core 自己的 rules | `proxy add …` / `proxy core mode` |
-| 出口：走哪个节点 | core 的策略组 | `proxy core use …` |
+| 分流：这个 host 走不走代理 | `proxy.py` 的规则，或 core 自己的 rules | `add(...)` / `mode()` |
+| 出口：走哪个节点 | core 的策略组 | `use_node(group, node)` |
 
 **换节点、bench 节点，全在 core 的 API 上。** 任何第三方客户端都只是这个 API 的一层壳，
 所以本 skill 不点名任何客户端：它要的是一个订阅 URL（或一份 config.yaml）和一颗核。
@@ -108,8 +105,8 @@ secret: "…"
 mixed-port: 7897          # 客户端要指向的端口——不是 API 端口
 ```
 
-```bash
-"$SKILL_DIR/proxy" core doctor
+```python
+core_status()
 ```
 
 `doctor` 按这个顺序找，并且**打印它用的是哪一条**：
@@ -127,18 +124,18 @@ mixed-port: 7897          # 客户端要指向的端口——不是 API 端口
 
 换一个端点：
 
-```bash
-proxy core connect 10.0.0.2:6170 --secret xxx --save    # 记住它
-MIHOMO_CONTROLLER=10.0.0.2:6170 MIHOMO_SECRET=xxx proxy core groups   # 或者只用一次
+```python
+connect("10.0.0.2:6170", secret="xxx", save=True)   # 记住它
+# 或者只用一次：先把 MIHOMO_CONTROLLER / MIHOMO_SECRET 设进环境，再 groups()
 ```
 
 ## 换节点
 
-```bash
-proxy core groups                   # 有哪些策略组，各自现在走谁
-proxy core nodes 漏网之鱼           # 这个组的候选，标出当前
-proxy core use 漏网之鱼 "日本 I1"    # 切换，然后读回来确认
-proxy core use 漏网之鱼 印尼         # 唯一匹配才允许省全名
+```python
+groups()                                # 有哪些策略组，各自现在走谁
+nodes("漏网之鱼")                        # 这个组的候选，标出当前
+use_node("漏网之鱼", "日本 I1")            # 切换，然后读回来确认
+use_node("漏网之鱼", "印尼")               # 唯一匹配才允许省全名
 ```
 
 三条纪律：
@@ -154,9 +151,17 @@ proxy core use 漏网之鱼 印尼         # 唯一匹配才允许省全名
 
 ```bash
 curl -s -x http://127.0.0.1:7897 https://api.ipify.org      # 103.196.116.251
-proxy core use 漏网之鱼 "日本 I1"
+```
+```python
+use_node("漏网之鱼", "日本 I1")
+```
+```bash
 curl -s -x http://127.0.0.1:7897 https://api.ipify.org      # 45.146.163.49
-proxy core use 漏网之鱼 "印尼 B46"
+```
+```python
+use_node("漏网之鱼", "印尼 B46")
+```
+```bash
 curl -s -x http://127.0.0.1:7897 https://api.ipify.org      # 103.196.116.251
 ```
 
@@ -165,9 +170,9 @@ curl -s -x http://127.0.0.1:7897 https://api.ipify.org      # 103.196.116.251
 
 ## bench：延迟和带宽是两个轴
 
-```bash
-proxy core bench 漏网之鱼                                   # 延迟，快的在前，超时在最后
-proxy core bench 漏网之鱼 --throughput --seconds 8 --limit 5
+```python
+bench("漏网之鱼")                                   # 延迟，快的在前，超时在最后
+bench("漏网之鱼", throughput=True, seconds=8, limit=5)
 ```
 
 不写组名时它会挑"真实节点最多的那个组"并在输出里说明——那常常不是你关心的组，所以**写清楚
@@ -187,10 +192,10 @@ proxy core bench 漏网之鱼 --throughput --seconds 8 --limit 5
 
 ## 模式与热重载
 
-```bash
-proxy core mode              # 现在是 rule / global / direct
-proxy core mode direct       # 全部直连——排查"是不是代理的问题"最干脆的一刀
-proxy core reload [path]     # 改完 config.yaml 立刻生效，不重启 core，不断连接
+```python
+mode()                # 现在是 rule / global / direct
+mode("direct")        # 全部直连——排查“是不是代理的问题”最干脆的一刀
+reload()              # 改完 config.yaml 立刻生效，不重启 core；reload(path) 指定文件
 ```
 
 `reload` 走 `PUT /configs?force=true`，是唯一"改规则不用重启"的路径。白名单就是这样生效的。
@@ -199,8 +204,8 @@ proxy core reload [path]     # 改完 config.yaml 立刻生效，不重启 core�
 
 本 skill 要的输入只有一个：**订阅链接**。其余全是它自己算出来的——核、端口、secret、geo 库。
 
-```bash
-"$SKILL_DIR/proxy" up "<订阅链接>"
+```python
+up("<订阅链接>")
 ```
 
 一条命令做完这些，每一步都不问你：
@@ -215,21 +220,21 @@ proxy core reload [path]     # 改完 config.yaml 立刻生效，不重启 core�
    节点、策略组、**规则列表原样透传**：路由是订阅自己的，本 skill 不另加一种说法；
 5. **起核**：先 `mihomo -t` 验（配置错在启动前报出来），再 detached 起，pid 落 `core.pid`；
    就绪的判据是**控制器答话**，不是端口开着；
-6. **记住**：controller + secret 写进 `$PROXY_HOME/mihomo.json`，之后 `proxy core doctor` 不用问人。
+6. **记住**：controller + secret 写进 `$PROXY_HOME/mihomo.json`，之后 `core_status()` 不用问人。
 
-```bash
-"$SKILL_DIR/proxy" up            # 不给链接：复用已经存下的订阅（换链接就是再给一个）
-"$SKILL_DIR/proxy" down          # 只停自己起的那个 pid（先证明那是核，不是回收来的别人的 pid）
+```python
+up()      # 不给链接：复用已经存下的订阅（换链接就是再给一个）
+down()    # 只停自己起的那个 pid（先证明那是核，不是回收来的别人的 pid）
 ```
 
 之后全是标准那套，本 skill 只是它的壳：
 
-```bash
-"$SKILL_DIR/proxy" core doctor                     # 控制器在哪、能不能答、模式与端口
-"$SKILL_DIR/proxy" core groups | core nodes 组      # 策略组与候选
-"$SKILL_DIR/proxy" core use 组 节点 | core mode …   # 换节点、切模式（读回确认）
-"$SKILL_DIR/proxy" core bench 组 [--throughput]     # 延迟或吞吐
-"$SKILL_DIR/proxy" core reload [PATH]              # 热重载，不重启不断连接
+```python
+core_status()                     # 控制器在哪、能不能答、模式与端口
+groups(); nodes("组")              # 策略组与候选
+use_node("组", "节点"); mode()   # 换节点、切模式（读回确认）
+bench("组")                       # 延迟或吞吐（throughput=True）
+reload()                          # 热重载，不重启不断连接
 ```
 
 **证明一条连接的去向**，是核自己说的，不是猜的：
@@ -250,7 +255,7 @@ level=warning msg="[TCP] dial 🐟 漏网之鱼 (match Match/) 127.0.0.1:62732(c
 
 | 能力 | 在哪 |
 |---|---|
-| 系统代理开关（Windows 注册表 / 环境变量） | 你的 shell 或系统设置；`proxy env` 打印的是本 skill 自己的分流代理 |
+| 系统代理开关（Windows 注册表 / 环境变量） | 你的 shell 或系统设置；`env()` 打印的是本 skill 自己的分流代理 |
 | 开机自启 | 系统的任务计划 / 服务 |
 | 账号 → 订阅链接（供应商登录） | 供应商的客户端或网页；本 skill 从链接开始 |
 
@@ -295,28 +300,28 @@ exit note         icanhazip.com follows a different rule, so that address says n
 
 | 命令 | 作用 |
 |---|---|
-| `proxy doctor` | 逐环检查：curl、配置合法性、catch-all、监听、**每个上游能否真的建立隧道** |
-| `proxy serve` | 前台跑代理 |
-| `proxy status` | 配置、监听状态、最近的决策 |
-| `proxy rules` | 规则表 |
-| `proxy check HOST` | 这个 host 到底走没走、走的哪条 |
-| `proxy add VALUE --via NAME [--type]` | 加规则（插在 catch-all 之前） |
-| `proxy rm VALUE` | 删规则 |
-| `proxy upstream list` / `add` | 管理上游 |
-| `proxy env` | 打印客户端需要的 export |
-| `proxy up [LINK]` | cli + key：没有核就装、有链接就抓订阅、挑空闲端口、渲染、验、起、记住 |
-| `proxy down` | 停掉 `up` 起的那个 pid |
-| `proxy core install [--from FILE]` | 把 mihomo（和 geo 数据库）放进 `$PROXY_HOME/core/` |
-| `proxy core subscribe URL\|--from FILE` | 抓订阅，落到 `$PROXY_HOME/core/subscription.yaml` |
-| `proxy core render` | 渲染 `config.yaml`，显示 controller / secret / mixed port |
-| `proxy core start` / `stop` / `status` | 起核（detached，pid 落在 `core.pid`）/ 只停它 / 报告现状 |
-| `proxy core doctor` | 控制器在哪、能不能答、模式与端口 |
-| `proxy core groups` / `nodes` | 策略组与候选节点 |
-| `proxy core use GROUP NODE` | 换节点，并读回确认 |
-| `proxy core bench [GROUP] [--throughput]` | 延迟或吞吐，快的在前 |
-| `proxy core mode [rule\|global\|direct]` | 报告或切换模式 |
-| `proxy core reload [PATH]` | 热重载配置，不重启 |
-| `proxy core connect HOST:PORT [--save]` | 记住一个控制器地址 |
+| `doctor()` | 逐环检查：curl、配置合法性、catch-all、监听、**每个上游能否真的建立隧道** |
+| `serve()` | 前台跑代理 |
+| `status()` | 配置、监听状态、最近的决策 |
+| `rules()` | 规则表 |
+| `check(host)` | 这个 host 到底走没走、走的哪条 |
+| `add(value, via, rule_type)` | 加规则（插在 catch-all 之前） |
+| `rm(value)` | 删规则 |
+| `upstream(action, name, address, kind, auth)` | 管理上游 |
+| `env()` | 打印客户端需要的 export |
+| `up(key, replace, mixed_port, controller_port)` | cli + key：没有核就装、有链接就抓订阅、挑空闲端口、渲染、验、起、记住 |
+| `down()` | 停掉 `up` 起的那个 pid |
+| `core_install(version, source)` | 把 mihomo（和 geo 数据库）放进 `$PROXY_HOME/core/` |
+| `core_subscribe(url, source)` | 抓订阅，落到 `$PROXY_HOME/core/subscription.yaml` |
+| `core_render(mixed_port, controller_port)` | 渲染 `config.yaml`，显示 controller / secret / mixed port |
+| `core_start()` / `core_stop()` / `core_state()` | 起核（detached，pid 落在 `core.pid`）/ 只停它 / 报告现状 |
+| `core_status()` | 控制器在哪、能不能答、模式与端口 |
+| `groups()` / `nodes(group)` | 策略组与候选节点 |
+| `use_node(group, node)` | 换节点，并读回确认 |
+| `bench(group, throughput)` | 延迟或吞吐，快的在前 |
+| `mode(which)` | 报告或切换模式 |
+| `reload(path)` | 热重载配置，不重启 |
+| `connect(controller, secret, save)` | 记住一个控制器地址 |
 
 ## 实现上几个不显然的决定
 
@@ -336,7 +341,7 @@ exit note         icanhazip.com follows a different rule, so that address says n
   行为的话，这一套不够。
 - 规则在启动时读入，改完要重启 `serve`。
 - `check` 的判定依赖代理写日志；日志路径不可写时它会退化成"没有记录"，而不是假装成功。
-- `proxy core start` 起的是**前台进程的 detached 版**：它不装服务、不改开机项、不动系统代理
+- `core_start()` 起的是**前台进程的 detached 版**：它不装服务、不改开机项、不动系统代理
   （见上表）。想让核跟着机器起来，那是系统计划任务的事。
 - `core subscribe` 只吃 Clash 格式的订阅（顶层有 `proxies:` 与 `rules:`）；其他格式的订阅是
   另一件事。
@@ -354,10 +359,12 @@ python3 test_mihomo.py     # 48 项：配置抓取/名称解析/排序/bench 还
 
 ```bash
 export PROXY_HOME=<一个空目录>            # ~/.proxy 的替身，删掉就干净
-"$SKILL_DIR/proxy" up <一份 subscription.yaml>   # 路径也认，与链接等价
-"$SKILL_DIR/proxy" core doctor                  # 控制器答话 + mixed port 能出去
-"$SKILL_DIR/proxy" core groups | head -3
-"$SKILL_DIR/proxy" down                         # pid 从 core.pid 读，不是 $!
+```python
+core_subscribe(source="subscription.yaml")   # 路径也认，与链接等价
+up()                                        # 装 + 渲染 + 验 + 起，然后记住控制器
+core_status()                               # 控制器答话 + mixed port 能出去
+groups()                                    # 策略组，第一屏就够了
+down()                                      # pid 从 core.pid 读，不是 $!
 ```
 
 一轮应当看到：`up` 从空目录到控制器答话（含下载）二十几秒，之后秒级；`doctor` 的 `found via` 是

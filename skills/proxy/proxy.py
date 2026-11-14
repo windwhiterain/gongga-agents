@@ -800,7 +800,121 @@ def run_core(argv):
     return module.run(argv)
 
 
+def up(key=None):
+    """Install the core if needed, take a subscription link, and start it."""
+    return run_core(["up"] + ([key] if key else []))
+
+
+def down():
+    """Stop the core this tool started."""
+    return run_core(["down"])
+
+
+def serve():
+    """Run the proxy in the foreground until interrupted."""
+    config = load_config()
+    server = ProxyServer(config)
+    out("listening on %s" % proxy_url_for(config))
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        server.stop()
+    return 0
+
+
+def rules():
+    """The rule table, in the order it is consulted."""
+    list_rules(load_config())
+    return 0
+
+
+def status():
+    """Config, listener, rule count, upstreams, system proxy, and last decisions."""
+    config = load_config()
+    out("config            %s" % CONFIG_PATH)
+    out("listen            %s" % proxy_url_for(config))
+    out("listening         %s" % ("yes" if server_is_listening(config) else "no"))
+    out("rules             %d" % len(config["rules"]))
+    out("upstreams         %s" % ", ".join(config["upstreams"]))
+    system = system_proxy()
+    if system:
+        mine = proxy_url_for(config)
+        same = system == mine or system == mine.replace("http://", "")
+        out("system proxy      %s%s" % (system, "" if same else "  <- another program, not this one"))
+    recent = Decisions().recent(10)
+    if recent:
+        out()
+        out("recent decisions:")
+        for entry in recent:
+            out("  %s %-40s -> %s%s" % (entry["at"], "%s:%s" % (entry["host"], entry["port"]),
+                                        entry["via"], (" [%s]" % entry.get("error")) if entry.get("error") else ""))
+    return 0
+
+
+def doctor():
+    """Check every link in the chain and say which one is broken."""
+    return do_doctor(load_config())
+
+
+def env():
+    """The shell exports that point a client at this proxy, and why git is left alone."""
+    config = load_config()
+    url = proxy_url_for(config)
+    live = server_is_listening(config)
+    if not live:
+        out("# nothing answers on %s yet: these point at a port with no proxy behind it" % url)
+        out("# start it with `serve()`")
+    out('export HTTPS_PROXY="%s"' % url)
+    out('export HTTP_PROXY="%s"' % url)
+    out('export ALL_PROXY="%s"' % url)
+    out('export NO_PROXY="localhost,127.0.0.1,::1"')
+    out()
+    out("# uv and pip read the environment; git does not")
+    if live:
+        out("git config --global http.proxy %s" % url)
+    else:
+        out("# git is left alone until something answers on %s" % url)
+    return 0
+
+
+def add(value, via, rule_type="suffix"):
+    """Route a host through a named upstream; `rule_type` is exact, suffix, prefix or cidr."""
+    return add_rule(load_config(), rule_type, value, via)
+
+
+def rm(value):
+    """Remove a rule by its value."""
+    return remove_rule(load_config(), value)
+
+
+def check(host):
+    """Is this host actually routed? Measured, through this proxy."""
+    return do_check(load_config(), host)
+
+
+def upstream(action="list", name=None, address=None, kind="http", auth=None):
+    """List the upstreams, or add one: `name` and `address`, `kind` http/socks5/direct."""
+    config = load_config()
+    if action == "list":
+        for name_of, spec in config["upstreams"].items():
+            out("%-12s %-7s %s" % (name_of, spec["kind"], spec.get("address", "")))
+        return 0
+    if not name:
+        out("upstream add needs a name and an address, and --kind http|socks5")
+        return 2
+    spec = {"kind": kind}
+    if kind != "direct":
+        spec["address"] = address
+    if auth:
+        spec["auth"] = auth
+    config["upstreams"][name] = spec
+    save_config(config)
+    out("upstream %s = %s %s" % (name, kind, address or ""))
+    return 0
+
+
 def main(argv):
+    """The command line, kept for a human at a shell: the same calls, by name."""
     if argv and argv[0] == "core":
         return run_core(argv[1:])
     parser = argparse.ArgumentParser(
@@ -840,90 +954,28 @@ def main(argv):
         parser.print_help()
         return 0
 
-    if args.cmd in ("up", "down"):
-        forwarded = [args.cmd] + ([args.key] if getattr(args, "key", None) else [])
-        return run_core(forwarded)
-
-    config = load_config()
-
+    if args.cmd == "up":
+        return up(args.key)
+    if args.cmd == "down":
+        return down()
     if args.cmd == "serve":
-        server = ProxyServer(config)
-        out("listening on %s" % proxy_url_for(config))
-        try:
-            server.serve_forever()
-        except KeyboardInterrupt:
-            server.stop()
-        return 0
-
+        return serve()
     if args.cmd == "rules":
-        list_rules(config)
-        return 0
-
+        return rules()
     if args.cmd == "status":
-        out("config            %s" % CONFIG_PATH)
-        out("listen            %s" % proxy_url_for(config))
-        out("listening         %s" % ("yes" if server_is_listening(config) else "no"))
-        out("rules             %d" % len(config["rules"]))
-        out("upstreams         %s" % ", ".join(config["upstreams"]))
-        system = system_proxy()
-        if system:
-            mine = proxy_url_for(config)
-            same = system == mine or system == mine.replace("http://", "")
-            out("system proxy      %s%s" % (system, "" if same else "  <- another program, not this one"))
-        recent = Decisions().recent(10)
-        if recent:
-            out()
-            out("recent decisions:")
-            for entry in recent:
-                out("  %s %-40s -> %s%s" % (entry["at"], "%s:%s" % (entry["host"], entry["port"]),
-                                            entry["via"], (" [%s]" % entry.get("error")) if entry.get("error") else ""))
-        return 0
-
+        return status()
     if args.cmd == "doctor":
-        return do_doctor(config)
-
+        return doctor()
     if args.cmd == "env":
-        url = proxy_url_for(config)
-        live = server_is_listening(config)
-        if not live:
-            out("# nothing answers on %s yet: these point at a port with no proxy behind it" % url)
-            out("# start it with `proxy serve`")
-        out('export HTTPS_PROXY="%s"' % url)
-        out('export HTTP_PROXY="%s"' % url)
-        out('export ALL_PROXY="%s"' % url)
-        out('export NO_PROXY="localhost,127.0.0.1,::1"')
-        out()
-        out("# uv and pip read the environment; git does not")
-        if live:
-            out("git config --global http.proxy %s" % url)
-        else:
-            out("# git is left alone until something answers on %s" % url)
-        return 0
-
+        return env()
     if args.cmd == "add":
-        return add_rule(config, args.type, args.value, args.via)
+        return add(args.value, args.via, args.type)
     if args.cmd == "rm":
-        return remove_rule(config, args.value)
+        return rm(args.value)
     if args.cmd == "check":
-        return do_check(config, args.host)
-
+        return check(args.host)
     if args.cmd == "upstream":
-        if args.action == "list":
-            for name, spec in config["upstreams"].items():
-                out("%-12s %-7s %s" % (name, spec["kind"], spec.get("address", "")))
-            return 0
-        if not args.name:
-            out("usage: proxy upstream add NAME ADDRESS --kind http|socks5 [--auth user:pass]")
-            return 2
-        spec = {"kind": args.kind}
-        if args.kind != "direct":
-            spec["address"] = args.address
-        if args.auth:
-            spec["auth"] = args.auth
-        config["upstreams"][args.name] = spec
-        save_config(config)
-        out("upstream %s = %s %s" % (args.name, args.kind, args.address or ""))
-        return 0
+        return upstream(args.action, args.name, args.address, args.kind, args.auth)
 
     parser.print_help()
     return 2
