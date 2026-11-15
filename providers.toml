@@ -2,7 +2,7 @@
 # 探测和官方文档都没拿到，值来自网关在售目录，不要当合同价用。
 
 schema = 1
-updated = "2026-11-11"
+updated = "2026-11-15"
 timezone = "Asia/Shanghai"
 
 # ---------------------------------------------------------------------------
@@ -1912,6 +1912,101 @@ cache_ttl_tiers = { implicit = 300, explicit_1h = 3600, explicit_7d = 604800 } #
   available = false
   console = "https://console.volcengine.com/ark/region:cn-beijing/overview"
   note = "用量能查，余额不能：GetInferenceUsage（按模型 / 接入点 / ApiKeyID 过滤）只接受 Access Key 签名，ARK_API_KEY 调不了；2026-08-12 之后新建的 key 连 AuthToken 那条旧路也没了。另有 ListModelActivations / ListEndpoints 在同一个管控面。余额只有控制台与账单页 —— unverified，不冒充端点。"
+
+# ---------------------------------------------------------------------------
+# 百度千帆（Qianfan）：只收文心 5.5 这一条
+# ---------------------------------------------------------------------------
+# 千帆上除了 ERNIE 全系还有一大批托管的三方模型（DeepSeek / GLM / Kimi / Qwen / MiMo），
+# 那些在别家 roster 里已经有条目，收进来只会让 `--model` 更难选。这里只登记文心 5.5。
+
+[[provider]]
+id = "baidu-qianfan"
+name = "百度千帆（文心）"
+kind = "vendor"
+key_env = "QIANFAN_API_KEY"
+homepage = "https://cloud.baidu.com/product/qianfan_home"
+docs = "https://cloud.baidu.com/doc/qianfan-api/s/3m7of64lb"
+catalog = "https://cloud.baidu.com/doc/qianfan-docs/s/7m95lyy43"
+catalog_verified = "2026-11-15 官方模型列表（2026-11-11 更新）的 ERNIE 系列只有两个 model 参数：ernie-5.5-flash-preview 与 ernie-light-dt-1.0，没有不带 -preview 的 ernie-5.5-flash。本机没有千帆 key，`/v2/models` 未探 —— 该端点是否存在 unverified。"
+retrieved = "2026-11-15"
+note = """
+API Key 形如 `bce-v3/ALTAK-…`，来自控制台「快速接入」的通用 Key；订了 Token Plan 的另有一把专属 Key，
+两者都能打同一个 v2 面，扣的不是同一种额度。密钥写 `~/.agents/keys.toml` 的 `baidu-qianfan` 一行。
+v2 是 OpenAI 兼容面（`/v2/chat/completions`），另有按地域的域名（如 `qianfan.bj.baidubce.com`），换基址即可。
+"""
+
+# 缓存保留时间：官方只写"系统会定期清理"，没给时长。
+cache_ttl = "unverified —— 官方原文只说『系统将定期清理一段时间没有使用过的缓存』，没有时长"
+cache_ttl_note = "隐式缓存：默认开启、无需 cache_control，命不命中由系统判定，官方明说即使上下文完全一致也有不命中的概率。计费表里有『命中缓存』一栏，说明 5.5 这条线按命中 token 折价；没有写入费与存储费的栏目 —— 估计不另收，是从价目表缺项推的，未向官方确认。"
+cache_ttl_source = "https://ai.baidu.com/ai-doc/WENXINWORKSHOP/Rm6uq7jy9"
+cache_ttl_retrieved = "2026-11-15"
+cache_ttl_estimate = "约 30 分钟"
+cache_ttl_estimate_basis = "guess"          # community：第三方实测/横评; inferred：按官方机制推出; guess：纯猜
+cache_ttl_estimate_source = "来源是猜的：官方只写『定期清理一段时间没有使用过的缓存』，既没给数字也没给机制。取 30 分钟的理由是同一会话内连续请求的间隔通常短于此，不是实测。"
+cache_ttl_secs = 1800                 # 规划用的数：`cache_ttl_tier` 那一档
+cache_ttl_tier = "隐式（唯一一档；命中是否续期官方没说）"
+
+  [[provider.endpoint]]
+  id = "openai"
+  api = "openai-completions"
+  base_url = "https://qianfan.baidubce.com/v2"
+  auth = "bearer"
+
+  [[provider.model]]
+  id = "ernie-5.5-flash-preview"
+  name = "ERNIE 5.5 Flash Preview（文心 5.5）"
+  tier = "flash"
+  context = 1000000
+  max_input = 1000000
+  max_output = 1000000
+  modalities = ["text"]
+  concurrency_limit = 300
+  # 思考只能开、强度只有一档：别的档位一律映射回 high（平台自己也把 low / medium 映射成 high）。
+  reasoning_levels = ["high"]
+  reasoning_default = "high"
+  reasoning_field = "thinking{type} + reasoning_effort"
+  reasoning_mapping = { minimal = "high", low = "high", medium = "high", high = "high", xhigh = "high", max = "high", ultra = "high" }
+  reasoning_note = "关不掉也没得调：官方支持清单把 ernie-5.5-flash-preview 列为『仅支持开启，不支持关闭』，reasoning_effort 默认 high 且『不支持调整』。思维链走 reasoning_content，与 content 同级；它**计入 max_tokens**（ERNIE 系思考模型不支持 thinking_budget），所以输出预算要按思维链 + 回答一起算，压得太紧会拿到 finish_reason=length。"
+  note = "2026-11-11 发布的文心最新基础模型预览版（首个后训练版本），官方自己说是中间检查点、训练未结束，正式版还会变；权重承诺 11 月 25 日前开源于 Apache 2.0。纯文本（无视觉）。输出上限两处口径不同：模型列表写 1M，控制台模型卡写『输出默认 64K』—— 即不传 max_tokens 时按 64K 截。最大输入与最大输出都写 1M，两者相加显然超过 1M，官方没解释这个重叠。"
+
+  [provider.model.params]
+  unit = "billion"
+  total = 280
+  active = 14
+  note = "混合稀疏注意力 + 多路由器 MoE：280B 总参数，每 token 激活 14B"
+  source = "https://ernie.baidu.com/zh/release/ernie-5-5-flash-preview/"
+  retrieved = "2026-11-15"
+
+  [provider.model.price]
+  currency = "CNY"
+  unit = "per_1m_tokens"
+  input = 2.00
+  output = 8.00
+  cache_read = 0.20
+  source = "https://cloud.baidu.com/doc/qianfan/s/wmh4sv6ya"
+  retrieved = "2026-11-15"
+  note = "表里是**刊例价**（高峰档）。同页还挂着限时 5 折活动价：高峰 1 / 0.1 / 4，空闲 0.5 / 0.05 / 2；活动没写截止日，所以不拿它当基数 —— 到期后按活动价做的估算会全部偏低一半。批量推理这一版没有报价。"
+  # 峰谷按"每天"切，与 DeepSeek 的双峰不同：这里没有工作日例外，节假日白天也是高峰价。
+  [[provider.model.price.band]]
+  id = "peak"
+  hours = [{ start = "08:00", end = "22:00" }]
+  note = "每天 08:00-22:00，含周末与法定节假日；基价就是这一档，所以不另写数字"
+  source = "https://cloud.baidu.com/doc/qianfan/s/wmh4sv6ya"
+  retrieved = "2026-11-15"
+    [[provider.model.price.band]]
+    id = "offpeak"
+    note = "每天 22:00-次日 08:00，刊例价为空闲价的一半"
+    input = 1.00
+    output = 4.00
+    cache_read = 0.10
+    source = "https://cloud.baidu.com/doc/qianfan/s/wmh4sv6ya"
+    retrieved = "2026-11-15"
+
+  [[provider.quota_query]]
+  id = "none-by-api-key"
+  available = false
+  console = "https://console.bce.baidu.com/qianfan/overview"
+  note = "余额与各模型的调用次数 / token 消耗只在千帆控制台与百度智能云财务页；账单那套要 AK/SK 签名，bce-v3 的 API Key 调不了。用 API Key 就能读的额度端点没有找到 —— unverified，不冒充端点。"
 
 # ---------------------------------------------------------------------------
 # OpenCode Go：订阅制中转站，模型清单走 /models 动态发现，不逐个静态配置
