@@ -147,7 +147,7 @@ def read_stats(options, key_id, key_secret):
         message = contract.js_string(contract.field(payload, "Message"))
         raise contract.BalanceError(f"{ACTION} refused: {code or 'no code'} {message}".strip())
     data = contract.field(payload, "Data")
-    items = contract.as_list(contract.field(data, "Items"))
+    items = contract.as_list(data, "Items")
     windows = []
     pieces = []
     resets = []

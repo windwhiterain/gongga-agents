@@ -1185,7 +1185,12 @@ cache_ttl_tier = "隐式（不指定 cache_control 就落这里；显式另算�
     script_env 只是让 harness 把模型 key 放进一个没人读的变量，别改成本脚本真读的名字。
     已验证：签名实现对官方文档给的固定示例复现出同一个 Signature；
     假 key 打到端点回 InvalidAccessKeyId.NotFound（说明请求结构与路径被网关接受）。
-    未验证：真实读数的数值与字段解释——2026-11-15 本机还没有 AccessKey，装上一把再跑一次。
+    2026-11-15 实测（AccessKey 已配好、RAM 用户已授权 AliyunModelStudioReadOnlyAccess）：
+    签名与鉴权都通过，但**个人版订阅的这个接口只回 `{"Success": true}`，没有 Data** ——
+    它统计的是「席位」（standard/pro/max 席位与 SeatCredits），个人版没有席位，所以读不出百分比。
+    结论：GetSubscriptionStats 覆盖团队席位，不覆盖个人版 Token Plan；当天退役的控制台 Cookie 读取
+    （providers/qwen.py，已删）才是这台机器上唯一读出过数字的路径（81.4% of 200000 Credits）。
+    要恢复读数就恢复那条控制台读取；不要以为这个端点能替代它。
   """
   script = "providers/qwen_subscription.py"
   script_env = "QWEN_TOKEN_PLAN_KEY"
