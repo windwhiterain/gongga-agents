@@ -7,6 +7,7 @@ other file instead. A credential is not in the roster -- it lives in the keystor
 beside it, `~/.agents/keys.toml`, which git does not track.
 """
 
+import importlib.util
 import os
 import tomllib
 
@@ -79,7 +80,9 @@ class Roster:
     def __init__(self, catalog, path):
         self.catalog = catalog
         self.path = path
-        self.providers = [provider for provider in catalog.get("provider") or [] if provider.get("id")]
+        self.providers = [
+            provider for provider in layers(path).providers(catalog) if provider.get("id")
+        ]
         self.by_id = {provider["id"]: provider for provider in self.providers}
         self.retired = {
             model_id
@@ -170,6 +173,37 @@ class Roster:
         """
         tier = model.get("tier")
         return tier.strip().lower() if isinstance(tier, str) and tier.strip() else None
+
+
+def layers(path):
+    """The roster's own expansion of `[[model]]` / `[[route]]` / `[[serving]]`.
+
+    # Invariant
+
+    Read from the checkout beside the catalog it reads, because both readers of
+    that file must fold the three tables the same way the server does
+    (`crates/server/src/providers/layers.rs`). A catalog with no `providers/`
+    directory beside it is read as the plain `[[provider]]` rows it states, which
+    is what every roster was before the layers existed.
+    """
+    script = os.path.join(os.path.dirname(os.path.abspath(path)), "providers", "layers.py")
+    if not os.path.isfile(script):
+        return _PLAIN
+    spec = importlib.util.spec_from_file_location("gongga_roster_layers", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class _Plain:
+    """The reader for a roster that states no layers: its own provider rows."""
+
+    @staticmethod
+    def providers(catalog):
+        return list(catalog.get("provider") or [])
+
+
+_PLAIN = _Plain()
 
 
 def load():

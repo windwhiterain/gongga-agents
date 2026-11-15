@@ -1,6 +1,8 @@
 # 字段里的 source 记录**实际查证来源**，retrieved 是查证日期；标 unverified 的表示本机
 # 探测和官方文档都没拿到，值来自网关在售目录，不要当合同价用。
 
+# 两种写法都读：`[[provider]]`（挂着自己的模型）是旧形状，`[[model]]` + `[[route]]` +
+# `[[serving]]` 是三层形状 —— 模型事实只写一次，接入面与它正交。见 README「三种表」。
 schema = 1
 updated = "2026-11-15"
 timezone = "Asia/Shanghai"
@@ -1916,12 +1918,42 @@ cache_ttl_tiers = { implicit = 300, explicit_1h = 3600, explicit_7d = 604800 } #
   note = "用量能查，余额不能：GetInferenceUsage（按模型 / 接入点 / ApiKeyID 过滤）只接受 Access Key 签名，ARK_API_KEY 调不了；2026-08-12 之后新建的 key 连 AuthToken 那条旧路也没了。另有 ListModelActivations / ListEndpoints 在同一个管控面。余额只有控制台与账单页 —— unverified，不冒充端点。"
 
 # ---------------------------------------------------------------------------
-# 百度千帆（Qianfan）：只收文心 5.5 这一条
+# 百度千帆（Qianfan）：模型事实一份，两条接入面各一条 route
 # ---------------------------------------------------------------------------
 # 千帆上除了 ERNIE 全系还有一大批托管的三方模型（DeepSeek / GLM / Kimi / Qwen / MiMo），
 # 那些在别家 roster 里已经有条目，收进来只会让 `--model` 更难选。这里只登记文心 5.5。
+#
+# 这一组是三层写法：`[[model]]` 是模型事实，只写一次；`[[route]]` 是一条接入面（端点、
+# 密钥变量、缓存、额度查询）；`[[serving]]` 说某条 route 卖它、卖多少钱、线上叫什么名。
+# 同一个模型在按量面和套餐面上不再抄两遍，换的只是 route 与那一档价。
 
-[[provider]]
+[[model]]
+id = "ernie-5.5-flash-preview"
+name = "ERNIE 5.5 Flash Preview（文心 5.5）"
+tier = "flash"
+context = 1000000
+max_input = 1000000
+max_output = 1000000
+modalities = ["text"]
+concurrency_limit = 300
+# 思考只能开、强度只有一档：别的档位一律映射回 high（平台自己也把 low / medium 映射成 high）。
+reasoning_levels = ["high"]
+reasoning_default = "high"
+reasoning_field = "thinking{type} + reasoning_effort"
+reasoning_mapping = { minimal = "high", low = "high", medium = "high", high = "high", xhigh = "high", max = "high", ultra = "high" }
+reasoning_note = "关不掉也没得调：官方支持清单把 ernie-5.5-flash-preview 列为『仅支持开启，不支持关闭』，reasoning_effort 默认 high 且『不支持调整』。思维链走 reasoning_content，与 content 同级；它**计入 max_tokens**（ERNIE 系思考模型不支持 thinking_budget），所以输出预算要按思维链 + 回答一起算，压得太紧会拿到 finish_reason=length。"
+note = "2026-11-11 发布的文心最新基础模型预览版（首个后训练版本），官方自己说是中间检查点、训练未结束，正式版还会变；权重承诺 11 月 25 日前开源于 Apache 2.0。纯文本（无视觉）。输出上限两处口径不同：模型列表写 1M，控制台模型卡写『输出默认 64K』—— 即不传 max_tokens 时按 64K 截。最大输入与最大输出都写 1M，两者相加显然超过 1M，官方没解释这个重叠。"
+
+[model.params]
+unit = "billion"
+total = 280
+active = 14
+note = "混合稀疏注意力 + 多路由器 MoE：280B 总参数，每 token 激活 14B"
+source = "https://ernie.baidu.com/zh/release/ernie-5-5-flash-preview/"
+retrieved = "2026-11-15"
+
+# --- route 1：按量面（千帆自己的 v2）--------------------------------------
+[[route]]
 id = "baidu-qianfan"
 name = "百度千帆（文心）"
 kind = "vendor"
@@ -1951,75 +1983,22 @@ cache_ttl_estimate_source = "来源是猜的：官方只写『定期清理一段
 cache_ttl_secs = 1800                 # 规划用的数：`cache_ttl_tier` 那一档
 cache_ttl_tier = "隐式（唯一一档；命中是否续期官方没说）"
 
-  [[provider.endpoint]]
+  [[route.endpoint]]
   id = "openai"
   api = "openai-completions"
   base_url = "https://qianfan.baidubce.com/v2"
   auth = "bearer"
 
-  [[provider.model]]
-  id = "ernie-5.5-flash-preview"
-  name = "ERNIE 5.5 Flash Preview（文心 5.5）"
-  tier = "flash"
-  context = 1000000
-  max_input = 1000000
-  max_output = 1000000
-  modalities = ["text"]
-  concurrency_limit = 300
-  # 思考只能开、强度只有一档：别的档位一律映射回 high（平台自己也把 low / medium 映射成 high）。
-  reasoning_levels = ["high"]
-  reasoning_default = "high"
-  reasoning_field = "thinking{type} + reasoning_effort"
-  reasoning_mapping = { minimal = "high", low = "high", medium = "high", high = "high", xhigh = "high", max = "high", ultra = "high" }
-  reasoning_note = "关不掉也没得调：官方支持清单把 ernie-5.5-flash-preview 列为『仅支持开启，不支持关闭』，reasoning_effort 默认 high 且『不支持调整』。思维链走 reasoning_content，与 content 同级；它**计入 max_tokens**（ERNIE 系思考模型不支持 thinking_budget），所以输出预算要按思维链 + 回答一起算，压得太紧会拿到 finish_reason=length。"
-  note = "2026-11-11 发布的文心最新基础模型预览版（首个后训练版本），官方自己说是中间检查点、训练未结束，正式版还会变；权重承诺 11 月 25 日前开源于 Apache 2.0。纯文本（无视觉）。输出上限两处口径不同：模型列表写 1M，控制台模型卡写『输出默认 64K』—— 即不传 max_tokens 时按 64K 截。最大输入与最大输出都写 1M，两者相加显然超过 1M，官方没解释这个重叠。"
-
-  [provider.model.params]
-  unit = "billion"
-  total = 280
-  active = 14
-  note = "混合稀疏注意力 + 多路由器 MoE：280B 总参数，每 token 激活 14B"
-  source = "https://ernie.baidu.com/zh/release/ernie-5-5-flash-preview/"
-  retrieved = "2026-11-15"
-
-  [provider.model.price]
-  currency = "CNY"
-  unit = "per_1m_tokens"
-  input = 2.00
-  output = 8.00
-  cache_read = 0.20
-  source = "https://cloud.baidu.com/doc/qianfan/s/wmh4sv6ya"
-  retrieved = "2026-11-15"
-  note = "表里是**刊例价**（高峰档）。同页还挂着限时 5 折活动价：高峰 1 / 0.1 / 4，空闲 0.5 / 0.05 / 2；活动没写截止日，所以不拿它当基数 —— 到期后按活动价做的估算会全部偏低一半。批量推理这一版没有报价。"
-  # 峰谷按"每天"切，与 DeepSeek 的双峰不同：这里没有工作日例外，节假日白天也是高峰价。
-  [[provider.model.price.band]]
-  id = "peak"
-  hours = [{ start = "08:00", end = "22:00" }]
-  note = "每天 08:00-22:00，含周末与法定节假日；基价就是这一档，所以不另写数字"
-  source = "https://cloud.baidu.com/doc/qianfan/s/wmh4sv6ya"
-  retrieved = "2026-11-15"
-    [[provider.model.price.band]]
-    id = "offpeak"
-    note = "每天 22:00-次日 08:00，刊例价为空闲价的一半"
-    input = 1.00
-    output = 4.00
-    cache_read = 0.10
-    source = "https://cloud.baidu.com/doc/qianfan/s/wmh4sv6ya"
-    retrieved = "2026-11-15"
-
-  [[provider.quota_query]]
+  [[route.quota_query]]
   id = "none-by-api-key"
   available = false
   console = "https://console.bce.baidu.com/qianfan/overview"
   note = "余额与各模型的调用次数 / token 消耗只在千帆控制台与百度智能云财务页；账单那套要 AK/SK 签名，bce-v3 的 API Key 调不了。用 API Key 就能读的额度端点没有找到 —— unverified，不冒充端点。"
 
-# ---------------------------------------------------------------------------
-# 百度千帆 · Token Plan 个人版：与上面的按量面是两条入口，key 不通用
-# ---------------------------------------------------------------------------
-# 套餐的专属 key 打 /v2 会被拒（401 token_plan_person_api_key_not_allowed，2026-11-15 本机实测），
-# 反过来按量 key 也打不了 tokenplan 面。两个面各记一个 provider，和 qwen-token-plan / qwen-dashscope 一样。
-
-[[provider]]
+# --- route 2：Token Plan 个人版（与按量面是两条入口，key 不通用）----------
+# 套餐的专属 key 打 /v2 会被拒（401 token_plan_person_api_key_not_allowed，2026-11-15
+# 本机实测），反过来按量 key 也打不了 tokenplan 面。两个面各记一条 route。
+[[route]]
 id = "qianfan-token-plan"
 name = "百度千帆 · Token Plan 个人版"
 kind = "vendor"
@@ -2046,39 +2025,59 @@ cache_ttl_estimate_source = "来源是猜的：抄 baidu-qianfan 那条的猜测
 cache_ttl_secs = 1800                 # 规划用的数：`cache_ttl_tier` 那一档
 cache_ttl_tier = "隐式（与按量面同一套机制，未单独验证）"
 
-  [[provider.endpoint]]
+  [[route.endpoint]]
   id = "openai"
   api = "openai-completions"
   base_url = "https://qianfan.baidubce.com/v2/tokenplan/personal"
   auth = "bearer"
   note = "本机实测通的唯一一面"
-  [[provider.endpoint]]
+  [[route.endpoint]]
   id = "anthropic"
   api = "anthropic-messages"
   base_url = "https://qianfan.baidubce.com/anthropic/tokenplan/personal"
   auth = "bearer"
   note = "文档口径（2026-11-11 那版快速开始），本机未验"
 
-  [[provider.model]]
-  id = "ernie-5.5-flash-preview"
-  name = "ERNIE 5.5 Flash Preview（文心 5.5）"
-  tier = "flash"
-  context = 1000000
-  max_input = 1000000
-  max_output = 1000000
-  modalities = ["text"]
-  reasoning_levels = ["high"]
-  reasoning_default = "high"
-  reasoning_field = "thinking{type} + reasoning_effort"
-  reasoning_mapping = { minimal = "high", low = "high", medium = "high", high = "high", xhigh = "high", max = "high", ultra = "high" }
-  reasoning_note = "与按量面同一个后端，思考同样是『只开不关、effort 固定 high』；差别只在计费。"
-  note = "同一模型的第二份登记，因为两条面不通用 key。价格不写：套餐扣的是订阅额度，没有每百万 token 的价目。参数量、输出上限、峰谷价这些事实见 baidu-qianfan 那一条，不在这里抄第二遍。"
-
-  [[provider.quota_query]]
+  [[route.quota_query]]
   id = "none-by-api-key"
   available = false
   console = "https://console.bce.baidu.com/qianfan/tokenPlan"
   note = "剩余额度、到期时间与调用明细只在控制台「我的订阅」/「用量明细」；用套餐 key 就能读的额度端点没有找到 —— unverified，不冒充端点。"
+
+# --- 供给：哪条 route 卖它，按哪一档价 -------------------------------------
+[[serving]]
+route = "baidu-qianfan"
+model = "ernie-5.5-flash-preview"
+
+[serving.price]
+currency = "CNY"
+unit = "per_1m_tokens"
+input = 2.00
+output = 8.00
+cache_read = 0.20
+source = "https://cloud.baidu.com/doc/qianfan/s/wmh4sv6ya"
+retrieved = "2026-11-15"
+note = "表里是**刊例价**（高峰档）。同页还挂着限时 5 折活动价：高峰 1 / 0.1 / 4，空闲 0.5 / 0.05 / 2；活动没写截止日，所以不拿它当基数 —— 到期后按活动价做的估算会全部偏低一半。批量推理这一版没有报价。"
+# 峰谷按"每天"切，与 DeepSeek 的双峰不同：这里没有工作日例外，节假日白天也是高峰价。
+  [[serving.price.band]]
+  id = "peak"
+  hours = [{ start = "08:00", end = "22:00" }]
+  note = "每天 08:00-22:00，含周末与法定节假日；基价就是这一档，所以不另写数字"
+  source = "https://cloud.baidu.com/doc/qianfan/s/wmh4sv6ya"
+  retrieved = "2026-11-15"
+    [[serving.price.band]]
+    id = "offpeak"
+    note = "每天 22:00-次日 08:00，刊例价为空闲价的一半"
+    input = 1.00
+    output = 4.00
+    cache_read = 0.10
+    source = "https://cloud.baidu.com/doc/qianfan/s/wmh4sv6ya"
+    retrieved = "2026-11-15"
+
+[[serving]]
+route = "qianfan-token-plan"
+model = "ernie-5.5-flash-preview"
+note = "套餐面扣的是订阅额度，没有每百万 token 的价目 —— 所以这一条不写 price。"
 
 # ---------------------------------------------------------------------------
 # OpenCode Go：订阅制中转站，模型清单走 /models 动态发现，不逐个静态配置

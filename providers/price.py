@@ -40,6 +40,8 @@ import os
 import sys
 import urllib.request
 
+import layers
+
 # The roster's own words, and the only ones `price.band.days` may use.
 DAYS = ("workday", "weekend", "holiday", "rest_day", "makeup_workday")
 
@@ -203,7 +205,7 @@ def load_roster(path=None):
 
 
 def find_model(roster, provider_id, model_id):
-    for provider in roster.get("provider") or []:
+    for provider in layers.providers(roster):
         if provider_id and provider.get("id") != provider_id:
             continue
         for model in provider.get("model") or []:
@@ -270,7 +272,7 @@ def main():
         moment = datetime.datetime.now()
 
     if args.list:
-        for provider in roster.get("provider") or []:
+        for provider in layers.providers(roster):
             for model in provider.get("model") or []:
                 bands = (model.get("price") or {}).get("band") or []
                 if bands:

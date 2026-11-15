@@ -48,6 +48,47 @@ gongga-agents/
 - **脚本查找**：`quota_query.script` 是相对该文件的路径，所以只在自己的 clone 里找。
 - 显式指定单文件（`GONGGA_PROVIDERS_CATALOG=/path/to/providers.toml`）时只用那一个。
 
+## 三种表：模型事实、接入面、供给
+
+同一个模型可以有好几条路走到：按量、套餐、中转站。旧写法把模型挂在路线下面，于是
+`ernie-5.5-flash-preview` 在千帆的按量面和套餐面上各抄了一份 13 行事实 —— 两份靠人记着同步，
+而真正不一样的只有价格和线上名字。
+
+所以现在可以写成三张表，gongga 读的时候再折成同一个形状（`crates/server/src/providers/layers.rs`）：
+
+- `[[model]]` —— 模型是什么，只写一次：上下文、最大输出、思考档位、模态、参数量。
+- `[[route]]` —— 怎么到得了：端点、`key_env`、缓存、额度查询。它就是原来的 `[[provider]]`。
+- `[[serving]]` —— 某条 route 卖某个模型：`route` + `model`，可选 `wire_id`（这条面在线上
+  用的名字，缺省就是模型 id），以及任何"这条面不一样"的字段，主要是 `price` ——
+  分时段价格写在 `[[serving.price.band]]`，规则与旧的 `[[provider.model.price.band]]` 相同。
+
+```toml
+[[model]]
+id = "ernie-5.5-flash-preview"
+context = 1000000
+max_output = 1000000
+
+[[route]]
+id = "qianfan-token-plan"
+key_env = "QIANFAN_TOKEN_PLAN_API_KEY"
+  [[route.endpoint]]
+  id = "openai"
+  api = "openai-completions"
+  base_url = "https://qianfan.baidubce.com/v2/tokenplan/personal"
+
+[[serving]]
+route = "qianfan-token-plan"
+model = "ernie-5.5-flash-preview"
+```
+
+三条要记住的：
+
+- `[[provider]]` 原样有效：它是"这条 route 只卖一个模型"时的内联写法，两种写法可以共存。
+- **顺序就是默认**：服务端的默认模型取列表第一行，`provider` 行排在 `route` 折出来的行前面，
+  所以挪动块会挪动默认模型。
+- 三层写法要新的 gongga 才看得见：旧二进制忽略 `[[model]]` / `[[route]]` / `[[serving]]`，
+  那些 route 在它眼里不存在 —— 迁移要跟着二进制走。
+
 ## 密钥政策
 
 **密钥不进任何 git 仓库** —— `main` 不写，`local` 也不写。服务端只从两个地方读，
@@ -90,15 +131,17 @@ roster 里的 `key = "..."` 会被**忽略**：roster 是 git 检出，写进去
    哪个模型被鼓励用（倍率、白名单）在 `skills/model_pool/preference.toml`。
 3. 新的额度查询脚本放 `providers/`，并在对应 provider 的 `quota_query.script` 里用相对路径引用；
    `providers/probe.py` 可以离线跑全部解析器。
-4. 价格分时段就写 `[[provider.model.price.band]]`：`days` 只能用 `workday` / `weekend` /
-   `holiday` / `rest_day` / `makeup_workday` 这五个词（定义在 `providers.toml` 顶部），
+4. 价格分时段就写 `[[provider.model.price.band]]`（三层写法是 `[[serving.price.band]]`）：
+   `days` 只能用 `workday` / `weekend` / `holiday` / `rest_day` / `makeup_workday` 这五个词（定义在 `providers.toml` 顶部），
    `hours` 写固定时段，价格写这个时段的数。**最宽的那个档放最后且不写 `days`**，它就是其余全部；
    写反了会让工作日夜间按高峰价计费。想知道某时刻实际多少钱：`python providers/price.py`。
-5. 缓存写在两处：**保留时间**是 provider 级的事实（`cache_ttl` / `cache_ttl_note` /
-   `cache_ttl_source`，写在 `[[provider]]` 下），**价格**照旧在 `[provider.model.price]`
+5. 缓存写在两处：**保留时间**是接入面级的事实（`cache_ttl` / `cache_ttl_note` /
+   `cache_ttl_source`，写在 `[[provider]]` 或 `[[route]]` 下），**价格**照旧在供给上
+   （`[serving.price]`，或旧的 `[provider.model.price]`）
    （`cache_read` / `cache_write` / `cache_write_5m` / `cache_storage`，按小时计的另配
    `cache_storage_unit`）。字段释义在 `providers.toml` 顶部。
-   **保留时间要填两层**：`cache_ttl` 只放官方口径，官方没公布就写 `unverified —— 原因`；
+   **保留时间要填两层，两层都要有数字**：`cache_ttl` 官方给了就用官方口径，没公布就写自己的
+   估计并在括号里标「估」—— 留 `unverified` 等于这一行没有信息；
    `cache_ttl_estimate` 放拿来规划用的那个数，宁可是猜的也要有，**并标出处**：
    `cache_ttl_estimate_basis` 用 `community`（第三方实测/横评）/ `inferred`（按官方机制推）/
    `guess`（纯猜），`cache_ttl_estimate_source` 写 URL，纯猜的写"来源是猜的"和猜法。
