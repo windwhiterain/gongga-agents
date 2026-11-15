@@ -1049,7 +1049,78 @@ cache_ttl_tier = "隐式（唯一一档）"
   retired_models = ["LongCat-Flash", "LongCat-Flash-Chat", "LongCat-Flash-Thinking", "LongCat-Flash-Lite", "LongCat-Flash-Omni-2603"]
   retired_note = "2026-05-29 停用"
 
-[[provider]]
+# ---------------------------------------------------------------------------
+# 阿里百炼（Qwen）：模型事实一份，两条接入面 —— 个人 Token Plan 与 DashScope 按量
+# ---------------------------------------------------------------------------
+# 同一个 qwen3.8-max 在两条面上是同一个模型：上下文、思考档位、思考预算、参数量都一样，
+# 差的是计费（Credits vs 按量）与缓存单价。原先按接入面各记一份，按量那份没写的几项
+# （reasoning_levels / thinking_budget_max）不是"不支持"，只是当时没抄 —— 现在写在
+# [[model]] 上一次，两条面一起读到，也就一起被校验。
+# 套餐面还有一条"preview 下线后按 max 计 Credits"的目录事实，那是这条路的账，留在 serving 上。
+
+[[model]]
+id = "qwen4-max-preview"
+name = "Qwen 4 Max（预览版）"
+tier = "sota"
+context = 1000000
+max_output = 393216                    # 官方《文本生成与视觉理解》：393,216（思考+输出）
+modalities = ["text", "image", "video"]
+thinking_budget_max = 262144
+reasoning_levels = ["none", "low", "medium", "high", "xhigh", "max"]
+reasoning_note = "取值集合与上限来自本机实测：reasoning_effort 传 bogus 时接口回 'must be one of: none/off/minimal/low/medium/high/xhigh/max'；thinking_budget 传 300000 回 'not greater than 262144'。官方文档（2026-11-11 那版）还没写 qwen4 的 effort→预算映射，所以这里不填 reasoning_mapping，也别把 qwen3.8 的 4096/16384/262144 直接套过来。"
+note = """
+预览版：Token Plan 独占（DashScope 按量目录没有它），2026-11-11 10:00 至 2026-11-25 24:00，预览结束后下线。
+官方别名 qwen4.0-max-preview，两个 id 都能调，账单按别名显示 —— 本机 2026-11-11 实测，返回的 model 就是 qwen4.0-max-preview。
+官方「选择模型」把它放在效果优先位（复杂推理与编程），视觉理解、Function Calling、内置工具、结构化输出都标支持。
+价格：官方定价页 2026-11-09 那版还没有 qwen4 一行，预览期只按 Credits 计量，没有每百万 Token 的标价可写 —— 这一块先照 qwen3.8-max 抄一份占位价（2026-11-11 按要求填），note 里已标「未核实」，正式价出来必须替换。
+活动口径两处：团队版文档写「限时 Credits 2 折（等于 5 倍用量），每晚 22:00-次日 08:00 再 2 折，即原标准 0.4 折」；新闻口径是「限时 2 折，新用户再叠加 5 折，最低 1 折」。等正式版定价页出来再补数字。
+参数量官方未公布，故不写 [model.params]。
+来源：上下文档 https://help.aliyun.com/zh/model-studio/text-generation-model/ 、预览期与折扣 https://help.aliyun.com/zh/model-studio/token-plan-team-overview （均 2026-11-11 那版）；能力清单 https://help.aliyun.com/zh/model-studio/models （2026-11-11）。
+"""
+
+[[model]]
+id = "qwen3.8-max"
+name = "Qwen 3.8 Max"
+tier = "sota"
+context = 1000000
+max_input = 991808
+max_output = 131072
+modalities = ["text", "image", "video"]
+thinking_budget_max = 256000
+reasoning_levels = ["low", "medium", "xhigh"]
+reasoning_default = "xhigh"
+reasoning_note = "reasoning_effort 与 thinking_budget **互斥**，同时给会报错；映射 low→4096 / medium→16384 / xhigh→262144"
+note = "两条接入面（Token Plan 与 DashScope 按量）原先各记一份，事实逐字段相同 —— 按量那份缺 reasoning_* / thinking_budget_max 是没抄，不是不支持。现在合并成这一份，两面一起读、一起校验。"
+
+[model.params]
+unit = "billion"
+total = 2400
+active = 95
+note = "Qwen3.8-2.4T-A95B, 512 experts"
+source = "https://developer.aliyun.com/article/1777043"
+retrieved = "2026-10-31"
+
+[[model]]
+id = "qwen3.8-flash"
+name = "Qwen 3.8 Flash"
+tier = "flash"
+context = 1000000
+max_input = 991808
+max_output = 131072
+modalities = ["text", "image", "video"]
+reasoning_levels = ["low", "medium", "xhigh"]
+note = "按量面原先叫它「百炼托管版」，那是为了和套餐面那份区分；同一个模型，原名就够了。"
+
+[model.params]
+unit = "billion"
+total = 125
+active = 6
+note = "Flash-Next build, plus a 51B n-gram table"
+source = "https://developer.aliyun.com/article/1777451"
+retrieved = "2026-10-31"
+
+# --- route 1：个人 Token Plan ---------------------------------------------
+[[route]]
 id = "qwen-token-plan"
 name = "阿里百炼 · 个人 Token Plan"
 kind = "vendor"
@@ -1064,7 +1135,7 @@ note = "这个主机是通义千问 MaaS 的产品端点，不是内置的 ap-so
 
 # 缓存保留时间：两种缓存两套规则，别混成一个数。
 cache_ttl = "显式缓存 5 分钟、命中即重置；隐式缓存无固定有效期，系统定期清理长时间未使用的"
-cache_ttl_note = "通用规则：显式缓存创建按输入标准价 125% 计（cache_write）、命中按 10%（cache_read_explicit）；隐式缓存写入按输入价 100%、命中通常 20%（cache_read）。**本 provider 收的 qwen3.8 两个模型都是官方点名的例外**——qwen3.8-max 命中不是 10%，qwen3.8-flash 创建与命中都不是 125% / 10% 且分区不同，所以以价格表里的数（和百炼控制台）为准，别用比例去算。qwen4-max-preview 的缓存支持与缓存单价官方定价页还没列，本机也没测，先按上面的通用规则理解、别当承诺。最小可缓存 1024 token，一次最多 4 个 cache_control 标记。"
+cache_ttl_note = "通用规则：显式缓存创建按输入标准价 125% 计（cache_write）、命中按 10%（cache_read_explicit）；隐式缓存写入按输入价 100%、命中通常 20%（cache_read）。**这条面收的 qwen3.8 两个模型都是官方点名的例外**——qwen3.8-max 命中不是 10%，qwen3.8-flash 创建与命中都不是 125% / 10% 且分区不同，所以以价格表里的数（和百炼控制台）为准，别用比例去算。qwen4-max-preview 的缓存支持与缓存单价官方定价页还没列，本机也没测，先按上面的通用规则理解、别当承诺。最小可缓存 1024 token，一次最多 4 个 cache_control 标记。"
 cache_ttl_source = "https://help.aliyun.com/zh/model-studio/context-cache"
 cache_ttl_retrieved = "2026-11-01"
 cache_ttl_estimate = "隐式缓存约 5 分钟；显式缓存官方就是 5 分钟（命中重置）"
@@ -1073,117 +1144,18 @@ cache_ttl_estimate_source = "https://github.com/Coffeiz/Gugu-web/blob/main/docs/
 cache_ttl_secs = 300                  # 规划用的数：`cache_ttl_tier` 那一档
 cache_ttl_tier = "隐式（不指定 cache_control 就落这里；显式另算，见 cache_ttl_note）"
 
-  [[provider.endpoint]]
+  [[route.endpoint]]
   id = "openai"
   api = "openai-completions"
   base_url = "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1"
   auth = "bearer"
-  [[provider.endpoint]]
+  [[route.endpoint]]
   id = "anthropic"
   api = "anthropic-messages"
   base_url = "https://token-plan.maas.qianwenaiapi.com/apps/anthropic"
   auth = "bearer"
 
-  [[provider.model]]
-  id = "qwen4-max-preview"
-  name = "Qwen 4 Max（预览版）"
-  tier = "sota"
-  context = 1000000
-  max_output = 393216                    # 官方《文本生成与视觉理解》：393,216（思考+输出）
-  modalities = ["text", "image", "video"]
-  thinking_budget_max = 262144
-  reasoning_levels = ["none", "low", "medium", "high", "xhigh", "max"]
-  reasoning_note = "取值集合与上限来自本机实测：reasoning_effort 传 bogus 时接口回 'must be one of: none/off/minimal/low/medium/high/xhigh/max'；thinking_budget 传 300000 回 'not greater than 262144'。官方文档（2026-11-11 那版）还没写 qwen4 的 effort→预算映射，所以这里不填 reasoning_mapping，也别把 qwen3.8 的 4096/16384/262144 直接套过来。"
-  note = """
-  预览版：Token Plan 独占（DashScope 按量目录没有它），2026-11-11 10:00 至 2026-11-25 24:00，预览结束后下线。
-  官方别名 qwen4.0-max-preview，两个 id 都能调，账单按别名显示 —— 本机 2026-11-11 实测，返回的 model 就是 qwen4.0-max-preview。
-  官方「选择模型」把它放在效果优先位（复杂推理与编程），视觉理解、Function Calling、内置工具、结构化输出都标支持。
-  价格：官方定价页 2026-11-09 那版还没有 qwen4 一行，预览期只按 Credits 计量，没有每百万 Token 的标价可写 —— 这一块先照 qwen3.8-max 抄一份占位价（2026-11-11 按要求填），note 里已标「未核实」，正式价出来必须替换。
-  活动口径两处：团队版文档写「限时 Credits 2 折（等于 5 倍用量），每晚 22:00-次日 08:00 再 2 折，即原标准 0.4 折」；新闻口径是「限时 2 折，新用户再叠加 5 折，最低 1 折」。等正式版定价页出来再补数字。
-  参数量官方未公布，故不写 [provider.model.params]。
-  来源：上下文档 https://help.aliyun.com/zh/model-studio/text-generation-model/ 、预览期与折扣 https://help.aliyun.com/zh/model-studio/token-plan-team-overview （均 2026-11-11 那版）；能力清单 https://help.aliyun.com/zh/model-studio/models （2026-11-11）。
-  """
-
-  [provider.model.price]
-  currency = "CNY"
-  unit = "per_1m_tokens"
-  input = 12.00                         # 照 qwen3.8-max 抄，未核实
-  output = 36.00
-  cache_read = 1.50
-  cache_write = 15.00
-  cache_read_explicit = 1.00
-  batch = { input = 6.00, output = 18.00 }
-  price_usd = { input = 2.00, output = 6.00, cache_read = 0.25 }
-  source = "https://platform.qianwenai.com/docs/developer-guides/getting-started/model-prices"
-  retrieved = "2026-10-22"
-  note = "**占位价：照 Qwen3.8 Max 的标价抄的，官方未公布 qwen4 单价、未核实** —— 该定价页 2026-11-09 版根本没有 qwen4 一行，2026-11-11 先按 qwen3.8-max 记账，正式价出来必须替换。标价不区分忙闲；Token Plan 是订阅制，实际扣 Credits，预览期的 2 折 / 夜间 0.4 折是按 Credits 走、不按这张表折算。"
-
-  [[provider.model]]
-  id = "qwen3.8-max"
-  name = "Qwen 3.8 Max"
-  tier = "sota"
-  context = 1000000
-  max_input = 991808
-  max_output = 131072
-  modalities = ["text", "image", "video"]
-  thinking_budget_max = 256000
-  retired_ids = ["qwen3.8-max-preview", "qwen3.8-max-0902"]
-  retired_note = "preview 已下线，调用自动路由到 qwen3.8-max 并按 max 计 Credits；-0902 是 2026-09-02 的锁版快照，同价，不是另一个模型"
-  reasoning_levels = ["low", "medium", "xhigh"]
-  reasoning_default = "xhigh"
-  reasoning_note = "reasoning_effort 与 thinking_budget **互斥**，同时给会报错；映射 low→4096 / medium→16384 / xhigh→262144"
-  [provider.model.params]
-  unit = "billion"
-  total = 2400
-  active = 95
-  note = "Qwen3.8-2.4T-A95B, 512 experts"
-  source = "https://developer.aliyun.com/article/1777043"
-  retrieved = "2026-10-31"
-
-  [provider.model.price]
-  currency = "CNY"
-  unit = "per_1m_tokens"
-  input = 12.00
-  output = 36.00
-  cache_read = 1.50                     # 隐式缓存命中
-  cache_write = 15.00                   # 显式缓存创建
-  cache_read_explicit = 1.00
-  batch = { input = 6.00, output = 18.00 }
-  price_usd = { input = 2.00, output = 6.00, cache_read = 0.25 }
-  source = "https://platform.qianwenai.com/docs/developer-guides/getting-started/model-prices"
-  retrieved = "2026-10-22"
-  note = "标价不区分忙闲；Token Plan 是订阅制，实际扣 Credits。百炼只对 DeepSeek 系做忙闲分段。"
-
-  [[provider.model]]
-  id = "qwen3.8-flash"
-  name = "Qwen 3.8 Flash"
-  tier = "flash"
-  context = 1000000
-  max_input = 991808
-  max_output = 131072
-  modalities = ["text", "image", "video"]
-  reasoning_levels = ["low", "medium", "xhigh"]
-  [provider.model.params]
-  unit = "billion"
-  total = 125
-  active = 6
-  note = "Flash-Next build, plus a 51B n-gram table"
-  source = "https://developer.aliyun.com/article/1777451"
-  retrieved = "2026-10-31"
-
-  [provider.model.price]
-  currency = "CNY"
-  unit = "per_1m_tokens"
-  input = 0.80
-  output = 2.70
-  cache_read = 0.10
-  cache_write = 1.25
-  cache_read_explicit = 0.10
-  price_usd = { input = 0.16, output = 0.47, cache_read = 0.016 }
-  source = "https://platform.qianwenai.com/docs/developer-guides/getting-started/model-prices"
-  retrieved = "2026-10-22"
-
-  [provider.plan]
+  [route.plan]
   name = "Token Plan（个人）"
   region = "华北2（北京）独占"
   tiers = { Lite = "¥60 标价 / ¥39 促销", Essential = "¥120 / ¥79", Standard = "¥180 / ¥139", Pro = "¥600 / ¥499" }
@@ -1198,7 +1170,7 @@ cache_ttl_tier = "隐式（不指定 cache_control 就落这里；显式另算�
   # 唯一的读取路径：官方签名的 OpenAPI。凭据是 AccessKey 对，不是模型 key（模型 key 签不了名）。
   # 控制台 Cookie 那条 2026-11-15 退役：Qwen 套餐不计量 5h / weekly 窗口，官方接口已覆盖全部
   # 窗口；而会话几天就静默失效（那天 09:15 过期，读数停摆、provider 被池子判成读不到）。
-  [[provider.quota_query]]
+  [[route.quota_query]]
   id = "openapi-subscription-stats"
   kind = "script"
   method = "GET"
@@ -1218,7 +1190,8 @@ cache_ttl_tier = "隐式（不指定 cache_control 就落这里；显式另算�
   script = "providers/qwen_subscription.py"
   script_env = "QWEN_TOKEN_PLAN_KEY"
 
-[[provider]]
+# --- route 2：DashScope 按量 ----------------------------------------------
+[[route]]
 id = "qwen-dashscope"
 name = "阿里百炼 DashScope 按量"
 kind = "vendor"
@@ -1241,78 +1214,109 @@ cache_ttl_estimate_source = "https://github.com/Coffeiz/Gugu-web/blob/main/docs/
 cache_ttl_secs = 300                  # 规划用的数：`cache_ttl_tier` 那一档
 cache_ttl_tier = "隐式（不指定 cache_control 就落这里；显式另算，见 cache_ttl_note）"
 
-  [[provider.endpoint]]
+  [[route.endpoint]]
   id = "openai"
   api = "openai-completions"
   base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
   auth = "bearer"
-  [[provider.endpoint]]
+  [[route.endpoint]]
   id = "qwen-native"
   api = "openai-responses"
   base_url = "https://dashscope.aliyuncs.com/api/v2/apps/protocols/compatible"
   auth = "bearer"
   note = "百炼自己的 Responses 兼容面；多数第三方模型只有 compatible-mode 一条路。"
 
-  [[provider.model]]
-  id = "qwen3.8-max"
-  name = "Qwen 3.8 Max"
-  tier = "sota"
-  context = 1000000
-  max_input = 991808
-  max_output = 131072
-  modalities = ["text", "image", "video"]
-  [provider.model.params]
-  unit = "billion"
-  total = 2400
-  active = 95
-  note = "Qwen3.8-2.4T-A95B, 512 experts"
-  source = "https://developer.aliyun.com/article/1777043"
-  retrieved = "2026-10-31"
-
-  [provider.model.price]
-  currency = "CNY"
-  unit = "per_1m_tokens"
-  input = 12.00
-  output = 36.00
-  cache_read = 1.50
-  cache_write = 15.00
-  cache_read_explicit = 1.00
-  source = "https://platform.qianwenai.com/docs/developer-guides/getting-started/model-prices"
-  retrieved = "2026-11-01"
-  note = "按量与 Token Plan 同价；qwen3.8 全系不分输入区间、无忙闲档 —— 忙闲只对目录里那些 DeepSeek 三方模型生效。"
-
-  [[provider.model]]
-  id = "qwen3.8-flash"
-  name = "Qwen 3.8 Flash（百炼托管版）"
-  tier = "flash"
-  context = 1000000
-  max_input = 991808
-  max_output = 131072
-  modalities = ["text", "image", "video"]
-  [provider.model.params]
-  unit = "billion"
-  total = 125
-  active = 6
-  note = "Flash-Next build, plus a 51B n-gram table"
-  source = "https://developer.aliyun.com/article/1777451"
-  retrieved = "2026-10-31"
-
-  [provider.model.price]
-  currency = "CNY"
-  unit = "per_1m_tokens"
-  input = 0.80
-  output = 2.70
-  cache_read = 0.10
-  cache_write = 1.25
-  cache_read_explicit = 0.10
-  source = "https://platform.qianwenai.com/docs/developer-guides/getting-started/model-prices"
-  retrieved = "2026-11-01"
-
-  [[provider.quota_query]]
+  [[route.quota_query]]
   id = "none-by-api-key"
   available = false
   dashboard = "https://modelstudio.console.alibabacloud.com/costing-balance/usage-statistics"
   note = "用量统计在控制台（延迟约 1 小时、只留 30 天）；没有用 sk- 就能调的额度端点。"
+
+# --- 供给：哪条面卖哪个模型、按哪一档价 -----------------------------------
+[[serving]]
+route = "qwen-token-plan"
+model = "qwen4-max-preview"
+
+[serving.price]
+currency = "CNY"
+unit = "per_1m_tokens"
+input = 12.00                         # 照 qwen3.8-max 抄，未核实
+output = 36.00
+cache_read = 1.50
+cache_write = 15.00
+cache_read_explicit = 1.00
+batch = { input = 6.00, output = 18.00 }
+price_usd = { input = 2.00, output = 6.00, cache_read = 0.25 }
+source = "https://platform.qianwenai.com/docs/developer-guides/getting-started/model-prices"
+retrieved = "2026-10-22"
+note = "**占位价：照 Qwen3.8 Max 的标价抄的，官方未公布 qwen4 单价、未核实** —— 该定价页 2026-11-09 版根本没有 qwen4 一行，2026-11-11 先按 qwen3.8-max 记账，正式价出来必须替换。标价不区分忙闲；Token Plan 是订阅制，实际扣 Credits，预览期的 2 折 / 夜间 0.4 折是按 Credits 走、不按这张表折算。"
+
+[[serving]]
+route = "qwen-token-plan"
+model = "qwen3.8-max"
+retired_ids = ["qwen3.8-max-preview", "qwen3.8-max-0902"]
+retired_note = "preview 已下线，调用自动路由到 qwen3.8-max 并按 max 计 Credits；-0902 是 2026-09-02 的锁版快照，同价，不是另一个模型"
+
+[serving.price]
+currency = "CNY"
+unit = "per_1m_tokens"
+input = 12.00
+output = 36.00
+cache_read = 1.50                     # 隐式缓存命中
+cache_write = 15.00                   # 显式缓存创建
+cache_read_explicit = 1.00
+batch = { input = 6.00, output = 18.00 }
+price_usd = { input = 2.00, output = 6.00, cache_read = 0.25 }
+source = "https://platform.qianwenai.com/docs/developer-guides/getting-started/model-prices"
+retrieved = "2026-10-22"
+note = "标价不区分忙闲；Token Plan 是订阅制，实际扣 Credits。百炼只对 DeepSeek 系做忙闲分段。"
+
+[[serving]]
+route = "qwen-token-plan"
+model = "qwen3.8-flash"
+
+[serving.price]
+currency = "CNY"
+unit = "per_1m_tokens"
+input = 0.80
+output = 2.70
+cache_read = 0.10
+cache_write = 1.25
+cache_read_explicit = 0.10
+price_usd = { input = 0.16, output = 0.47, cache_read = 0.016 }
+source = "https://platform.qianwenai.com/docs/developer-guides/getting-started/model-prices"
+retrieved = "2026-10-22"
+
+[[serving]]
+route = "qwen-dashscope"
+model = "qwen3.8-max"
+
+[serving.price]
+currency = "CNY"
+unit = "per_1m_tokens"
+input = 12.00
+output = 36.00
+cache_read = 1.50
+cache_write = 15.00
+cache_read_explicit = 1.00
+source = "https://platform.qianwenai.com/docs/developer-guides/getting-started/model-prices"
+retrieved = "2026-11-01"
+note = "按量与 Token Plan 同价；qwen3.8 全系不分输入区间、无忙闲档 —— 忙闲只对目录里那些 DeepSeek 三方模型生效。"
+
+[[serving]]
+route = "qwen-dashscope"
+model = "qwen3.8-flash"
+
+[serving.price]
+currency = "CNY"
+unit = "per_1m_tokens"
+input = 0.80
+output = 2.70
+cache_read = 0.10
+cache_write = 1.25
+cache_read_explicit = 0.10
+source = "https://platform.qianwenai.com/docs/developer-guides/getting-started/model-prices"
+retrieved = "2026-11-01"
 
 [[provider]]
 id = "tencent-tokenhub"
