@@ -1195,6 +1195,28 @@ cache_ttl_tier = "隐式（不指定 cache_control 就落这里；显式另算�
   source = "https://platform.qianwenai.com/docs/token-plan/personal/token-plan-personal-overview"
   quota_note = "官方余量查询是 `bl usage token-plan`（CLI 控制台鉴权）或 OpenAPI GetSubscriptionStats（AccessKey 签名），都没有 sk- 可用的路径"
 
+  # 官方路径：不需要浏览器会话，因此不会几天就静默失效。凭据是 AccessKey 对，
+  # 不是模型 key（模型 key 签不了名）。排在控制台之前：能读到就用它。
+  [[provider.quota_query]]
+  id = "openapi-subscription-stats"
+  kind = "script"
+  method = "GET"
+  url = "https://modelstudio.cn-beijing.aliyuncs.com/tokenplan/subscription/stats"
+  auth = "access-key"
+  auth_env = "ALIBABA_CLOUD_ACCESS_KEY_ID"
+  unit = "percent-left"
+  source = "https://help.aliyun.com/zh/model-studio/get-subscription-stats"
+  note = """
+    凭据从 ALIBABA_CLOUD_ACCESS_KEY_ID / ALIBABA_CLOUD_ACCESS_KEY_SECRET 读，
+    或者 ~/.agents/keys.toml 里的 qwen-accesskey = "<id>:<secret>"（不进 git）。
+    script_env 只是让 harness 把模型 key 放进一个没人读的变量，别改成本脚本真读的名字。
+    已验证：签名实现对官方文档给的固定示例复现出同一个 Signature；
+    假 key 打到端点回 InvalidAccessKeyId.NotFound（说明请求结构与路径被网关接受）。
+    未验证：真实读数的数值与字段解释——2026-11-15 本机还没有 AccessKey，装上一把再跑一次。
+  """
+  script = "providers/qwen_subscription.py"
+  script_env = "QWEN_TOKEN_PLAN_KEY"
+
   [[provider.quota_query]]
   id = "console-data-gateway"
   kind = "script"
