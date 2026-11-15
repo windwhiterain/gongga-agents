@@ -13,7 +13,7 @@ There is no API-key endpoint that reports credits. The console reads them from
 `/backend/account/token_plan_credit`, and that endpoint authenticates a **web
 session cookie** rather than a key: the key returns `401 not login`. So the
 credential here is a `Cookie:` header copied from a signed-in console session,
-which is the same shape `qwen.py` uses for its console.
+which is the shape any console-only allowance needs (the Qwen token plan used the same trick until its console reader was retired in favour of a signed API).
 
 # Invariant
 

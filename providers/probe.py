@@ -40,7 +40,6 @@ def load(name):
 deepseek = load("deepseek")
 kimi = load("kimi-coding")
 minimax = load("minimax")
-qwen = load("qwen")
 
 checks = []
 throws = re.compile(r".")
@@ -202,10 +201,10 @@ SHARES = kimi.parse({"usages": {"limit_5h": {"used_ratio": 0}, "limit_7d": {"use
 
 def refused_scripts():
     """Every script answers a refusal with zero, and only a refusal."""
-    # The credential each reader is handed: a key for the key-based ones, and a
-    # `Cookie:` line for qwen, which refuses anything else before a request is made.
+    # The credential each reader is handed is its provider API key.
+
     for name, reader, status, key in [("deepseek", deepseek, 401, "k"), ("minimax-cn", minimax, 401, "k"),
-                                      ("qwen", qwen, 401, "a=1"), ("kimi-coding", kimi, 401, "k")]:
+                                      ("kimi-coding", kimi, 401, "k")]:
         result = reader.read_balance(options(key), fetch=lambda url, **kw: response(status, False, "denied"))
         assert_equal(result["reading"]["remaining"], 0, f"{name} reports the refusal as an exhausted allowance")
         assert_match(result["reading"].get("error"), rf"HTTP {status}", f"{name} says which status refused it")
@@ -278,106 +277,10 @@ def datetime_ms(stamp):
 check("minimax: the language resources decide, per window, with a reset estimate", minimax_windows)
 
 
-def qwen_parse():
-    quota = {"lite": {"monthly": 11_500, "five_hour": 3_000},
-             "standard": {"monthly": 45_000, "five_hour": 3_000},
-             "addon_quota": {"extrabundle": 0}}
-    reading = qwen.parse({"per1MonthPercentage": 0.349, "per1MonthResetTime": 1_792_000_000_000}, quota,
-                         {"specCode": "standard", "remainingDays": 22, "endTime": 1_795_000_000_000})
-    assert_equal(reading["remaining"], 65.1, "the plan meters a month, and reports what is left of it")
-    assert_deep(reading["windows"], [{"name": "monthly", "remaining": 65.1, "capacity": 100}])
-    assert_equal(reading["resetsAt"], contract.iso_from_ms(1_792_000_000_000))
-    assert_equal(reading.get("error"), None)
-    assert_match(reading["detail"], r"standard plan, 65\.1% left, of 45000 Credits")
-    assert_match(reading["detail"], r"subscription ends 2026-11-18T")
-
-    legacy = qwen.parse({"per1WeekPercentage": 1, "per1WeekResetTime": "2026-10-20T03:00:00+08:00"}, None, None)
-    assert_equal(legacy["remaining"], 0, "a subscription still metering a week reports that window")
-    assert_deep(legacy["windows"], [{"name": "weekly", "remaining": 0, "capacity": 100}])
-    assert_match(legacy.get("error"), r"weekly allowance is spent")
-    assert_equal(legacy["resetsAt"], "2026-10-19T19:00:00.000Z")
-
-    ratio_only = qwen.parse({"per1MonthPercentage": 0.5}, None, None)
-    assert_equal(ratio_only["remaining"], 50, "a tier total this script could not read costs the Credits, not the reading")
-    if re.search(r"Credits", ratio_only["detail"]):
-        raise AssertionError(f"the Credits should be absent: {ratio_only['detail']}")
-
-    assert_raises(lambda: qwen.parse({}, quota, {"specCode": "standard"}), r"meters no per1Month")
-    assert_raises(lambda: qwen.parse(None, quota, None))
-
-
-check("qwen: the console's used ratio becomes percent left, with the tier total as context", qwen_parse)
-
-
-def qwen_request():
-    assert_equal(qwen.cookie_value("a=1; sec_token=abc; cna=xyz", "sec_token"), "abc")
-    assert_equal(qwen.cookie_value("a=1", "sec_token"), None)
-
-    transport, requests = fake_gateway({"usage": {"per1MonthPercentage": 0.25}})
-    result = qwen.read_balance(options("a=1; cna=xyz", "https://cs-data.example/data/api.json", 5000),
-                               fetch=transport)
-    assert_equal(result["reading"]["remaining"], 75)
-
-    info = requests[0]
-    assert_match(info["url"], r"tool/user/info\.json$")
-    assert_match(info["headers"].get("cookie", ""), r"cna=xyz")
-
-    request = requests[1]
-    query = contract.form_decode(request["url"].split("?", 1)[1])
-    assert_equal(query.get("action"), "BroadScopeAspnGateway")
-    assert_equal(query.get("product"), "sfm_bailian")
-    assert_equal(query.get("api"), "zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/usage")
-    assert_equal(query.get("_v"), "undefined")
-    form = contract.form_decode(request["body"])
-    assert_equal(form.get("action"), "BroadScopeAspnGateway")
-    assert_equal(form.get("region"), "cn-beijing")
-    assert_equal(form.get("sec_token"), "csrf-from-console", "the token comes from the console, not from the user")
-    params = json.loads(form.get("params"))
-    assert_equal(params["Api"], "zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/usage")
-    assert_equal(params["V"], "1.0")
-    assert_equal(params["Data"]["cornerstoneParam"]["consoleSite"], "QIANWENAI")
-    assert_equal(params["Data"]["cornerstoneParam"]["X-Anonymous-Id"], "xyz",
-                 "the console reads its own anonymous id out of the cookie")
-    assert_match(request["headers"].get("user-agent", ""), r"Mozilla/5\.0",
-                 "the gateway refuses a custom user agent")
-    assert_equal(request["headers"].get("content-type"), "application/x-www-form-urlencoded")
-    assert_match(request["headers"].get("referer", ""), r"token-plan/individual$")
-    assert_deep([inner_of(entry) for entry in requests[1:]], ["usage", "quota-config", "subscription"])
-
-
-check("qwen: the gateway request carries the session, the CSRF token, and a browser identity", qwen_request)
-
-
-def qwen_failures():
-    refused = lambda url, **kw: response(200, True, json.dumps({
-        "data": {"errorCode": "BailianGateway.Login.NotLogined", "errorMsg": "nope"}}))
-    assert_raises(lambda: qwen.call_gateway("usage", "a=1", "t", 1000, fetch=refused),
-                  r"the console session was refused")
-
-    empty = lambda url, **kw: response(200, True, json.dumps({"code": "200"}))
-    assert_raises(lambda: qwen.call_gateway("usage", "a=1", "t", 1000, fetch=empty), r"answered no data body")
-
-    failing = lambda url, **kw: response(500, False, "boom")
-    assert_raises(lambda: qwen.call_gateway("usage", "a=1", "t", 1000, fetch=failing), r"HTTP 500")
-
-    no_token = lambda url, **kw: response(401, False, "")
-
-    def offline(url, **kwargs):
-        raise RuntimeError("offline")
-
-    assert_equal(qwen.read_sec_token("a=1", 1000, fetch=no_token), None)
-    assert_equal(qwen.read_sec_token("a=1", 1000, fetch=offline), None,
-                 "a token call that cannot answer leaves the cookie's own sec_token to be used")
-
-
-check("qwen: a refused session, an unknown envelope, and a missing token each report themselves", qwen_failures)
-
 PROVIDERS = [
     ("deepseek-official", deepseek, "DEEPSEEK_API_KEY", "https://api.deepseek.com"),
     ("kimi-coding", kimi, "KIMI_CODING_API_KEY", "https://api.kimi.com/coding/v1"),
     ("minimax-cn", minimax, "MINIMAX_CN_API_KEY", "https://www.minimax.cn"),
-    # `key` is the console session cookie here, not an API key.
-    ("qwen", qwen, "QWEN_CONSOLE_COOKIE", "https://cs-data.qianwenai.com/data/api.json"),
 ]
 
 

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """`qwen-token-plan` allowance, read from Alibaba Cloud's own OpenAPI.
 
-The gateway `qwen.py` reads (the console's own XHR) needs a browser session. A session
-lives a few days, cannot be renewed by a machine, and its expiry is silent: the reading
-stops arriving and the plan looks unreadable. This reader asks the same question through
-`GetSubscriptionStats`, which is an ordinary signed OpenAPI -- a long-lived AccessKey
-instead of a cookie.
+The earlier route read the console's own XHR, which needs a browser session: it lived a
+few days, could not be renewed by a machine, and its expiry was silent -- the reading
+stopped arriving and the plan looked unreadable (2026-11-15). This reader asks the same
+question through `GetSubscriptionStats`, an ordinary signed OpenAPI: a long-lived
+AccessKey instead of a cookie. The plan meters a month and nothing shorter, so this
+covers every window the console did.
 
   GET https://modelstudio.cn-beijing.aliyuncs.com/tokenplan/subscription/stats
   x-acs-action: GetSubscriptionStats, x-acs-version: 2026-02-10
@@ -21,7 +22,7 @@ id/secret pair is refused by name. Where the pair may live, in this order:
 in `~/.agents/keys.toml` beside the roster -- never in a file that is committed.
 
 The reading is `percent-left`, the worst seat type's remaining Credits over its total,
-which is the unit `qwen.py` reports, so either entry can stand in for the other.
+as a percentage, the same unit the provider console prints.
 """
 
 import hashlib

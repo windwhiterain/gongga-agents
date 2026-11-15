@@ -1195,8 +1195,9 @@ cache_ttl_tier = "隐式（不指定 cache_control 就落这里；显式另算�
   source = "https://platform.qianwenai.com/docs/token-plan/personal/token-plan-personal-overview"
   quota_note = "官方余量查询是 `bl usage token-plan`（CLI 控制台鉴权）或 OpenAPI GetSubscriptionStats（AccessKey 签名），都没有 sk- 可用的路径"
 
-  # 官方路径：不需要浏览器会话，因此不会几天就静默失效。凭据是 AccessKey 对，
-  # 不是模型 key（模型 key 签不了名）。排在控制台之前：能读到就用它。
+  # 唯一的读取路径：官方签名的 OpenAPI。凭据是 AccessKey 对，不是模型 key（模型 key 签不了名）。
+  # 控制台 Cookie 那条 2026-11-15 退役：Qwen 套餐不计量 5h / weekly 窗口，官方接口已覆盖全部
+  # 窗口；而会话几天就静默失效（那天 09:15 过期，读数停摆、provider 被池子判成读不到）。
   [[provider.quota_query]]
   id = "openapi-subscription-stats"
   kind = "script"
@@ -1216,24 +1217,6 @@ cache_ttl_tier = "隐式（不指定 cache_control 就落这里；显式另算�
   """
   script = "providers/qwen_subscription.py"
   script_env = "QWEN_TOKEN_PLAN_KEY"
-
-  [[provider.quota_query]]
-  id = "console-data-gateway"
-  kind = "script"
-  method = "GET"
-  url = "https://cs-data.qianwenai.com/data/api.json"
-  auth = "cookie"
-  auth_env = "QWEN_CONSOLE_COOKIE"
-  dashboard = "https://platform-home.qianwenai.com/analytics/token-plan/individual"
-  unit = "percent-left"
-  note = """
-    官方唯一路径是 ACS3-HMAC-SHA256 签名的 OpenAPI（GetSubscriptionStats，
-    https://help.aliyun.com/zh/model-studio/get-subscription-stats），要 AccessKey 而不是模型 sk-；
-    官方 CLI `bl usage token-plan` 走控制台鉴权。所以本机用控制台 Cookie 读数据网关，
-    脚本自己取 sec_token。Cookie 过期时读数是"缺失"，不是 0。
-  """
-  script = "providers/qwen.py"
-  script_env = "QWEN_CONSOLE_COOKIE"
 
 [[provider]]
 id = "qwen-dashscope"
