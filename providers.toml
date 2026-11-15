@@ -48,7 +48,8 @@ timezone = "Asia/Shanghai"
 # 前缀缓存省的是输入费，但它**会过期**。过期时间由厂商定，且大多写着"不保证"，
 # 所以它属于 provider 级的事实，写在 `[[provider]]` 下，不是写在某个模型的价格里：
 #
-#   cache_ttl                  保留多久，用厂商自己的说法（"5 分钟，命中即续期"）
+#   cache_ttl                  保留多久，**必须带数字**：厂商自己的说法优先；官方没公布就写估计值
+#                              并在括号里标「估」—— 这一行是读的人看到的第一眼，留 unverified 等于没写
 #   cache_ttl_note             它没说的那一半：写入怎么收费、能不能续期、存储怎么算
 #   cache_ttl_source           查证来源；cache_ttl_retrieved 是查证日期
 #   cache_ttl_estimate         拿来做规划的那个数 —— 官方不给的时候也要有，可以带"约"
@@ -58,9 +59,10 @@ timezone = "Asia/Shanghai"
 #   cache_ttl_tier             那个秒数是**哪一档**：请求不指定缓存时长时落的那一档
 #   cache_ttl_tiers            该 provider 还有别的、能明确要到且长度不同的档（秒）；服务端不读
 #
-# 这两层必须分开写，因为它们的用途不同：`cache_ttl` 回答"厂商承诺了什么"，只有官方能填；
-# `cache_ttl_estimate` 回答"我该按多少秒去做超时/重发/前缀稳定性"，宁可是猜的也要有个数。
-# 官方没公布时 `cache_ttl` 写 `unverified —— ...`，估计值照填 —— 留空等于没有这个信息。
+# 这两层必须分开写，因为它们的用途不同：`cache_ttl` 回答"厂商承诺了什么"，`cache_ttl_estimate`
+# 回答"我该按多少秒去做超时/重发/前缀稳定性"。但**两层都要有数字**：官方没公布时 `cache_ttl`
+# 写自己的估计并标「估」，不要写 `unverified` —— 那等于让这一行空着，而"大概是多久"是读的人
+# 唯一能拿去做决定的东西。出处交给 `cache_ttl_estimate_basis` / `cache_ttl_estimate_source`。
 #
 # 散文和数字必须成对：`cache_ttl_estimate` 给人读，`cache_ttl_secs` 给程序算 —— prefix cache
 # 的前缀过期时间是照后者算的，所以改了口径就要同步改数字，否则读文件的人和服务端各信各的。
@@ -652,7 +654,7 @@ catalog_verified = "2026-11-01 本机 key 探到 33 个：文本对话线仍是 
 retrieved = "2026-10-22"
 
 # 缓存保留时间：官方文档只讲命中计价，不讲保留多久 —— 官方值是 unverified，估计值见下。
-cache_ttl = "unverified —— 官方 Prompt 缓存页没有公布有效期，由系统自行淘汰"
+cache_ttl = "5 分钟（估 —— 官方 Prompt 缓存页没有公布有效期，由系统自行淘汰）"
 cache_ttl_note = "自动启用，最小缓存单元 256 token；文档里没有 TTL 参数。定价表只有 cache_read 一档 —— 估计写入与存储不另收费，是从缺项推的，未确认。"
 cache_ttl_source = "https://platform.stepfun.com/docs/zh/guides/developer/prompt-cache"
 cache_ttl_retrieved = "2026-11-01"
@@ -788,7 +790,7 @@ catalog_verified = "2026-11-01 本机 key 探到 7 个：mimo-v2.6-flash / -pro 
 retrieved = "2026-10-22"
 
 # 缓存保留时间：定价页只写"缓存写入限时免费"，保留多久一个字没有 —— 官方值留空，估计值见下。
-cache_ttl = "unverified —— 定价页没有公布前缀缓存的保留时间"
+cache_ttl = "数小时量级，约 1–6 小时（估 —— 定价页没有公布前缀缓存的保留时间）"
 cache_ttl_note = "缓存命中有价（见 cache_read），写入 0.00 是限时免费的价，不是永久承诺；有效期没数字，别在配置里编一个。"
 cache_ttl_source = "https://mimo.mi.com/docs/zh-CN/price/pay-as-you-go"
 cache_ttl_retrieved = "2026-11-01"
@@ -942,7 +944,7 @@ catalog_verified = "2026-11-04 本机 key 探到 3 个：LongCat-2.5-Preview、L
 retrieved = "2026-10-22"
 
 # 缓存保留时间：官方定价页只给缓存命中价，估计值按同档厂商填。
-cache_ttl = "unverified —— 官方定价页没有缓存保留时间"
+cache_ttl = "5 分钟（估 —— 官方定价页没有缓存保留时间）"
 cache_ttl_note = "第三方横评把它列为 Cache TTL undefined，与官方文档一致：没有可依赖的时长，只有命中价。"
 cache_ttl_source = "https://longcat.chat/platform/docs/pricing/longcat-2.0"
 cache_ttl_retrieved = "2026-11-01"
@@ -1329,7 +1331,7 @@ TENCENT_API_KEY（只有 DSH 凭据引用这个名字）。补齐时写进 keys.
 
 # 缓存保留时间：官方指南讲了 TTL 的机制（prompt_cache_key / X-Session-ID 怎么喂前缀），
 # 但通篇没有给时长 —— 机制存在不等于数字存在，官方值留空，估计值按同档填。
-cache_ttl = "unverified —— 官方《提升 Cache 命中率指南》只讲 TTL 机制，没有给具体时长"
+cache_ttl = "5 分钟（估 —— 官方《提升 Cache 命中率指南》只讲 TTL 机制，没有给具体时长）"
 cache_ttl_note = "同一份文档给了两条提高命中的手段：请求体里 prompt_cache_key 填 conversation_id、HTTP 头 X-Session-ID 把人固定到同一推理实例。本机没有这把 key，也验不了命中。"
 cache_ttl_source = "https://cloud.tencent.cn/document/product/1823/131410"
 cache_ttl_retrieved = "2026-11-01"
@@ -1490,7 +1492,7 @@ note = """
 """
 
 # 缓存保留时间：平台文档没有缓存章节，估计值按同档厂商填。
-cache_ttl = "unverified —— 平台文档没有缓存章节，缓存命中价也标着『没公布』"
+cache_ttl = "5 分钟（估 —— 平台文档没有缓存章节，缓存命中价也标着『没公布』）"
 cache_ttl_source = "https://dots.ai/platform/docs"
 cache_ttl_retrieved = "2026-11-01"
 cache_ttl_estimate = "约 5 分钟"
@@ -1564,7 +1566,7 @@ note = """
 
 # 缓存保留时间：官方不卖时长，卖的是"元/百万 tokens/小时"的存储 —— 也就是说缓存是租来的，
 # 存在期间一直在计费，但没有公布过期时间。
-cache_ttl = "unverified —— 官方只按小时收缓存存储费，没有公布过期时间"
+cache_ttl = "1 小时（估 —— 官方只按小时收缓存存储费，没有公布过期时间）"
 cache_ttl_note = "存储按『元/百万 Tokens/小时』计，现价 0.00（限时免费），官方明说免费期结束后才会公布标准价；过期时间未公布——社区有『约 1 小时』的说法，没有官方出处，这里不采用。隐式缓存，无需 cache_control。"
 cache_ttl_source = "https://docs.bigmodel.cn/cn/guide/capabilities/cache"
 cache_ttl_retrieved = "2026-11-01"
@@ -1939,7 +1941,7 @@ API Key 形如 `bce-v3/ALTAK-…`，来自控制台「快速接入」的通用 K
 """
 
 # 缓存保留时间：官方只写"系统会定期清理"，没给时长。
-cache_ttl = "unverified —— 官方原文只说『系统将定期清理一段时间没有使用过的缓存』，没有时长"
+cache_ttl = "30 分钟（估 —— 官方原文只说『系统将定期清理一段时间没有使用过的缓存』，没有时长）"
 cache_ttl_note = "隐式缓存：默认开启、无需 cache_control，命不命中由系统判定，官方明说即使上下文完全一致也有不命中的概率。计费表里有『命中缓存』一栏，说明 5.5 这条线按命中 token 折价；没有写入费与存储费的栏目 —— 估计不另收，是从价目表缺项推的，未向官方确认。"
 cache_ttl_source = "https://ai.baidu.com/ai-doc/WENXINWORKSHOP/Rm6uq7jy9"
 cache_ttl_retrieved = "2026-11-15"
@@ -2034,7 +2036,7 @@ note = """
 额度是订阅制的积分/额度，不是按 token 计费：余额、到期与调用明细都在控制台「我的订阅」与「用量明细」。
 """
 
-cache_ttl = "unverified —— 套餐面文档一个字没提缓存，按量面也只说『系统会定期清理』"
+cache_ttl = "30 分钟（估 —— 套餐面文档一个字没提缓存，按量面也只说『系统会定期清理』）"
 cache_ttl_note = "同一后端，但套餐面没有缓存计费一栏，也没说是否与按量面共享缓存；命中与否由系统判定。"
 cache_ttl_source = "https://cloud.baidu.com/doc/qianfan/s/Dmrabu8b6"
 cache_ttl_retrieved = "2026-11-15"
