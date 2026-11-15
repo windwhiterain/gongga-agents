@@ -1167,9 +1167,28 @@ cache_ttl_tier = "隐式（不指定 cache_control 就落这里；显式另算�
   source = "https://platform.qianwenai.com/docs/token-plan/personal/token-plan-personal-overview"
   quota_note = "官方余量查询是 `bl usage token-plan`（CLI 控制台鉴权）或 OpenAPI GetSubscriptionStats（AccessKey 签名），都没有 sk- 可用的路径"
 
-  # 唯一的读取路径：官方签名的 OpenAPI。凭据是 AccessKey 对，不是模型 key（模型 key 签不了名）。
-  # 控制台 Cookie 那条 2026-11-15 退役：Qwen 套餐不计量 5h / weekly 窗口，官方接口已覆盖全部
-  # 窗口；而会话几天就静默失效（那天 09:15 过期，读数停摆、provider 被池子判成读不到）。
+  # 读取顺序：控制台会话在前，签名的 OpenAPI 在后。
+  # 2026-11-15 实测：GetSubscriptionStats 只统计「席位」（SeatCredits / SeatRemainingCredits），
+  # 个人版订阅没有席位，接口只回 {"Success": true} 而没有 Data —— 它读不出本机这份套餐的百分比。
+  # 控制台那条是唯一读出过数字的路径（81.4% of 200000 Credits），所以排第一；OpenAPI 留着，
+  # 等这个账号变成团队席位形态时它自然能给出读数。
+  [[route.quota_query]]
+  id = "console-data-gateway"
+  kind = "script"
+  method = "GET"
+  url = "https://cs-data.qianwenai.com/data/api.json"
+  auth = "cookie"
+  auth_env = "QWEN_CONSOLE_COOKIE"
+  dashboard = "https://platform-home.qianwenai.com/analytics/token-plan/individual"
+  unit = "percent-left"
+  note = """
+    个人版 Token Plan 唯一的读数来源：用控制台会话（cookie）读数据网关，脚本自己取 sec_token。
+    会话有寿命：2026-11-15 09:15 过期过一次，读数停摆、provider 被池子判成「读不到」。
+    过期是「缺失」不是 0；重取 cookie 见 @skill(providers) 的 §4b（从那台已登录的浏览器里拿）。
+  """
+  script = "providers/qwen.py"
+  script_env = "QWEN_CONSOLE_COOKIE"
+
   [[route.quota_query]]
   id = "openapi-subscription-stats"
   kind = "script"
