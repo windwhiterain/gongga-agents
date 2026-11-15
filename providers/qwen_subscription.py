@@ -48,6 +48,7 @@ KEY_ENV = "QWEN_TOKEN_PLAN_KEY"
 KEYSTORE = os.path.join(os.environ.get("GONGGA_AGENTS_HOME")
                         or os.path.join(os.path.expanduser("~"), ".agents"), "keys.toml")
 KEYSTORE_NAME = "qwen-accesskey"
+UNRESOLVED = "unresolved"
 
 
 def encode(part):
@@ -106,7 +107,7 @@ def credentials(options, environment):
         return key_id.strip(), key_secret.strip()
     key_id = (environment.get(ENV_ID) or "").strip()
     key_secret = (environment.get(ENV_SECRET) or "").strip()
-    if key_id and key_secret:
+    if key_id and key_secret and UNRESOLVED not in (key_id, key_secret):
         return key_id, key_secret
     pair = keystore_pair()
     if pair is not None:
@@ -187,6 +188,11 @@ def main():
         pair = keystore_pair()
         if pair is not None:
             environment[ENV_ID], environment[ENV_SECRET] = pair
+    # The option reader refuses a missing credential before any of this script runs, and
+    # its sentence cannot name the keystore. A placeholder keeps it quiet so the refusal
+    # below is the one an operator reads; `credentials` treats it as absent.
+    environment.setdefault(ENV_ID, UNRESOLVED)
+    environment.setdefault(ENV_SECRET, UNRESOLVED)
     options = contract.read_options(
         sys.argv[1:], environment, ENV_ID, BASE_URL, PROVIDER,
         script_name=os.path.basename(__file__))
