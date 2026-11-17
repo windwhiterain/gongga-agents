@@ -195,7 +195,6 @@ unit = "per_1m_tokens"
 input = 2.00              # cache miss
 output = 8.00
 cache_read = 0.04
-price_usd = { input = 0.30, output = 1.20, cache_read = 0.006 }
 # 价目表只有这三栏；写入与存储没有列价，估计不计费（推断，未确认）。
 # Peak first: it is the narrow exception, and a band list is read in order.
 # Its prices are the base ones above, so it states none of its own.
@@ -215,7 +214,6 @@ retrieved = "2026-10-22"
   input = 1.00
   output = 4.00
   cache_read = 0.02
-  price_usd = { input = 0.15, output = 0.60, cache_read = 0.003 }
   source = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
   retrieved = "2026-10-22"
 
@@ -229,7 +227,6 @@ unit = "per_1m_tokens"
 input = 9.00
 output = 27.00
 cache_read = 0.30
-price_usd = { input = 1.32, output = 3.96, cache_read = 0.044 }
 # Peak first and the catch-all second: a band list is read in order, and the base
 # price above is the peak rate, so `peak` states none of its own.
 [[serving.price.band]]
@@ -245,7 +242,6 @@ note = "除高峰时段以外的一切时间：工作日 18:00-次日 09:00、12
 input = 4.50
 output = 13.50
 cache_read = 0.15
-price_usd = { input = 0.66, output = 1.98, cache_read = 0.022 }
 source = "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/"
 retrieved = "2026-10-22"
 
@@ -403,7 +399,6 @@ unit = "per_1m_tokens"
 input = 1.00
 output = 4.00
 cache_read = 0.10
-price_usd = { input = 0.15, output = 0.60, cache_read = 0.015 }
 source = "https://platform.minimaxi.com/docs/pricing/overview"
 retrieved = "2026-10-22"
 note = "无任何峰谷机制。service_tier=priority 是 1.5×，但本模型不支持。"
@@ -419,7 +414,6 @@ unit = "per_1m_tokens"
 input = 2.10              # 输入 ≤512k
 output = 8.40
 cache_read = 0.42
-price_usd = { input = 0.30, output = 1.20, cache_read = 0.06 }
 source = "https://platform.minimaxi.com/docs/pricing/overview"
 retrieved = "2026-10-22"
 note = "永久五折，原价 ¥4.20/¥16.80/¥0.84"
@@ -429,7 +423,6 @@ note = "永久五折，原价 ¥4.20/¥16.80/¥0.84"
   input = 4.20
   output = 16.80
   cache_read = 0.84
-  price_usd = { input = 0.60, output = 2.40, cache_read = 0.12 }
   source = "https://platform.minimaxi.com/docs/pricing/overview"
 
 
@@ -603,7 +596,6 @@ unit = "per_1m_tokens"
 input = 6.50
 output = 27.00
 cache_read = 1.70
-price_usd = { input = 0.95, output = 4.00, cache_read = 0.19 }
 source = "https://bailian.console.aliyun.com/cn-beijing/model/market/detail/kimi%2Fkimi-k2.8-preview"
 retrieved = "2026-11-01"
 
@@ -617,7 +609,6 @@ unit = "per_1m_tokens"
 input = 13.00
 output = 54.00
 cache_read = 1.70
-price_usd = { input = 1.90, output = 8.00, cache_read = 0.19 }
 source = "https://www.kimi.ai/zh-hans/resources/kimi-k3-1-pro-pricing"
 retrieved = "2026-11-01"
 
@@ -798,7 +789,6 @@ unit = "per_1m_tokens"
 input = 7.00
 output = 20.00
 cache_read = 0.70
-price_usd = { input = 1.00, output = 2.70, cache_read = 0.10 }
 source = "https://platform.stepfun.com/docs/zh/guides/pricing/pricing/details"
 retrieved = "2026-10-22"
 note = "cache read 2026-10-14 00:30（北京时间）起从 ¥0.35 涨到 ¥0.70，之前付费的调用方有保护期。"
@@ -813,7 +803,6 @@ unit = "per_1m_tokens"
 input = 1.35
 output = 8.10
 cache_read = 0.27
-price_usd = { input = 0.20, output = 1.15, cache_read = 0.04 }
 source = "https://platform.stepfun.com/docs/zh/guides/pricing/pricing/details"
 retrieved = "2026-10-22"
 
@@ -827,7 +816,6 @@ unit = "per_1m_tokens"
 input = 0.70
 output = 2.10
 cache_read = 0.14
-price_usd = { input = 0.09, output = 0.30, cache_read = 0.02 }
 source = "https://platform.stepfun.com/docs/zh/guides/pricing/pricing/details"
 retrieved = "2026-10-22"
 
@@ -952,7 +940,6 @@ input = 3.00
 output = 6.00
 cache_read = 0.025
 cache_write = 0.00                       # 限时免费
-price_usd = { input = 0.435, output = 0.87, cache_read = 0.0036 }
 source = "https://mimo.mi.com/docs/zh-CN/price/pay-as-you-go"
 retrieved = "2026-10-22"
 [[serving.price.band]]
@@ -973,7 +960,6 @@ input = 1.00
 output = 2.00
 cache_read = 0.02
 cache_write = 0.00                       # 限时免费
-price_usd = { input = 0.14, output = 0.28, cache_read = 0.0028 }
 source = "https://mimo.mi.com/docs/zh-CN/price/pay-as-you-go"
 retrieved = "2026-10-22"
 
@@ -988,7 +974,6 @@ input = 30.00
 output = 60.00
 cache_read = 0.25
 cache_write = 0.00                       # 限时免费，与其它两款一致
-price_usd = { input = 4.35, output = 8.70, cache_read = 0.036 }
 source = "https://mimo.mi.com/docs/zh-CN/price/pay-as-you-go"
 retrieved = "2026-10-22"
 
@@ -1090,7 +1075,6 @@ unit = "per_1m_tokens"
 input = 2.00
 output = 8.00
 cache_read = 0.04
-price_usd = { input = 0.30, output = 1.20, cache_read = 0.006 }
 source = "https://longcat.chat/platform/docs/pricing/longcat-2.0"
 retrieved = "2026-10-22"
 note = "没有峰谷分段，只有企业按月消费量的阶梯折扣（月消费 ≥¥500 起 10%，≥¥40,000 到 40%）。没有月套餐，只有永不过期的预付余额加 30 天 Token Pack。"
@@ -1105,7 +1089,6 @@ unit = "per_1m_tokens"
 input = 2.00
 output = 8.00
 cache_read = 0.04
-price_usd = { input = 0.30, output = 1.20 }
 source = "https://longcat.chat/platform/docs/pricing/longcat-2.5"
 retrieved = "2026-10-22"
 
@@ -1119,7 +1102,6 @@ unit = "per_1m_tokens"
 input = 2.00
 output = 8.00
 cache_read = 0.04
-price_usd = { input = 0.30, output = 1.20, cache_read = 0.006 }
 source = "https://longcat.chat/platform/docs/pricing/longcat-2.5"
 retrieved = "2026-11-04"
 note = "限时折扣价，与 2.0 / 2.5-Preview 同价；平台显示价与账单为准。没有峰谷分段。"
@@ -1139,6 +1121,7 @@ id = "qwen4-max-preview"
 name = "Qwen 4 Max（预览版）"
 tier = "sota"
 context = 1000000
+max_input = 991808                     # 非思考（reasoning_effort=none）；默认思考模式 983616
 max_output = 393216                    # 官方《文本生成与视觉理解》：393,216（思考+输出）
 modalities = ["text", "image", "video"]
 thinking_budget_max = 262144
@@ -1152,7 +1135,39 @@ note = """
 活动口径两处：团队版文档写「限时 Credits 2 折（等于 5 倍用量），每晚 22:00-次日 08:00 再 2 折，即原标准 0.4 折」；新闻口径是「限时 2 折，新用户再叠加 5 折，最低 1 折」。等正式版定价页出来再补数字。
 参数量官方未公布，故不写 [model.params]。
 来源：上下文档 https://help.aliyun.com/zh/model-studio/text-generation-model/ 、预览期与折扣 https://help.aliyun.com/zh/model-studio/token-plan-team-overview （均 2026-11-11 那版）；能力清单 https://help.aliyun.com/zh/model-studio/models （2026-11-11）。
+
+输入上限（2026-11-17 本机套餐 key 实测，超长请求被拒时接口自报）：默认思考模式 `Range of input length should be [1, 983616]`，`reasoning_effort=none` 时 `[1, 991808]` —— 与正式版 qwen4-max / qwen3.8-max 同数。两个都比 `context` 小，长会话真正撞的是这两个数，不是 1M：lichen-vm/impl/mentor/2 就在 983964 输入上撞了 983616 这条。
 """
+
+[[model]]
+id = "qwen4-max"
+name = "Qwen 4 Max"
+tier = "sota"
+context = 1000000
+max_input = 991808                     # 非思考；思考模式 983616
+max_output = 262144                    # 思考 + 最终答案合计；关思考时 131072
+modalities = ["text", "image", "video"]
+thinking_budget_max = 262144
+reasoning_levels = ["low", "high", "xhigh"]
+reasoning_default = "high"
+reasoning_mapping = { minimal = "low", medium = "high", max = "xhigh" }
+reasoning_note = "档位与默认值来自官方《Latest model: Qwen4-Max》(2026-11-17)：low / high / xhigh，默认 high，thinking_budget 默认 131072；minimal→low、medium→high、max→xhigh。本机套餐 key 2026-11-17 传 bogus 实测接口仍收 'none/off/minimal/low/medium/high/xhigh/max' 全集，thinking_budget 传 300000 回 'not greater than 262144'——接口接受别名比官方三档宽，映射按官方口径记，别把 extra 档当新能力。none/off 是关思考，不是更强的档。"
+note = """
+正式版 2026-11-16 上线，接替 11-11 的 qwen4-max-preview（preview 11-25 24:00 下线）。
+wire id 就是 qwen4-max，本机 2026-11-17 在套餐面真实调用返回的 model 也是 qwen4-max，**没有** qwen4.0-max 这个别名 —— preview 才有 qwen4.0-max-preview 别名，别互相套。
+与 preview 的两处硬差异（迁移时要重新核对长输出和思考档）：思考+答案合计上限 393216 → 262144，默认档 xhigh → high。
+官方支持文本/图像/视频输入、流式、Function Calling、并行工具、结构化输出、显式与隐式缓存、CoT Summary；**不支持** Batch 推理、微调与模型部署，所以这条 serving 不写 batch 价。
+参数量（正式版官方公布，preview 那条当时写"未公布"）：2.4T backbone、每 token 激活 71B，另有 328B N-gram Embedding。
+来源：规格 https://docs.qwencloud.com/developer-guides/getting-started/latest-model 、定价 https://docs.qwencloud.com/developer-guides/getting-started/pricing 、发布 https://qwen.ai/blog?id=qwen4-max （均 2026-11-17 取）。
+"""
+
+[model.params]
+unit = "billion"
+total = 2400
+active = 71
+note = "2.4T backbone + 328B N-gram Embedding, 71B active per token"
+source = "https://docs.qwencloud.com/developer-guides/getting-started/latest-model"
+retrieved = "2026-11-17"
 
 [[model]]
 id = "qwen3.8-max"
@@ -1205,9 +1220,9 @@ key_prefix = "sk-sp-"
 key_env = "QWEN_API_KEY"
 homepage = "https://modelstudio.console.alibabacloud.com"
 catalog = "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1/models"
-catalog_verified = "2026-11-11 本机套餐 key 探到 22 个：新增 qwen4-max-preview（官方别名 qwen4.0-max-preview，预览期 11-11 10:00 至 11-25 24:00，结束后下线）；另有 qwen3.8-max / -flash、qwen3.7-max / -plus、qwen3.6-flash、auto、decision-model-preview、glm-5.2 / glm-5.3、deepseek-v4-flash / -pro / -v4.1-flash / -v4.1-flash-1017，以及图像和音频的几个"
-retrieved = "2026-11-11"
-note = "这个主机是通义千问 MaaS 的产品端点，不是内置的 ap-southeast-1 国际区；套餐 key 与 DashScope 按量 key 是两份凭据。套餐目录里混着 glm-5.2 / glm-5.3（智谱）和 deepseek-v4*（DeepSeek）—— 那是三方经百炼路由，不是阿里的模型，一条都不收；deepseek 的忙闲价格也不替它们算。qwen4-max-preview 目前只在 Token Plan 上卖（DashScope 按量目录里没有），个人版文档 2026-11-09 那版还没列出它，团队版页面 2026-11-11 已列出，本机 key 实探也拿到了。"
+catalog_verified = "2026-11-17 本机套餐 key 探到 23 个：新增 qwen4-max 正式版（11-16 上线，wire id 与返回 model 都是 qwen4-max，无别名）；qwen4-max-preview 仍在目录里，11-25 24:00 下线。其余 qwen3.8-max / -flash、qwen3.7-max / -plus、qwen3.6-flash、auto、decision-model-preview、glm-5.2 / glm-5.3、deepseek-v4-flash / -pro / -v4.1-flash / -v4.1-flash-1017，以及图像和音频的几个"
+retrieved = "2026-11-17"
+note = "这个主机是通义千问 MaaS 的产品端点，不是内置的 ap-southeast-1 国际区；套餐 key 与 DashScope 按量 key 是两份凭据。套餐目录里混着 glm-5.2 / glm-5.3（智谱）和 deepseek-v4*（DeepSeek）—— 那是三方经百炼路由，不是阿里的模型，一条都不收；deepseek 的忙闲价格也不替它们算。qwen4-max 与 qwen4-max-preview 目前都只在 Token Plan 上卖：2026-11-17 本机 DashScope 按量 key 的目录（182 个）里没有 qwen4-max；官方说正式版也开放按量 API，但走的是 qwencloudapi.com 的新区域端点，不是这条 route 的 dashscope.aliyuncs.com，故按量面暂不收。"
 
 # 缓存保留时间：两种缓存两套规则，别混成一个数。
 cache_ttl = "显式缓存 5 分钟、命中即重置；隐式缓存无固定有效期，系统定期清理长时间未使用的"
@@ -1335,6 +1350,21 @@ cache_ttl_tier = "隐式（不指定 cache_control 就落这里；显式另算�
 # --- 供给：哪条面卖哪个模型、按哪一档价 -----------------------------------
 [[serving]]
 route = "qwen-token-plan"
+model = "qwen4-max"
+
+[serving.price]
+currency = "CNY"
+unit = "per_1m_tokens"
+input = 10.00                          # 华北2（北京）/ 全球，0<Token≤1M
+output = 30.00                         # 思维链+回答合计
+cache_read = 0.50                      # 显式/隐式缓存命中
+cache_write = 12.50                    # 创建缓存 5m；1h 是 20.00
+source = "https://help.aliyun.com/zh/model-studio/model-pricing"
+retrieved = "2026-11-17"
+note = "阿里云百炼中文定价页直接公布的人民币价（非汇率换算）：华北2（北京）与全球 输入 10 元 / 输出（思维链+回答）30 元 / 创建缓存 5m 12.5 元·1h 20 元 / 显式与隐式缓存命中 0.5 元，每百万 Token；新加坡（国际）另有 10.938 / 32.813 元、缓存 13.672 / 21.875 / 0.547 元。Token Plan 实际扣订阅 Credits、不按这张表计费 —— 这张表只作比价用；服务端也只读 input/cache_read 比值，不做币种换算。正式版官方明确不支持 Batch，故不写 batch 价；比 qwen3.8-max 的 12/36 元便宜约 17%，缓存命中降约 80%（2.5→0.5 元）。"
+
+[[serving]]
+route = "qwen-token-plan"
 model = "qwen4-max-preview"
 
 [serving.price]
@@ -1346,10 +1376,9 @@ cache_read = 1.50
 cache_write = 15.00
 cache_read_explicit = 1.00
 batch = { input = 6.00, output = 18.00 }
-price_usd = { input = 2.00, output = 6.00, cache_read = 0.25 }
 source = "https://platform.qianwenai.com/docs/developer-guides/getting-started/model-prices"
 retrieved = "2026-10-22"
-note = "**占位价：照 Qwen3.8 Max 的标价抄的，官方未公布 qwen4 单价、未核实** —— 该定价页 2026-11-09 版根本没有 qwen4 一行，2026-11-11 先按 qwen3.8-max 记账，正式价出来必须替换。标价不区分忙闲；Token Plan 是订阅制，实际扣 Credits，预览期的 2 折 / 夜间 0.4 折是按 Credits 走、不按这张表折算。"
+note = "**占位价：照 Qwen3.8 Max 的标价抄的，官方未公布 preview 的单价、未核实** —— 该定价页 2026-11-09 版根本没有 qwen4 一行，2026-11-11 先按 qwen3.8-max 记账。2026-11-16 上线的正式版 qwen4-max 已有官方价，见它自己的 serving；preview 11-25 下线，这张占位价不再替换。标价不区分忙闲；Token Plan 是订阅制，实际扣 Credits，预览期的 2 折 / 夜间 0.4 折是按 Credits 走、不按这张表折算。"
 
 [[serving]]
 route = "qwen-token-plan"
@@ -1366,7 +1395,6 @@ cache_read = 1.50                     # 隐式缓存命中
 cache_write = 15.00                   # 显式缓存创建
 cache_read_explicit = 1.00
 batch = { input = 6.00, output = 18.00 }
-price_usd = { input = 2.00, output = 6.00, cache_read = 0.25 }
 source = "https://platform.qianwenai.com/docs/developer-guides/getting-started/model-prices"
 retrieved = "2026-10-22"
 note = "标价不区分忙闲；Token Plan 是订阅制，实际扣 Credits。百炼只对 DeepSeek 系做忙闲分段。"
@@ -1383,7 +1411,6 @@ output = 2.70
 cache_read = 0.10
 cache_write = 1.25
 cache_read_explicit = 0.10
-price_usd = { input = 0.16, output = 0.47, cache_read = 0.016 }
 source = "https://platform.qianwenai.com/docs/developer-guides/getting-started/model-prices"
 retrieved = "2026-10-22"
 
@@ -1472,26 +1499,74 @@ active = 21
 source = "https://tech.ifeng.com/c/8vaPZal0DaH"
 retrieved = "2026-10-31"
 
+[[model]]
+id = "hy4-flash"
+name = "Hy4 flash（腾讯混元，自蒸馏轻量版）"
+tier = "flash"
+context = 1024000
+max_input = 960000
+max_output = 64000
+modalities = ["text", "image"]
+reasoning_levels = ["high", "no_think"]
+reasoning_default = "high"
+reasoning_field = "reasoning_effort"
+reasoning_note = "官方《深度思考》：默认 high，支持 high / no_think。本机 2026-11-17 用 TokenHub API key 实测：传 bogus reasoning_effort 被拒（认这个字段）；常规调用一次回 1 个 reasoning token，思考默认开着。"
+note = """
+2026-11-16 上线，Hy4 的低成本日常版（官方用 Hy4 当教师做自蒸馏 + 长度优化强化学习）。
+规格取自本机 TokenHub /v1/models 实测（上下文 1024000 / 输出 64000）与官方《混元调用指南》（最大输入 960000、支持文本+图像输入、PNG/JPEG/WEBP/动图除外的 GIF、单图 10MB）。
+档位 high / no_think，默认 high；参数量用发布口径 224B 总（含 64B Engram）/ 12B 激活，均为腾讯自报，非第三方评测。
+来源：/v1/models 本机 2026-11-17 实测、档位 https://cloud.tencent.cn/document/product/1823/131208 、参数与模态 https://web-observer.com/tencent-hy4-flash-2026 （转述腾讯发布材料，2026-11-16）。
+"""
+
+[model.params]
+unit = "billion"
+total = 224
+active = 12
+note = "含 64B Engram 参数；腾讯发布口径，未独立核实"
+source = "https://web-observer.com/tencent-hy4-flash-2026"
+retrieved = "2026-11-17"
+
+[[model]]
+id = "hy-role"
+name = "Hy-Role（腾讯混元角色对话）"
+tier = "test"
+context = 32000
+max_output = 4000
+modalities = ["text"]
+note = "角色扮演专用模型；本机 2026-11-17 用 TokenHub API key 实测可对话调用，输出无 reasoning token。上下文字段取自 /v1/models 实测。不按通用对话派活，故 tier=test。"
+
+[[model]]
+id = "hunyuan-role-latest"
+name = "Hy-Role-Latest（腾讯混元角色对话最新版）"
+tier = "test"
+context = 32000
+max_output = 4000
+modalities = ["text"]
+note = "Hy-Role 的最新版；本机 2026-11-17 实测可对话调用，输出无 reasoning token。上下文字段取自 /v1/models 实测。角色扮演专用，tier=test。"
+
 [[route]]
 id = "tencent-tokenhub"
 name = "腾讯云 TokenHub"
 kind = "vendor"
 # 官方《提升 Cache 命中率指南》给了两条调高命中的手段：请求体里 `prompt_cache_key`
 # （填 conversation_id）与 HTTP 头 `X-Session-ID`（把人固定到同一推理实例）。两条都是免费的路由
-# 提示、都不创建缓存；服务端给两者的值都是会话目录。本机没有这把 key，两条都未实测。
+# 提示、都不创建缓存；服务端给两者的值都是会话目录。本机 2026-11-17 用 API key 只核了目录与
+# 对话调用，这两条命中提示仍未实测。
 cache_affinity = true
 session_id_headers = ["X-Session-ID"]
 key_env = "TENCENT_API_KEY"
-key_prefix = "sk-tp-"
+# 实测的这把 key 前缀是 sk-（不是订阅 key 的 sk-tp-）；2026-11-17 用它打 /v1 通过、/plan/v3 401。
+key_prefix = "sk-"
 homepage = "https://cloud.tencent.com/product/hub"
-catalog_verified = "本机 profile 在用 hy4-preview；2026-11-04 官方文档已给出 GET /v1/models（Bearer 鉴权，未带 key 返回 401，status=online 为可用），但本机没有 TENCENT_API_KEY，未实测"
+catalog_verified = "2026-11-17 本机 API key 实测 GET https://tokenhub.tencentmaas.com/v1/models 返回 133 个（带 status / context_length / max_output_tokens），其中混元自家文本对话在线的有 hy4-flash（新登记）、hy4、hy3；三方托管（DeepSeek/GLM/Kimi/MiniMax/MiMo/Step 等）与图像/视频/3D/语音模型仍一条不收"
 tokenhub_plan = "计划制，按额度包计费（DescribeTokenPlan 查余量）。官方模型清单里除混元自家外，挂着一整排三方托管：DeepSeek 全系、GLM-5.3/-5.3-Flash/-5.3-FlashX/GLM-5.2/GLM-5V-Turbo、Kimi K3.1 Pro(-Highspeed)/K3/K2.8 Preview/K2.7 Code(-Highspeed)/K2.6、MiniMax M3.1-Flash/M3/M2.7、Qwen3.5 Flash/Plus、MiMo V2.6 Pro/Flash、Vidu 图像视频 —— 都不是腾讯的模型，一条都不收"
   plan_note = "Token Plan 个人版 Lite $7 / Standard $17 / Pro $51 / Max $103（每月，intl 文档在案；CN 价未查）；Coding Plan Lite ¥40 / Pro ¥200 每月，5 小时 / 周 / 月三档窗口。两个套餐都是「同一套餐内全模型任意切换」，也就是说三方模型也能用 —— 能用不等于该收进 roster"
-retrieved = "2026-10-22"
+retrieved = "2026-11-17"
 note = """
-本机还没有这把 key：`~/.agents/keys.toml` 里没有 tencent-tokenhub 一行，环境里也没有
-TENCENT_API_KEY（只有 DSH 凭据引用这个名字）。补齐时写进 keys.toml —— **不要**写进 roster，
-这里写 key 会被服务端忽略，而且 roster 是 git 检出。
+2026-11-17 本机拿到一把 API key（sk- 开头，按量计费、不是订阅 key），实测 /v1 的 models、
+chat/completions、messages 三个端点都通；key 本身按仓库密钥政策写进 ~/.agents/keys.toml 的
+[keys] 表、**不**写进 roster —— roster 是 git 检出，写 key 也会被服务端忽略。
+之前 note 里"本机没有这把 key"的说法已作废。
 """
 
 # 缓存保留时间：官方指南讲了 TTL 的机制（prompt_cache_key / X-Session-ID 怎么喂前缀），
@@ -1509,20 +1584,27 @@ cache_ttl_tier = "隐式（唯一一档）"
   [[route.endpoint]]
   id = "openai"
   api = "openai-completions"
+  base_url = "https://tokenhub.tencentmaas.com/v1"
+  auth = "bearer"
+  note = "2026-11-17 本机 API key 实测：/v1/models 列目录、/v1/chat/completions 对话都通（hy4-flash 返回 1 个 reasoning token）。服务端按 api 名取第一条匹配端点，所以这条实测可用的放前面；官方主机还有新加坡 tokenhub-intl.tencentmaas.com，CN key 与 intl key 不通用。"
+  [[route.endpoint]]
+  id = "openai-plan"
+  api = "openai-completions"
   base_url = "https://tokenhub.tencentmaas.com/plan/v3"
   auth = "bearer"
-  note = """
-unverified：官方「API 使用说明」给的默认接入地址是广州 https://tokenhub.tencentmaas.com 与新加坡
-https://tokenhub-intl.tencentmaas.com（另有 .cn 镜像），示例路径是 /v1/models；`/plan/v3` 这个前缀
-在 2026-11-01 那次官方文档里查不到。本机没有这把 key，探不了，先按原样留着 —— 有 key 时第一件事
-是用 /v1/models 核这一条。
-"""
+  note = "订阅（Token Plan）key 的接入前缀；2026-11-17 实测这把按量 API key 打它是 401（API Key 不存在或签名失败），所以排在 /v1 之后。`/plan/v3` 这个前缀在 2026-11-01 那次官方文档里查不到，仍是 unverified —— 留给订阅 key 用，API key 不要走这条。"
   [[route.endpoint]]
   id = "anthropic"
   api = "anthropic-messages"
+  base_url = "https://tokenhub.tencentmaas.com/v1"
+  auth = "bearer"
+  note = "2026-11-17 本机 API key 实测 /v1/messages 对话通（hy4-flash）。Anthropic 面的路径也是 /v1，不是 /plan/anthropic。"
+  [[route.endpoint]]
+  id = "anthropic-plan"
+  api = "anthropic-messages"
   base_url = "https://tokenhub.tencentmaas.com/plan/anthropic"
   auth = "bearer"
-  note = "同上，unverified；国际站主机是 tokenhub-intl.tencentmaas.com，官方明说不能跨站点调用，所以 CN key 与 intl key 不通用"
+  note = "订阅 key 的 Anthropic 前缀，unverified；2026-11-17 实测按量 API key 打它是 401，故排在 /v1 之后。国际站主机 tokenhub-intl.tencentmaas.com，CN 与 intl key 不通用。"
   [[route.endpoint]]
   id = "coding-plan"
   api = "openai-completions"
@@ -1555,6 +1637,43 @@ https://tokenhub-intl.tencentmaas.com（另有 .cn 镜像），示例路径是 /
 
 [[serving]]
 route = "tencent-tokenhub"
+model = "hy4-flash"
+[serving.price]
+currency = "CNY"
+unit = "per_1m_tokens"
+input = 0.50
+output = 2.00
+cache_read = 0.02
+source = "https://cloud.tencent.com/document/product/1823/130055"
+retrieved = "2026-11-17"
+note = "官方 TokenHub 按量刊例价（广州）：输入 0.5 / 输出 2 / 缓存命中 0.02 元每百万 Token，无峰谷分段。官方限时折扣：至 2026-11-30 12:00:00（北京时间）按目录价 50% 结算（即 0.25 / 1 元），期满恢复；这里写刊例价，折扣不写进 price。"
+
+[[serving]]
+route = "tencent-tokenhub"
+model = "hy-role"
+[serving.price]
+currency = "CNY"
+unit = "per_1m_tokens"
+input = 2.40
+output = 9.60
+source = "https://cloud.tencent.com/document/product/1823/130055"
+retrieved = "2026-11-17"
+note = "官方 TokenHub 按量刊例价：输入 2.4 / 输出 9.6 元每百万 Token；官方价目页未给缓存单价，故不写 cache_read。"
+
+[[serving]]
+route = "tencent-tokenhub"
+model = "hunyuan-role-latest"
+[serving.price]
+currency = "CNY"
+unit = "per_1m_tokens"
+input = 2.40
+output = 9.60
+source = "https://cloud.tencent.com/document/product/1823/130055"
+retrieved = "2026-11-17"
+note = "官方 TokenHub 按量刊例价：输入 2.4 / 输出 9.6 元每百万 Token；官方价目页未给缓存单价，故不写 cache_read。"
+
+[[serving]]
+route = "tencent-tokenhub"
 model = "hy4"
 [serving.price]
 currency = "CNY"
@@ -1562,7 +1681,6 @@ unit = "per_1m_tokens"
 input = 6.00
 output = 18.00
 cache_read = 0.30
-price_usd = { input = 0.834, output = 2.501, cache_read = 0.042 }
 source = "https://cloud.tencent.com/document/product/1823/130055"
 retrieved = "2026-11-04"
 note = "刊例价与 hy4-preview 持平，无峰谷分段。官方另给限时折扣：至 2026-12-31 23:59:59（北京时间）Hy4 按目录价 50% 结算，期满恢复；标价仍是刊例价。"
@@ -1577,7 +1695,6 @@ unit = "per_1m_tokens"
 input = 6.00
 output = 18.00
 cache_read = 0.30
-price_usd = { input = 0.834, output = 2.501, cache_read = 0.042 }
 source = "https://cloud.tencent.com/document/product/1823/130055"
 retrieved = "2026-10-22"
 note = "平价，没有任何峰谷分段。"
@@ -1592,7 +1709,6 @@ unit = "per_1m_tokens"
 input = 1.00
 output = 4.00
 cache_read = 0.25
-price_usd = { input = 0.14, output = 0.58, cache_read = 0.035 }
 source = "https://cloud.tencent.com/document/product/1823/130055"
 retrieved = "2026-10-22"
 
@@ -1662,15 +1778,10 @@ cache_ttl_tier = "隐式（唯一一档）"
 [[serving]]
 route = "dots-studio"
 model = "dots3-note-prev"
-[serving.price]
-currency = "USD"
-unit = "per_1m_tokens"
-input = 0.14
-output = 0.28
-cache_read = 0.00                      # 缓存单价没公布
-source = "https://dots.ai/platform/docs"
-retrieved = "2026-10-22"
-note = "当前免费体验、暂不收费，收费前会提前通知。Apache 2.0 开源权重，2026-08-14 发布。"
+# 不记价：官方价目页 https://dots.ai/platform/docs （2026-11-17 取）只列美元
+# （输入 0.14 / 输出 0.28 每百万 Token），没有人民币价；按「价格只用人民币、不做
+# 汇率换算」的要求不写进来。且当前免费体验、暂不收费，恢复收费前官网会提前通知。
+# Apache 2.0 开源权重，2026-08-14 发布。
 
 
 [[model]]
@@ -1813,7 +1924,6 @@ output = 28.00
 cache_read = 2.00
 cache_storage = 0.00                   # 元/百万 token/小时，现价限时免费
 cache_storage_unit = "per_1m_tokens_per_hour"
-price_usd = { input = 1.40, output = 4.40, cache_read = 0.26 }
 source = "https://docs.bigmodel.cn/cn/guide/start/pricing"
 retrieved = "2026-11-01"
 note = "缓存存储限时免费；不分输入区间，也没有峰谷。"
@@ -1830,7 +1940,6 @@ output = 2.80
 cache_read = 0.23
 cache_storage = 0.00                   # 元/百万 token/小时，现价限时免费
 cache_storage_unit = "per_1m_tokens_per_hour"
-price_usd = { input = 0.15, output = 0.50, cache_read = 0.03 }
 source = "https://docs.bigmodel.cn/cn/guide/start/pricing"
 retrieved = "2026-11-01"
 
@@ -1846,7 +1955,6 @@ output = 7.00
 cache_read = 0.57
 cache_storage = 0.00                   # 元/百万 token/小时，现价限时免费
 cache_storage_unit = "per_1m_tokens_per_hour"
-price_usd = { input = 0.37, output = 1.25, cache_read = 0.075 }
 source = "https://docs.bigmodel.cn/cn/guide/start/pricing"
 retrieved = "2026-11-01"
 
@@ -1862,7 +1970,6 @@ output = 28.00
 cache_read = 2.00
 cache_storage = 0.00                   # 元/百万 token/小时，现价限时免费
 cache_storage_unit = "per_1m_tokens_per_hour"
-price_usd = { input = 1.40, output = 4.40, cache_read = 0.26 }
 source = "https://docs.bigmodel.cn/cn/guide/start/pricing"
 retrieved = "2026-11-01"
 note = "与 GLM-5.3 同价：贵不在参数，在后训练。要便宜档用 -flash。"
@@ -2068,7 +2175,6 @@ cache_read = 0.60
 cache_storage = 0.017                  # 元/百万 token/小时，不足 1 小时按 1 小时算
 cache_storage_unit = "per_1m_tokens_per_hour"
 flex = { input = 1.50, output = 7.50 }
-price_usd = { input = 0.50, output = 2.50, cache_read = 0.10 }
 source = "https://docs.volcengine.com/docs/ark/model-pricing"
 retrieved = "2026-11-01"
 note = "国际站（BytePlus）同模型叫 dola-seed-2-1-turbo-260628，USD 价就在这里；CN 与 intl 是两套 key。"
