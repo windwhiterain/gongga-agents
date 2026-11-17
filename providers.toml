@@ -2077,8 +2077,10 @@ note = "国际站（BytePlus）同模型叫 dola-seed-2-1-turbo-260628，USD 价
 # ---------------------------------------------------------------------------
 # 百度千帆（Qianfan）：模型事实一份，两条接入面各一条 route
 # ---------------------------------------------------------------------------
-# 千帆上除了 ERNIE 全系还有一大批托管的三方模型（DeepSeek / GLM / Kimi / Qwen / MiMo），
-# 那些在别家 roster 里已经有条目，收进来只会让 `--model` 更难选。这里只登记文心 5.5。
+# 千帆上除了 ERNIE 全系还有一大批托管的三方模型（DeepSeek / GLM / Kimi / Qwen / MiMo）。
+# 套餐面按官方在售清单登记：已有事实的复用 `[[model]]`，只写一条 `[[serving]]` 并用
+# `wire_id` 记千帆的 model 参数；套餐特有、别家没有的（ERNIE-Light-DT-1.0、Kimi-K2.6）
+# 在这里新建事实。按量面仍只登记文心 5.5 —— 本机没有那把 key，端点与价都是文档口径。
 #
 # 这一组是三层写法：`[[model]]` 是模型事实，只写一次；`[[route]]` 是一条接入面（端点、
 # 密钥变量、缓存、额度查询）；`[[serving]]` 说某条 route 卖它、卖多少钱、线上叫什么名。
@@ -2110,6 +2112,38 @@ active = 14
 note = "混合稀疏注意力 + 多路由器 MoE：280B 总参数，每 token 激活 14B"
 source = "https://ernie.baidu.com/zh/release/ernie-5-5-flash-preview/"
 retrieved = "2026-11-15"
+
+[[model]]
+id = "ernie-light-dt-1.0"
+name = "ERNIE-Light-DT-1.0（文心闪电深度思考）"
+tier = "flash"
+context = 1000000
+max_input = 1000000
+max_output = 131072
+modalities = ["text"]
+# 官方模型列表明确"思考模式可开可关"，但没给档位枚举，也没说字段名；本机套餐 key 未探。
+# reasoning 字段先不写，免得编一个 server 会照着发的档位；wire 侧实际行为 unverified。
+note = """2026-11-11 上线，与 5.5 同批进 Token Plan 个人/企业版（2026-11-11 百度千帆公众号）。
+基于自研 BSA（反馈式 KV 压缩）稀疏注意力，主打超长上下文、低成本；官方模型列表写 1M 上下文、128K 最大输出，
+且"思考模式可开可关"—— 与 5.5 的"只能开"不同。纯文本。本机只有套餐 key，这一面没有 /models 可探，
+除 id 与上下文/上限之外的能力细节都标 unverified，不冒充实测。"""
+source = "https://intl.cloud.baidu.com/en/doc/qianfan/s/7m95lyy43-intl-en"
+retrieved = "2026-11-17"
+
+[[model]]
+id = "kimi-k2.6"
+name = "Kimi K2.6"
+tier = "pro"
+context = 262144
+max_input = 262144
+max_output = 262144
+modalities = ["text"]
+note = """千帆官方模型列表（2026-11-11 更新）列为 Others 一项：256k 上下文、最大输出 [1, 262144]、
+思维链 32k。roster 里原有的 Kimi 是 K2.8（kimi-for-coding）与 K2.7 Code（kimi-for-coding-highspeed），
+是 Kimi 自营面的 id，与千帆托管的 kimi-k2.6 不是同一条供给，所以这里按官方列表新建事实、不复用那两条。
+本机套餐 key 未逐个探过这些 id，能力细节 unverified。"""
+source = "https://intl.cloud.baidu.com/en/doc/qianfan/s/7m95lyy43-intl-en"
+retrieved = "2026-11-17"
 
 # --- route 1：按量面（千帆自己的 v2）--------------------------------------
 [[route]]
@@ -2237,6 +2271,50 @@ note = "表里是**刊例价**（高峰档）。同页还挂着限时 5 折活�
 route = "qianfan-token-plan"
 model = "ernie-5.5-flash-preview"
 note = "套餐面扣的是订阅额度，没有每百万 token 的价目 —— 所以这一条不写 price。"
+
+# 套餐面其余在售模型（2026-11-11 官方模型列表与千帆公众号 2026-11-11 那版）。
+# 这一面没有可探的 /models，下面的 wire_id 全是文档口径、本机套餐 key 未逐个探，unverified。
+# 已在别家 roster 有事实的（GLM / DeepSeek）只写供给、用 wire_id 记千帆的 model 参数；
+# 千帆特有的两条（Light-DT / Kimi K2.6）在文件前面新建了 [[model]]。
+[[serving]]
+route = "qianfan-token-plan"
+model = "ernie-light-dt-1.0"
+
+[[serving]]
+route = "qianfan-token-plan"
+model = "glm-5.3-flash"
+wire_id = "glm-5.3-flash"
+
+[[serving]]
+route = "qianfan-token-plan"
+model = "glm-5.3"
+wire_id = "glm-5.3"
+
+[[serving]]
+route = "qianfan-token-plan"
+model = "glm-5.2"
+wire_id = "glm-5.2"
+
+[[serving]]
+route = "qianfan-token-plan"
+model = "kimi-k2.6"
+
+[[serving]]
+route = "qianfan-token-plan"
+model = "deepseek-flash"
+wire_id = "deepseek-v4.1-flash-1017"
+note = "千帆 model 参数是 deepseek-v4.1-flash-1017；roster 事实 deepseek-flash 就是 V4.1-Flash-1017（deepseek-v4-flash 是其退役别名）。"
+
+[[serving]]
+route = "qianfan-token-plan"
+model = "deepseek-v4-pro"
+wire_id = "deepseek-v4-pro"
+
+[[serving]]
+route = "qianfan-token-plan"
+model = "deepseek-flash"
+wire_id = "deepseek-v4-flash"
+note = "官方模型列表里 deepseek-v4-flash 与 -0731 是两个 id，都归 V4-Flash；这里登记无日期后缀的那一个，-0731 未列。"
 
 # ---------------------------------------------------------------------------
 # OpenCode Go：订阅制中转站，模型清单走 /models 动态发现，共享的模型只写一条供给
