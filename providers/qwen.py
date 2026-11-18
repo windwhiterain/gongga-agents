@@ -22,8 +22,10 @@ browser's.
 The reading is the **percentage left** of the period the account meters: the
 console reports the ratio used (`per1MonthPercentage` since the 2026-09 billing
 change, `per1WeekPercentage` for a subscription that still meters weekly), and
-this script converts it. Credits are reported in `detail` only, because the tier's
-total comes from a second call that times out on its own.
+this script converts it. Credits are reported in `detail` only: their total comes
+from a second call, which runs beside the `usage` call rather than after it -- the
+harness kills a reader at ten seconds, and three calls in a row measured 9-12 s on
+this machine, which read as a reader that never answered.
 
 This is an interface the provider does not publish and may change or refuse at any
 time. Whichever way it is read, the traffic is the user's own console session;
@@ -37,6 +39,7 @@ import math
 import os
 import re
 import sys
+import threading
 import tomllib
 import uuid
 
@@ -259,6 +262,48 @@ def cookie_of(options):
     return options.key
 
 
+def gather(cookie, sec_token, timeout_ms, base_url=GATEWAY_URL, fetch=None):
+    """The three gateway calls at once, and the reading taken out of two of them.
+
+    # Invariant
+
+    `usage` is the reading and its failure is this script's; `quota-config` and
+    `subscription` are context, and one that does not come back in its own time
+    contributes nothing instead of costing the answer. All three run together so the
+    wall clock is the slowest call rather than the sum: one after another they
+    measured 9-12 s on this machine against the harness's ten-second guard.
+    """
+    results = {}
+    failures = {}
+    finished = threading.Event()
+    remaining = [3]
+
+    def call(inner):
+        try:
+            if inner == "usage":
+                results[inner] = call_gateway(inner, cookie, sec_token, timeout_ms,
+                                              base_url=base_url, fetch=fetch)
+            else:
+                results[inner] = optional_gateway(inner, cookie, sec_token, timeout_ms,
+                                                  base_url=base_url, fetch=fetch)
+        except Exception as error:  # noqa: BLE001 - `usage`'s is re-raised below
+            failures[inner] = error
+        finally:
+            remaining[0] -= 1
+            if remaining[0] == 0:
+                finished.set()
+
+    for inner in ("usage", "quota-config", "subscription"):
+        threading.Thread(target=call, args=(inner,), daemon=True).start()
+    finished.wait(timeout_ms / 1000.0)
+    if "usage" in failures:
+        raise failures["usage"]
+    if "usage" not in results:
+        raise contract.BalanceError(
+            f"the usage call did not answer within {timeout_ms} ms")
+    return results["usage"], results.get("quota-config"), results.get("subscription")
+
+
 def read_balance(options, fetch=None):
     """Read the Qwen Token Plan's remaining allowance.
 
@@ -272,10 +317,8 @@ def read_balance(options, fetch=None):
         token = cookie_value(cookie, "sec_token")
         if token is None:
             token = read_sec_token(cookie, options.timeout_ms, fetch=fetch)
-        usage = call_gateway("usage", cookie, token, options.timeout_ms, options.base_url, fetch=fetch)
-        quota = optional_gateway("quota-config", cookie, token, options.timeout_ms, options.base_url, fetch=fetch)
-        subscription = optional_gateway("subscription", cookie, token, options.timeout_ms,
-                                        options.base_url, fetch=fetch)
+        usage, quota, subscription = gather(cookie, token, options.timeout_ms,
+                                           base_url=options.base_url, fetch=fetch)
         return {"reading": parse(usage, quota, subscription), "payload": {"usage": usage, "quota": quota,
                                                                          "subscription": subscription}}
     except contract.BalanceError as error:
