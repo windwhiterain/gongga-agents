@@ -141,7 +141,9 @@ def main():
         fallback_env_name=FALLBACK_ENV_NAME, model=True, script_name=os.path.basename(__file__))
     if options is None:
         return
-    result = read_balance(options)
+    # A domestic endpoint this machine reaches directly: the environment's proxy is
+    # for foreign hosts, and a stale one turns this into an unreachable provider.
+    result = read_balance(options, fetch=contract.direct_transport)
     contract.emit_reading(result["reading"], raw=options.raw, payload=result.get("payload"))
 
 

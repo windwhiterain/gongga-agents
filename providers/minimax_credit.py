@@ -152,7 +152,9 @@ def main():
     # keeps it.
     if "=" not in contract.js_string(options.key):
         options.key = keystore_cookie() or os.environ.get(ENV_NAME) or options.key
-    result = read_balance(options)
+    # A domestic endpoint this machine reaches directly: the environment's proxy is
+    # for foreign hosts, and a stale one turns this into an unreachable provider.
+    result = read_balance(options, fetch=contract.direct_transport)
     # No `--raw`: the payload carries the account's API key back.
     contract.emit_reading(result["reading"])
 
