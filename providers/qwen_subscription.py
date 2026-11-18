@@ -139,7 +139,10 @@ def read_stats(options, key_id, key_secret):
     }
     signed, _ = sign(key_id, key_secret, "GET", quote(PATH), "", headers)
     url = f"{BASE_URL}{PATH}"
-    payload = contract.get_json(url, None, options.timeout_ms, headers=signed)
+    # A domestic endpoint this machine reaches directly: the environment's proxy is
+    # for foreign hosts, and a stale one turns this into an unreachable endpoint.
+    payload = contract.get_json(url, None, options.timeout_ms, headers=signed,
+                                fetch=contract.direct_transport)
     if not contract.is_object(payload):
         raise contract.BalanceError(f"{ACTION} answered no object")
     if contract.field(payload, "Success") is not True:

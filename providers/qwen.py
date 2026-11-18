@@ -417,7 +417,10 @@ def main():
     # keeps it.
     if "=" not in contract.js_string(options.key):
         options.key = keystore_cookie() or options.key
-    result = read_balance(options)
+    # These hosts are the console's own and this machine reaches them directly; a
+    # proxy in the environment is for foreign hosts, and a stale one only turns the
+    # read into the timeout the harness reads as "no answer". See `direct_transport`.
+    result = read_balance(options, fetch=contract.direct_transport)
     contract.emit_reading(result["reading"], raw=options.raw, payload=result.get("payload"))
 
 

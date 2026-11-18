@@ -36,7 +36,7 @@ import sys
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 DEFAULT_TIMEOUT_MS = 10_000
 
@@ -315,6 +315,29 @@ def default_transport(url, method="GET", headers=None, body=None, timeout_ms=10_
     request that asked for it, not to a process-wide opener.
     """
     opener = build_opener() if allow_redirect else build_opener(_RefuseRedirect())
+    return exchange(opener, url, method, headers, body, timeout_ms)
+
+
+def direct_transport(url, method="GET", headers=None, body=None, timeout_ms=10_000, allow_redirect=True):
+    """The same request with every proxy setting ignored.
+
+    # Invariant
+
+    For a reader whose hosts are the provider's own console: those are reachable
+    from this machine directly, and a proxy it inherited -- stale, moved to another
+    port, or one that no longer tunnels -- turns the read into a timeout the
+    harness's ten-second guard takes for "no answer at all". `ProxyHandler({})`
+    drops the proxy for this request only; `default_transport` keeps honouring the
+    environment for the readers that need it.
+    """
+    handlers = [ProxyHandler({})]
+    if not allow_redirect:
+        handlers.append(_RefuseRedirect())
+    return exchange(build_opener(*handlers), url, method, headers, body, timeout_ms)
+
+
+def exchange(opener, url, method, headers, body, timeout_ms):
+    """One request through an opener already built: `(status, ok, body)` out."""
     request = Request(url, data=body.encode("utf-8") if body is not None else None,
                       headers=headers or {}, method=method)
     try:

@@ -1281,6 +1281,11 @@ cache_ttl_tier = "隐式（不指定 cache_control 就落这里；显式另算�
     报告里的失败成了「no seat with a readable share」。2026-11-17 三个网关调用还是串行，实测
     9-12 秒（info.json 2.0 + usage 2.4 + quota-config 3.2 + subscription 3.2）；改成三个并发后
     实测 4.9/5.3/5.8 秒。加任何一次串行往返之前先算这笔账。
+    这两条读取都**不走**机器上的 HTTP(S)_PROXY：控制台与网关都是国内直连的域名。2026-11-18 实测
+    代理（127.0.0.1:10793，以及服务端继承的 7897）对**所有** https 主机都超时，连 baidu 都是
+    12 秒不通，而直连三个域名都是 200/0.1-0.3 秒；经代理读一次就是 10 秒被护栏杀成「没答」。
+    所以 qwen.py / qwen_subscription.py 用 contract.direct_transport（ProxyHandler({})），
+    直连后实测 1.0 / 0.7 秒。别把这两条改回默认 transport，除非那台机器的代理确实能通。
   """
   script = "providers/qwen.py"
   script_env = "QWEN_CONSOLE_COOKIE"
