@@ -165,7 +165,12 @@ def read_stats(options, key_id, key_secret):
         if contract.is_finite(refresh) and refresh > 0:
             resets.append(refresh)
     if not windows:
-        raise contract.BalanceError(f"{ACTION} answered no seat with a readable share")
+        raise contract.BalanceError(
+            f"{ACTION} answered no seat with a readable share: this endpoint meters team seats, "
+            "so a personal Token Plan reads nothing here. The entry before this one "
+            "(providers/qwen.py, the console session) is the reader that answers this account; "
+            "a failure reported from here usually means it did not finish in the server's ten "
+            "seconds, not that the allowance is empty")
     primary = min(windows, key=lambda window: window["remaining"])
     reading = {"remaining": primary["remaining"], "windows": windows}
     if resets:
