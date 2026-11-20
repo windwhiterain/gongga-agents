@@ -40,6 +40,7 @@ import os
 import re
 import sys
 import threading
+import time
 import tomllib
 import uuid
 
@@ -52,6 +53,9 @@ DASHBOARD_URL = f"{CONSOLE_ORIGIN}/analytics/token-plan/individual"
 INFO_URL = f"{CONSOLE_ORIGIN}/tool/user/info.json"
 ENV_NAME = "QWEN_CONSOLE_COOKIE"
 FALLBACK_ENV_NAME = "BAILIAN_CONSOLE_COOKIE"
+# The CSRF page is tiny and every other call waits for it; the whole reader is
+# killed at ten seconds, so this one call may not take all of them.
+TOKEN_TIMEOUT_MS = 4_000
 
 # Where a cookie may live besides the environment: the keystore beside the roster,
 # under a name of its own, because the provider's entry there is the API key and the
@@ -263,20 +267,20 @@ def cookie_of(options):
 
 
 def gather(cookie, sec_token, timeout_ms, base_url=GATEWAY_URL, fetch=None):
-    """The three gateway calls at once, and the reading taken out of two of them.
+    """The usage call and the two context calls, started together.
 
     # Invariant
 
-    `usage` is the reading and its failure is this script's; `quota-config` and
-    `subscription` are context, and one that does not come back in its own time
-    contributes nothing instead of costing the answer. All three run together so the
-    wall clock is the slowest call rather than the sum: one after another they
-    measured 9-12 s on this machine against the harness's ten-second guard.
+    The reading is `usage`, so this returns the moment `usage` answers; the two
+    context calls contribute only what has already arrived. Waiting for them would
+    make a slow `subscription` cost the answer -- on 2026-11-20 the harness killed a
+    reader at its ten-second guard while `usage` had long been in hand, and the pool
+    reported the fallback reader instead. A failure of `usage` is this script's;
+    a failure of either context call costs the extra detail and nothing else.
     """
     results = {}
     failures = {}
-    finished = threading.Event()
-    remaining = [3]
+    usage_done = threading.Event()
 
     def call(inner):
         try:
@@ -289,13 +293,12 @@ def gather(cookie, sec_token, timeout_ms, base_url=GATEWAY_URL, fetch=None):
         except Exception as error:  # noqa: BLE001 - `usage`'s is re-raised below
             failures[inner] = error
         finally:
-            remaining[0] -= 1
-            if remaining[0] == 0:
-                finished.set()
+            if inner == "usage":
+                usage_done.set()
 
     for inner in ("usage", "quota-config", "subscription"):
         threading.Thread(target=call, args=(inner,), daemon=True).start()
-    finished.wait(timeout_ms / 1000.0)
+    usage_done.wait(timeout_ms / 1000.0)
     if "usage" in failures:
         raise failures["usage"]
     if "usage" not in results:
@@ -311,13 +314,30 @@ def read_balance(options, fetch=None):
     read costs the Credits in `detail`, not the ratio the plan is scored by.
     """
     cookie = cookie_of(options)
+    started = time.monotonic()
+
+    def left():
+        """What is left of the caller's own timeout, in milliseconds.
+
+        # Invariant
+
+        The harness kills a reader that outlives the timeout it passes (ten seconds),
+        and a kill is silence: the answer, if it had already been read, is thrown
+        away. So each round trip is bounded by what remains of that same number
+        rather than by a second copy of it.
+        """
+        spent = int((time.monotonic() - started) * 1000)
+        return max(500, int(options.timeout_ms) - spent)
+
     try:
         # The console publishes the CSRF token to a signed-in session; a cookie
         # that already carries one is used before the extra call is made.
         token = cookie_value(cookie, "sec_token")
         if token is None:
-            token = read_sec_token(cookie, options.timeout_ms, fetch=fetch)
-        usage, quota, subscription = gather(cookie, token, options.timeout_ms,
+            # A tiny page, and the only call the others wait behind; the harness's
+            # ten seconds are the whole reader's, so it does not get all of them.
+            token = read_sec_token(cookie, min(left(), TOKEN_TIMEOUT_MS), fetch=fetch)
+        usage, quota, subscription = gather(cookie, token, left(),
                                            base_url=options.base_url, fetch=fetch)
         return {"reading": parse(usage, quota, subscription), "payload": {"usage": usage, "quota": quota,
                                                                          "subscription": subscription}}
