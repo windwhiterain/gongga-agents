@@ -55,11 +55,23 @@ ECHO_HOSTS = ["https://api.ipify.org", "https://icanhazip.com", "https://ifconfi
 # --- configuration ------------------------------------------------------------
 
 
+def config_stamp(path):
+    """What the rule file looked like when it was last read: its bytes' age and size."""
+    try:
+        info = os.stat(path)
+        return (info.st_mtime_ns, info.st_size)
+    except OSError:
+        return None
+
+
 def load_config(path=CONFIG_PATH):
     """Read the config, or return the default when there is none yet."""
     if not os.path.exists(path):
         return json.loads(json.dumps(DEFAULT_CONFIG))
-    with open(path, "r", encoding="utf-8") as fh:
+    # utf-8-sig: Windows editors and PowerShell 5.1 write a BOM, and a BOM is not a
+    # JSON value. Before this, such a file failed to load and the proxy kept the rules
+    # it started with -- so every upstream switch was written, logged, and ignored.
+    with open(path, "r", encoding="utf-8-sig") as fh:
         config = json.load(fh)
     validate_config(config)
     return config
@@ -374,8 +386,10 @@ def parse_head(head):
 class ProxyServer:
     """A small HTTP proxy: CONNECT for TLS, absolute-form for plain HTTP."""
 
-    def __init__(self, config, decisions=None):
+    def __init__(self, config, decisions=None, config_path=CONFIG_PATH):
         self.config = config
+        self.config_path = config_path
+        self.config_stamp = config_stamp(config_path)
         self.decisions = decisions or Decisions()
         listen = config["listen"]
         self.address = (listen["host"], listen["port"])
@@ -392,6 +406,26 @@ class ProxyServer:
                              "already using it" % (self.address[0], self.address[1], exc))
         self.sock.listen(128)
         self.running = True
+
+    def reload_if_changed(self):
+        """Read the rule file again when it changed under this process.
+
+        # Invariant
+
+        A file that does not load leaves the previous rules in force: a half-written
+        edit must not turn every connection into an error.
+        """
+        stamp = config_stamp(self.config_path)
+        if stamp is None or stamp == self.config_stamp:
+            return
+        try:
+            config = load_config(self.config_path)
+        except Exception as error:  # noqa: BLE001 - an unreadable edit keeps the old table
+            out("rules unchanged: %s" % error)
+            return
+        self.config = config
+        self.config_stamp = stamp
+        out("rules reloaded from %s" % self.config_path)
 
     def serve_forever(self):
         while self.running:
@@ -414,6 +448,11 @@ class ProxyServer:
     def handle(self, client):
         try:
             client.settimeout(30)
+            # Which upstream carries this connection is decided from the file that is
+            # on disk now, not from the one this process started with: a client whose
+            # proxy is a fixed local port cannot be told about a new upstream, so the
+            # port must be the thing that stays and the rule the thing that moves.
+            self.reload_if_changed()
             head, leftover = read_request_head(client)
             if head is None:
                 return

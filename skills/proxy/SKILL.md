@@ -166,7 +166,37 @@ curl -s -x http://127.0.0.1:7897 https://api.ipify.org      # 103.196.116.251
 ```
 
 **前提是这个 echo 站点和目标 host 命中同一组规则**——上面成立是因为 `api.ipify.org` 在
-白名单里，走的就是 `漏网之鱼`。不在白名单的 echo 站点走直连，地址不变，什么也证明不了。
+白名单里，走的就是 `漏网之鱼`。不在白名单的 echo 站点走直连，地址不变，什么也证明不了（白名单是什么、
+怎么切，见「两套规则集：vendor 和 whitelist」）。
+
+## 两套规则集：vendor 和 whitelist
+
+「分流」不是一张表，是二选一，而且这个选择不在 `config.yaml` 里，在 `~/.kualemon/state.json` 的
+`"routing"` 字段：
+
+| 规则集 | 谁写 | 语义 | 尾巴 |
+| --- | --- | --- | --- |
+| `vendor` | 订阅自带（3000+ 条） | 境外走代理，`GEOIP,CN` 和局域网直连 | `MATCH,🐟 漏网之鱼` |
+| `whitelist` | `flm whitelist add/remove`，存 `~/.kualemon/whitelist.txt` | **只有列出来的 host 走代理，其余全部直连** | `MATCH,DIRECT` |
+
+切换：`flm routing vendor|whitelist [--via GROUP]`。它会重建 `config.yaml` 并对运行中的 core 做
+`PUT /configs`，不用重启；代价是**节点名跟着订阅刷新一起变**，写死旧名字的脚本会失效。
+
+**这是最会伪装成「节点坏了」的坑。** whitelist 模式下，不在表里的 host（`googleapis.com`、
+`gstatic.com`、`ipinfo.io`、任何没被手工加进去的域名）全部直连。症状是「代理明明在跑，google 就是
+打不开」，而换节点、重启 core、重连客户端统统无效——因为请求根本没进节点。2026-11-20 这台机器就是
+这样：22 条白名单规则加一条 `MATCH,DIRECT`，`storage.googleapis.com` 一直在走本机线，而当时所有的
+排查都花在了节点上。
+
+判据只有一条，先看尾巴再怀疑节点：
+
+```bash
+flm rules --match googleapis      # 命中的是哪一组
+flm routing                        # 现在生效的是 vendor 还是 whitelist
+grep -n 'MATCH' ~/.kualemon/mihomo/config.yaml
+```
+
+`MATCH` 后面是 `DIRECT`，就说明「没列出来的都直连」这件事是**配置决定的**，不是节点决定的。
 
 ## bench：延迟和带宽是两个轴
 
@@ -182,7 +212,8 @@ bench("漏网之鱼", throughput=True, seconds=8, limit=5)
 
 **吞吐必须证明字节真的过了那个节点**，这里有个会静默说谎的坑：在 `rule` 或白名单模式下，
 测试 URL 很可能命中一条直连规则，于是测出来的是**本机自己那条线**的速度，而标签上写着节点名。
-这正是"换节点救不了下载慢"这类结论的来源之一——那个数字可能压根没经过节点。
+这正是"换节点救不了下载慢"这类结论的来源之一——那个数字可能压根没经过节点（白名单为什么会让整张表
+都变成直连，见「两套规则集」）。
 
 所以 `bench(throughput=true)` 先把 core 切到 `global` 模式（规则不再参与决定），再逐节点跑固定窗口的
 传输，最后在 `finally` 里把模式和原来的选择一起还原。bench 把整台机器留在 global 模式是
@@ -199,6 +230,12 @@ reload()              # 改完 config.yaml 立刻生效，不重启 core；reloa
 ```
 
 `reload` 走 `PUT /configs?force=true`，是唯一"改规则不用重启"的路径。白名单就是这样生效的。
+
+`proxy.py` 自己的规则文件也一样：`~/.proxy/config.json` 一改，**下一条连接**就按新表走——它每条连接
+比一次 mtime，文件读不出来就沿用旧表（半截写入不会把整台机器变成错误）。所以"客户端地址永不变、
+出口随时换"是这样一个形状：客户端只认 `127.0.0.1:7899`，而路由器的 catch-all 规则（`{"type":"all"}`）
+里 `via` 换成 `falemon` / `mihomo` / `direct` 就行，不重启、不打断在飞的连接。
+`system-proxy-follow` skill 就是靠这一点工作的。
 
 ## 一条命令：cli + key
 
