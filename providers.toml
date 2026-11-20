@@ -103,6 +103,11 @@ tier = "flash"
 context = 1000000
 max_output = 384000
 modalities = ["text", "image"]
+# 服务端搜索 / 读链接：2026-11-20 对 /v1/responses 真机验证——返回 web_search_call
+# item（kind=deep_search，action.type=search/open_page），回放自产 item 也 HTTP 200。
+# 必须用 2026-11-13 启用的新名；旧名 `web_search` 会被 flash 静默忽略。见
+# docs/notes/server-providers.md。
+builtin_tools = ["deepseek_web_search", "deepseek_read_url"]
 reasoning_levels = ["none", "low", "high", "max"]
 reasoning_default = "high"
 reasoning_field = { openai = "thinking{type} + reasoning_effort", anthropic = "reasoning.effort", responses = "reasoning.effort" }
