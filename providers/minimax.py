@@ -125,7 +125,7 @@ def parse(payload, model=None):
 def read_balance(options, fetch=None):
     """Query the Token Plan endpoint and return the reading."""
     try:
-        payload = contract.get_json(
+        payload = contract.get_json_retrying(
             f"{options.base_url}/v1/token_plan/remains", options.key, options.timeout_ms, fetch=fetch)
         return {"reading": parse(payload, options.model), "payload": payload}
     except contract.BalanceError as error:

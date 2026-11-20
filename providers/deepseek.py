@@ -53,7 +53,8 @@ def parse(payload):
 def read_balance(options, fetch=None):
     """Query the balance endpoint and return the reading."""
     try:
-        payload = contract.get_json(f"{options.base_url}/user/balance", options.key, options.timeout_ms, fetch=fetch)
+        payload = contract.get_json_retrying(
+            f"{options.base_url}/user/balance", options.key, options.timeout_ms, fetch=fetch)
         return {"reading": parse(payload), "payload": payload}
     except contract.BalanceError as error:
         refused = contract.refused_reading(error)

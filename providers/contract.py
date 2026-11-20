@@ -303,6 +303,50 @@ def parse_json(url, body):
         raise BalanceError(f"non-JSON response from {url}: {compact(body)}")
 
 
+# What a reader keeps back for its own startup and for printing the reading. The
+# harness kills the whole process at the timeout it passes, so a call that spends all
+# of it costs the reading instead of reporting it.
+READER_HEADROOM_MS = 1_500
+
+
+def budget_ms(timeout_ms, started, headroom_ms=READER_HEADROOM_MS):
+    """What is left of the reader's timeout, once its own overhead is set aside."""
+    spent = int((time.monotonic() - started) * 1000)
+    return max(500, int(timeout_ms) - spent - headroom_ms)
+
+
+def timed_out(error) -> bool:
+    """Whether this failure is the far side not answering, so a second try can help."""
+    said = str(error).lower()
+    return "timed out" in said or "timeout" in said
+
+
+def get_json_retrying(url, key, timeout_ms, headers=None, fetch=None, attempt_ms=4_000):
+    """`get_json`, tried twice while the reader's own timeout still has room.
+
+    # Invariant
+
+    The first attempt is bounded well short of the whole timeout, so a response that
+    never comes still leaves time for a second connection; only a round trip that did
+    not answer is retried, never a refusal, which is an answer. 2026-11-20: the
+    DeepSeek wallet read spent the whole timeout on one stalled response, was killed at
+    the harness's guard, and the pool reported the allowance of a provider holding
+    459.22 CNY as unreadable -- the endpoint answers in 0.2 s and had simply stalled.
+    """
+    started = time.monotonic()
+    first = min(int(attempt_ms), budget_ms(timeout_ms, started))
+    try:
+        return get_json(url, key, first, headers=headers, fetch=fetch)
+    except BalanceError as error:
+        if not timed_out(error):
+            raise
+        failure = error
+    left = budget_ms(timeout_ms, started)
+    if left < 1_000:
+        raise failure
+    return get_json(url, key, left, headers=headers, fetch=fetch)
+
+
 class _RefuseRedirect(HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         return None

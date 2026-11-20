@@ -181,8 +181,8 @@ def read_balance(options, fetch=None):
     script to the older endpoint is the only shape here that is not.
     """
     try:
-        payload = contract.get_json(f"{options.base_url}/usages", options.key, options.timeout_ms,
-                                    headers=HEADERS, fetch=fetch)
+        payload = contract.get_json_retrying(f"{options.base_url}/usages", options.key, options.timeout_ms,
+                                             headers=HEADERS, fetch=fetch)
         return {"reading": parse(payload), "payload": payload}
     except contract.BalanceError as error:
         refused = contract.refused_reading(error)
@@ -190,8 +190,8 @@ def read_balance(options, fetch=None):
             return {"reading": refused}
         if re.search(r"HTTP 404", str(error)) is None:
             raise
-        payload = contract.get_json(f"{options.base_url}/usage", options.key, options.timeout_ms,
-                                    headers=HEADERS, fetch=fetch)
+        payload = contract.get_json_retrying(f"{options.base_url}/usage", options.key, options.timeout_ms,
+                                             headers=HEADERS, fetch=fetch)
         return {"reading": parse(payload), "payload": payload}
 
 
