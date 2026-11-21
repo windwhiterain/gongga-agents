@@ -2424,17 +2424,25 @@ model = "kimi-k2.6"
 route = "qianfan-token-plan"
 model = "deepseek-flash"
 wire_id = "deepseek-v4.1-flash-1017"
+# The model's builtin tools are DeepSeek-official names; this route's Responses
+# face accepts only function/mcp/knowledge_search/namespace and rejects them 400.
+builtin_tools = []
 note = "千帆 model 参数是 deepseek-v4.1-flash-1017；roster 事实 deepseek-flash 就是 V4.1-Flash-1017（deepseek-v4-flash 是其退役别名）。"
 
 [[serving]]
 route = "qianfan-token-plan"
 model = "deepseek-v4-pro"
 wire_id = "deepseek-v4-pro"
+# Same wire dialect as the flash serving above: the inherited `web_search` is not
+# a supported tool type here.
+builtin_tools = []
 
 [[serving]]
 route = "qianfan-token-plan"
 model = "deepseek-flash"
 wire_id = "deepseek-v4-flash"
+# See the qianfan deepseek-flash serving: no builtin tools on this face.
+builtin_tools = []
 note = "官方模型列表里 deepseek-v4-flash 与 -0731 是两个 id，都归 V4-Flash；这里登记无日期后缀的那一个，-0731 未列。"
 
 # ---------------------------------------------------------------------------
@@ -2477,6 +2485,9 @@ model = "qwen3.8-flash"
 [[serving]]
 route = "opencode-go"
 model = "deepseek-v4-pro"
+# A relay face with its own tool dialect; do not inherit the official route's
+# `web_search`, which this gateway does not declare as a tool type.
+builtin_tools = []
 
 [[serving]]
 route = "opencode-go"
