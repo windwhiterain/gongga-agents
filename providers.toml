@@ -2580,11 +2580,12 @@ model = "bonsai-2-27b"
 id = "minicpm5-2b"
 name = "MiniCPM5-2B (peer whiting_main, mask-capable)"
 tier = "test"
-context = 55296
+context = 131072
+unmasked_context = 55296
 max_output = 4096
 modalities = ["text"]
 reasoning_levels = ["off", "high"]
-note = "Dense LlamaForCausalLM 2.52B, 42 layers, GQA 16:2, no Mamba; 131K native context (served at 55296, KV 2.25 GiB on the 8 GB card). Thinking on by default. Patched vLLM: compiled flex attention, gongga_memory mask adapter, mask-aware prefix-cache block hashes, native CPU offload."
+note = "Dense LlamaForCausalLM 2.52B, 42 layers, GQA 16:2, no Mamba; 131072 full-tape positions and 55296 unmasked input+output tokens (2.25 GiB GPU KV plus native CPU offload). Thinking on by default. Patched vLLM: compiled flex attention, gongga_memory mask adapter and usage accounting, mask-aware prefix-cache block hashes."
 
 [[route]]
 id = "kvmask-peer"
