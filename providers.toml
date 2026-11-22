@@ -2573,3 +2573,38 @@ note = "A/B 两台机器上 `bonsai` 解析到不同地址：A 指 127.0.0.1，B
 [[serving]]
 route = "local-qwen3"
 model = "bonsai-2-27b"
+
+# MiniCPM5-2B on peer whiting_main: patched mask-capable vLLM (dense Llama, no Mamba).
+# Thinking enabled; marker-preserving chat template. Backend port 8311 (fixed).
+[[model]]
+id = "minicpm5-2b"
+name = "MiniCPM5-2B (peer whiting_main, mask-capable)"
+tier = "test"
+context = 28608
+max_output = 4096
+modalities = ["text"]
+reasoning_levels = ["off", "high"]
+note = "Dense LlamaForCausalLM 2.52B, 42 layers, GQA 16:2, no Mamba; 131K native context (served at 9472). Thinking on by default. Served by patched vLLM with gongga_memory mask adapter + offload."
+
+[[route]]
+id = "kvmask-peer"
+name = "MiniCPM5-2B peer (mask-capable vLLM)"
+kind = "local"
+base_url = "http://192.168.1.3:8311/v1"
+served_by = "peer ~/kv-mask/exp/start_minicpm_fixed.sh"
+note = "Key in ~/.agents/keys.toml [keys] kvmask-peer (endpoint sk-fake). Stop backend: peer ~/kv-mask/exp/stop_minicpm.sh."
+
+  [[route.endpoint]]
+  id = "responses"
+  api = "openai-responses-memory-mask"
+  base_url = "http://192.168.1.3:8311/v1"
+  auth = "bearer"
+
+  [[route.quota_query]]
+  id = "none"
+  available = false
+  note = "本机自建，无额度概念。"
+
+[[serving]]
+route = "kvmask-peer"
+model = "minicpm5-2b"
