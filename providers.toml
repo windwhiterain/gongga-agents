@@ -2592,8 +2592,8 @@ id = "kvmask-peer"
 name = "MiniCPM5-2B peer (mask-capable vLLM)"
 kind = "local"
 base_url = "http://192.168.1.3:8311/v1"
-served_by = "peer ~/kv-mask/exp/start_minicpm_fixed.sh"
-note = "Key in ~/.agents/keys.toml [keys] kvmask-peer (endpoint sk-fake). Stop backend: peer ~/kv-mask/exp/stop_minicpm.sh."
+served_by = "peer systemd user unit minicpm-endpoint.service (ExecStart ~/kv-mask/exp/start_minicpm_fixed.sh)"
+note = "Key in ~/.agents/keys.toml [keys] kvmask-peer (endpoint sk-fake). The backend is resident on the peer as a systemd user service: start/stop with `systemctl --user start|stop minicpm-endpoint.service` (enabled, linger on, restarts on crash). ~/kv-mask/exp/stop_minicpm.sh no longer stops it: systemd treats that kill as a failed run and restarts it."
 
   [[route.endpoint]]
   id = "responses"
