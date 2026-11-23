@@ -2574,127 +2574,86 @@ note = "A/B 两台机器上 `bonsai` 解析到不同地址：A 指 127.0.0.1，B
 route = "local-qwen3"
 model = "bonsai-2-27b"
 
-# MiniCPM5-2B on peer whiting_main: patched mask-capable vLLM (dense Llama, no Mamba).
-# Thinking enabled; marker-preserving chat template. Backend port 8311 (fixed).
-[[model]]
-id = "minicpm5-2b"
-name = "MiniCPM5-2B (peer whiting_main, mask-capable)"
-tier = "test"
-context = 131072
-unmasked_context = 55296
-max_output = 4096
-modalities = ["text"]
-reasoning_levels = ["off", "high"]
-note = "Dense LlamaForCausalLM 2.52B, 42 layers, GQA 16:2, no Mamba; 131072 full-tape positions and 55296 unmasked input+output tokens (2.25 GiB GPU KV plus native CPU offload). Thinking on by default. Patched vLLM: compiled flex attention, gongga_memory mask adapter and usage accounting, mask-aware prefix-cache block hashes."
-
-[[route]]
-id = "kvmask-peer"
-name = "MiniCPM5-2B peer (mask-capable vLLM)"
-kind = "local"
-base_url = "http://192.168.1.3:8311/v1"
-served_by = "peer systemd user unit minicpm-endpoint.service (ExecStart ~/kv-mask/exp/start_minicpm_fixed.sh)"
-note = "Key in ~/.agents/keys.toml [keys] kvmask-peer (endpoint sk-fake). The backend is resident on the peer as a systemd user service: start/stop with `systemctl --user start|stop minicpm-endpoint.service` (enabled, linger on, restarts on crash). ~/kv-mask/exp/stop_minicpm.sh no longer stops it: systemd treats that kill as a failed run and restarts it."
-
-  [[route.endpoint]]
-  id = "responses"
-  api = "openai-responses-memory-mask"
-  base_url = "http://192.168.1.3:8311/v1"
-  auth = "bearer"
-
-  [[route.quota_query]]
-  id = "none"
-  available = false
-  note = "本机自建，无额度概念。"
-
-[[serving]]
-route = "kvmask-peer"
-model = "minicpm5-2b"
-
-# gongga 官方免费端点：社区共用，无密钥、无账号、不计费。
-#
-# 它是「能开始」的模型，不是「快」的模型：后端是一台家用机器上的 int4 35B-A3B
-# （8 GB 显卡，专家权重放内存），一次只跑一个请求，全站并发 4、每 IP 并发 2，
-# 超出直接 503。主人关机它就不可用 —— 这不是 SLA，是一条让人上手就能跑起来的路。
-[[model]]
-id = "minicpm47-35b-a3b"
-name = "MiniCPM-V 4.7 35B-A3B (int4, gongga 官方免费端点)"
-tier = "test"
-context = 262144
-unmasked_context = 115776
-max_output = 4096
-modalities = ["text"]
-reasoning_levels = ["none", "high"]
-note = "Qwen3.5 MoE 35B-A3B 的官方 int4 权重（21.07 GiB），15.47 GiB 专家权重在 UVA CPU offload 上；35B 总参、约 3B 激活。262144 是整条带的位置数，115776 是可见的输入+输出上限。后端：--tool-call-parser qwen3_coder、--reasoning-parser qwen3。tier=test 是刻意的：6 tok/s 量级、单请求，适合试跑与演示，不适合派重活；从 2B 换过来约 85 秒冷启动。"
-[model.params]
-unit = "billion"
-total = 35
-active = 3
-source = "the checkpoint's own config"
-retrieved = "2026-11-23"
-
-[[model]]
-id = "minicpm5-2b"
-name = "MiniCPM5-2B (peer whiting_main rig, mask-capable sglang)"
-tier = "test"
-context = 32768
-unmasked_context = 20000
-max_output = 4096
-modalities = ["text"]
-reasoning_levels = ["none", "high"]
-note = "Dense 2.5B, bf16, 5.03 GB of weights fully resident on the 8 GB card (no CPU offload, no expert paging): this is the fast shape the 35B cannot have. 42 layers, hidden 2048, 2 KV heads x 128, so 42 KiB of KV per token in bf16 -- twice the 35B's 20.3 KiB/token, which is why the visible ceiling is 20000 and the tape ceiling 32768. Mask mode with host offload is verified on this model (write-back side: a build_backup with key_len > backed_len; hit side: a mask_offload event when a masked row reloads only its visible part). Cold start 22-30 s. Thinking is on by default in its template. Same weights on the speed path (flashinfer, CUDA graphs, 4 concurrent): 76.7-80.9 tok/s decode single stream, 218 tok/s aggregate, prefill 7.7k-10.2k tok/s, 24k TTFT 2.9 s; the rig runs the mask path (Triton eager) and is slower there."
-
-[model.params]
-unit = "billion"
-total = 2.5
-active = 2.5
-note = "dense, so every parameter is active"
-source = "config.json: hidden_size 2048, num_hidden_layers 42, num_key_value_heads 2; checkpoint 5033557096 bytes bf16"
-retrieved = "2026-11-23"
-
-# The peer serve is the mask-extended face, so a session here checkpoints as a
-# memory-mask view instead of cutting the projection, and the head stays minimal
-# for a 32k window.
-[model.defaults]
-live_compact_enabled = true
-live_compact_mode = "mask"
-prefix_cache_plan = false
-
+# MiniCPM-V 4.7 35B-A3B on peer whiting_main: patched vLLM masks full-attention
+# layers only; linear-attention state is deliberately left unmasked. Backend port 8312.
 [[route]]
 id = "gongga-official"
 name = "gongga 官方免费端点"
 kind = "community"
-# 空串 = 这条路不要密钥。README「密钥政策」里的例外只有这一种写法。
+# 空串 = 这条路不要密钥。README「密钥政策」里的例外只有这一种写法：
+# 没有要查的名字，也没有要发的头。
 key_env = ""
 homepage = "https://github.com/windwhiterain/gongga-agents"
-note = "社区共用，免费。地址后面是一台按模型切换后端的机器：同一时刻只有一个模型常驻，换模型要冷启动（2B 约 25 秒，35B 约 85 秒），所以第一发会比较慢。请开流式并把 max_tokens 控制在几百以内。主人随时可能关机或更换地址。"
+note = "社区共用，免费。请求走一台家用机器，请开流式（stream: true）并把 max_tokens 控制在几百以内，否则一个长请求会占住整条队列。主人随时可能关机或更换地址。"
   [[route.endpoint]]
   id = "responses"
   api = "openai-responses-memory-mask"
   base_url = "http://162.14.81.104:4000/v1"
   auth = "none"
-  note = "不带 Authorization 即可调用。两套模型共用这一个地址，模型名决定后端。"
+  note = "不带 Authorization 即可调用；带上任何值都不会被拒，也不会被采纳。"
 
   [[route.quota_query]]
   id = "none"
   available = false
   note = "免费端点，无额度概念。"
 
-[[serving]]
-route = "gongga-official"
-model = "minicpm5-2b"
-[serving.price]
-currency = "CNY"
-unit = "per_1m_tokens"
-input = 0.00
-output = 0.00
-note = "免费。这是默认模型：2.5B dense，完全常驻显存，冷启动 22-30 秒。"
+# The peer holds two models on one 8 GB card. The tunnel lands on the rig, which
+# swaps only when idle: the model named in the body decides what is resident, and
+# a request for the other one while anything runs gets 503 with Retry-After.
+[[model]]
+id = "minicpm47-35b-a3b"
+name = "MiniCPM-V 4.7 35B-A3B (peer, int4 with experts on UVA CPU offload)"
+tier = "test"
+context = 262144
+unmasked_context = 115776
+max_output = 4096
+modalities = ["text"]
+reasoning_levels = ["none", "high"]
+reasoning_default = "high"
+note = "Qwen3.5 MoE 35B-A3B, 21.07 GiB int4 with 15.47 GiB of experts on UVA CPU offload. Backend states --tool-call-parser qwen3_coder --reasoning-parser qwen3. Cold start about 85 s behind the rig (stop + load + first answer)."
+
+[model.params]
+unit = "billion"
+total = 35
+active = 3
+note = "MoE, 8 of 128 experts per token"
+source = "the checkpoint's own config"
+retrieved = "2026-11-23"
+
+[model.defaults]
+live_compact_enabled = true
+live_compact_mode = "mask"
+prefix_cache_plan = false
 
 [[serving]]
 route = "gongga-official"
 model = "minicpm47-35b-a3b"
-[serving.price]
-currency = "CNY"
-unit = "per_1m_tokens"
-input = 0.00
-output = 0.00
-note = "免费。按需切换后端，从 2B 换过来约 85 秒冷启动。"
+
+[[model]]
+id = "minicpm5-2b"
+name = "MiniCPM5-2B (peer, dense 2.5B bf16, weights fully resident)"
+tier = "test"
+context = 32768
+unmasked_context = 20000
+max_output = 4096
+modalities = ["text"]
+reasoning_levels = ["none", "high"]
+reasoning_default = "high"
+note = "Dense 2.5B bf16, 5.03 GB resident on the 8 GB card -- no CPU offload, no expert paging. 42 layers, 2 KV heads x 128, so 42 KiB of KV per token: the visible ceiling is 20000 and the tape ceiling 32768. Backend must state --tool-call-parser minicpm5 (otherwise its `<function name=...>` markup reaches the caller as text), --reasoning-parser deepseek-r1 (the template writes `<think>`/`</think>`), and --default-chat-template-kwargs with enable_thinking true (unset means the template emits no thinking preamble at all, which is not the same as thinking off). Cold start about 25 s."
+
+[model.params]
+unit = "billion"
+total = 2.5
+active = 2.5
+note = "dense, so every parameter is active"
+source = "config.json: hidden_size 2048, 42 layers, num_key_value_heads 2"
+retrieved = "2026-11-23"
+
+[model.defaults]
+live_compact_enabled = true
+live_compact_mode = "mask"
+prefix_cache_plan = false
+
+[[serving]]
+route = "gongga-official"
+model = "minicpm5-2b"
