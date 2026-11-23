@@ -2609,3 +2609,55 @@ note = "Key in ~/.agents/keys.toml [keys] kvmask-peer (endpoint sk-fake). The ba
 [[serving]]
 route = "kvmask-peer"
 model = "minicpm5-2b"
+
+# gongga 官方免费端点：社区共用，无密钥、无账号、不计费。
+#
+# 它是「能开始」的模型，不是「快」的模型：后端是一台家用机器上的 int4 35B-A3B
+# （8 GB 显卡，专家权重放内存），一次只跑一个请求，全站并发 4、每 IP 并发 2，
+# 超出直接 503。主人关机它就不可用 —— 这不是 SLA，是一条让人上手就能跑起来的路。
+[[model]]
+id = "minicmp4.7-35b-a3b"
+name = "MiniCPM-V 4.7 35B-A3B (int4, gongga 官方免费端点)"
+tier = "test"
+context = 262144
+max_output = 4096
+modalities = ["text"]
+note = "Qwen3.5 MoE 35B-A3B 的官方 int4 权重，35B 总参、约 3B 激活。端点以 --max-model-len 262144 启动；输出上限 4096 是这个端点实际肯给的数。思考默认开启，工具调用按 qwen3_coder 解析。tier=test 是刻意的：6 tok/s 量级、单请求，适合试跑与演示，不适合派重活。"
+[model.params]
+unit = "billion"
+total = 35
+active = 3
+note = "取自模型名与端点启动参数（--max-model-len 262144），未向权重仓库逐项核对。"
+
+[[route]]
+id = "gongga-official"
+name = "gongga 官方免费端点"
+kind = "community"
+# 空串 = 这条路不要密钥。README「密钥政策」里的例外只有这一种写法：
+# 没有要查的名字，也没有要发的头。
+key_env = ""
+homepage = "https://github.com/windwhiterain/gongga-agents"
+note = "社区共用，免费。请求走一台家用机器，请开流式（stream: true）并把 max_tokens 控制在几百以内，否则一个长请求会占住整条队列。主人随时可能关机或更换地址。"
+  [[route.endpoint]]
+  id = "openai"
+  api = "openai-completions"
+  base_url = "http://162.14.81.104:4000/v1"
+  auth = "none"
+  note = "不带 Authorization 即可调用；带上任何值都不会被拒，也不会被采纳。"
+
+  [[route.quota_query]]
+  id = "none"
+  available = false
+  note = "免费端点，无额度概念。"
+
+[[serving]]
+route = "gongga-official"
+model = "minicmp4.7-35b-a3b"
+# 端点同时认旧拼写 minicpm47-35b-a3b，所以另一条 LAN 路由不受影响；
+# 公开 id 与端点在线上的名字一致，这里不需要 wire_id。
+[serving.price]
+currency = "CNY"
+unit = "per_1m_tokens"
+input = 0.00
+output = 0.00
+note = "免费。费用由端点主人承担，不对外计费，因此没有分时价格、缓存价与额度查询。"
