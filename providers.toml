@@ -2629,21 +2629,47 @@ total = 35
 active = 3
 note = "取自模型名与端点启动参数（--max-model-len 262144），未向权重仓库逐项核对。"
 
+[[model]]
+id = "minicpm5-2b"
+name = "MiniCPM5-2B (peer whiting_main rig, mask-capable sglang)"
+tier = "test"
+context = 32768
+unmasked_context = 20000
+max_output = 4096
+modalities = ["text"]
+reasoning_levels = ["none", "high"]
+note = "Dense 2.5B, bf16, 5.03 GB of weights fully resident on the 8 GB card (no CPU offload, no expert paging): this is the fast shape the 35B cannot have. 42 layers, hidden 2048, 2 KV heads x 128, so 42 KiB of KV per token in bf16 -- twice the 35B's 20.3 KiB/token, which is why the visible ceiling is 20000 and the tape ceiling 32768. Mask mode with host offload is verified on this model (write-back side: a build_backup with key_len > backed_len; hit side: a mask_offload event when a masked row reloads only its visible part). Cold start 22-30 s. Thinking is on by default in its template. Same weights on the speed path (flashinfer, CUDA graphs, 4 concurrent): 76.7-80.9 tok/s decode single stream, 218 tok/s aggregate, prefill 7.7k-10.2k tok/s, 24k TTFT 2.9 s; the rig runs the mask path (Triton eager) and is slower there."
+
+[model.params]
+unit = "billion"
+total = 2.5
+active = 2.5
+note = "dense, so every parameter is active"
+source = "config.json: hidden_size 2048, num_hidden_layers 42, num_key_value_heads 2; checkpoint 5033557096 bytes bf16"
+retrieved = "2026-11-23"
+
+# The peer serve is the mask-extended face, so a session here checkpoints as a
+# memory-mask view instead of cutting the projection, and the head stays minimal
+# for a 32k window.
+[model.defaults]
+live_compact_enabled = true
+live_compact_mode = "mask"
+prefix_cache_plan = false
+
 [[route]]
 id = "gongga-official"
 name = "gongga 官方免费端点"
 kind = "community"
-# 空串 = 这条路不要密钥。README「密钥政策」里的例外只有这一种写法：
-# 没有要查的名字，也没有要发的头。
+# 空串 = 这条路不要密钥。README「密钥政策」里的例外只有这一种写法。
 key_env = ""
 homepage = "https://github.com/windwhiterain/gongga-agents"
-note = "社区共用，免费。请求走一台家用机器，请开流式（stream: true）并把 max_tokens 控制在几百以内，否则一个长请求会占住整条队列。主人随时可能关机或更换地址。"
+note = "社区共用，免费。地址后面是一台按模型切换后端的机器：同一时刻只有一个模型常驻，换模型要冷启动（2B 约 25 秒，35B 约 85 秒），所以第一发会比较慢。请开流式并把 max_tokens 控制在几百以内。主人随时可能关机或更换地址。"
   [[route.endpoint]]
-  id = "openai"
-  api = "openai-completions"
+  id = "responses"
+  api = "openai-responses-memory-mask"
   base_url = "http://162.14.81.104:4000/v1"
   auth = "none"
-  note = "不带 Authorization 即可调用；带上任何值都不会被拒，也不会被采纳。"
+  note = "不带 Authorization 即可调用。两套模型共用这一个地址，模型名决定后端。"
 
   [[route.quota_query]]
   id = "none"
@@ -2652,12 +2678,22 @@ note = "社区共用，免费。请求走一台家用机器，请开流式（str
 
 [[serving]]
 route = "gongga-official"
-model = "minicpm4.7-35b-a3b"
-# 端点同时认旧拼写 minicpm47-35b-a3b，所以另一条 LAN 路由不受影响；
-# 公开 id 与端点在线上的名字一致，这里不需要 wire_id。
+model = "minicpm5-2b"
 [serving.price]
 currency = "CNY"
 unit = "per_1m_tokens"
 input = 0.00
 output = 0.00
-note = "免费。费用由端点主人承担，不对外计费，因此没有分时价格、缓存价与额度查询。"
+note = "免费。这是默认模型：2.5B dense，完全常驻显存，冷启动 22-30 秒。"
+
+[[serving]]
+route = "gongga-official"
+model = "minicpm4.7-35b-a3b"
+# 这台机器在线上认的是 rig 的名字；公开 id 与它是两套拼写。
+wire_id = "minicpm47-35b-a3b"
+[serving.price]
+currency = "CNY"
+unit = "per_1m_tokens"
+input = 0.00
+output = 0.00
+note = "免费。按需切换后端，从 2B 换过来约 85 秒冷启动。"
