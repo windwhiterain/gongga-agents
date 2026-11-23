@@ -2616,7 +2616,7 @@ model = "minicpm5-2b"
 # （8 GB 显卡，专家权重放内存），一次只跑一个请求，全站并发 4、每 IP 并发 2，
 # 超出直接 503。主人关机它就不可用 —— 这不是 SLA，是一条让人上手就能跑起来的路。
 [[model]]
-id = "minicmp4.7-35b-a3b"
+id = "minicpm4.7-35b-a3b"
 name = "MiniCPM-V 4.7 35B-A3B (int4, gongga 官方免费端点)"
 tier = "test"
 context = 262144
@@ -2652,7 +2652,7 @@ note = "社区共用，免费。请求走一台家用机器，请开流式（str
 
 [[serving]]
 route = "gongga-official"
-model = "minicmp4.7-35b-a3b"
+model = "minicpm4.7-35b-a3b"
 # 端点同时认旧拼写 minicpm47-35b-a3b，所以另一条 LAN 路由不受影响；
 # 公开 id 与端点在线上的名字一致，这里不需要 wire_id。
 [serving.price]
