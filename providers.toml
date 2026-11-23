@@ -2616,18 +2616,21 @@ model = "minicpm5-2b"
 # （8 GB 显卡，专家权重放内存），一次只跑一个请求，全站并发 4、每 IP 并发 2，
 # 超出直接 503。主人关机它就不可用 —— 这不是 SLA，是一条让人上手就能跑起来的路。
 [[model]]
-id = "minicpm4.7-35b-a3b"
+id = "minicpm47-35b-a3b"
 name = "MiniCPM-V 4.7 35B-A3B (int4, gongga 官方免费端点)"
 tier = "test"
 context = 262144
+unmasked_context = 115776
 max_output = 4096
 modalities = ["text"]
-note = "Qwen3.5 MoE 35B-A3B 的官方 int4 权重，35B 总参、约 3B 激活。端点以 --max-model-len 262144 启动；输出上限 4096 是这个端点实际肯给的数。思考默认开启，工具调用按 qwen3_coder 解析。tier=test 是刻意的：6 tok/s 量级、单请求，适合试跑与演示，不适合派重活。"
+reasoning_levels = ["none", "high"]
+note = "Qwen3.5 MoE 35B-A3B 的官方 int4 权重（21.07 GiB），15.47 GiB 专家权重在 UVA CPU offload 上；35B 总参、约 3B 激活。262144 是整条带的位置数，115776 是可见的输入+输出上限。后端：--tool-call-parser qwen3_coder、--reasoning-parser qwen3。tier=test 是刻意的：6 tok/s 量级、单请求，适合试跑与演示，不适合派重活；从 2B 换过来约 85 秒冷启动。"
 [model.params]
 unit = "billion"
 total = 35
 active = 3
-note = "取自模型名与端点启动参数（--max-model-len 262144），未向权重仓库逐项核对。"
+source = "the checkpoint's own config"
+retrieved = "2026-11-23"
 
 [[model]]
 id = "minicpm5-2b"
@@ -2688,9 +2691,7 @@ note = "免费。这是默认模型：2.5B dense，完全常驻显存，冷启�
 
 [[serving]]
 route = "gongga-official"
-model = "minicpm4.7-35b-a3b"
-# 这台机器在线上认的是 rig 的名字；公开 id 与它是两套拼写。
-wire_id = "minicpm47-35b-a3b"
+model = "minicpm47-35b-a3b"
 [serving.price]
 currency = "CNY"
 unit = "per_1m_tokens"
